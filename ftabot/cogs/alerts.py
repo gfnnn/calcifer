@@ -12,7 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .admin import _is_admin
+from ._guards import _is_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot

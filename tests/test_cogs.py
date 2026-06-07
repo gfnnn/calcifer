@@ -140,6 +140,25 @@ def test_is_admin_denies_member_without_role(monkeypatch):
     assert _is_admin(it, "Officer") is False
 
 
+async def test_require_admin_allows_officer_without_replying():
+    from ftabot.cogs._guards import require_admin
+
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    assert await require_admin(it, "Officer") is True
+    assert it.response.sent is False  # no denial message on the allowed path
+
+
+async def test_require_admin_denies_with_the_action_in_the_message():
+    from ftabot.cogs._guards import require_admin
+
+    it = _Interaction()  # plain user, no perms
+    assert await require_admin(it, "Officer", action="manage boards") is False
+    assert it.response.sent is True
+    assert it.response.ephemeral is True
+    assert "manage boards" in it.response.content
+    assert "Officer" in it.response.content
+
+
 # --- admin commands ---------------------------------------------------------
 
 

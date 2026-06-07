@@ -7,6 +7,29 @@ import discord
 from . import brand
 from .models import Member, class_color
 
+# Discord embed limits — interpolated roster/officer data (notes, raid strings,
+# user-supplied search terms) must be clamped so a long value never raises an
+# HTTP 400 that drops the whole reply.
+TITLE_LIMIT = 256
+FIELD_NAME_LIMIT = 256
+FIELD_VALUE_LIMIT = 1024
+DESC_LIMIT = 4096
+
+
+def clip(text: object, limit: int) -> str:
+    """Truncate text to a Discord limit, appending an ellipsis when it cuts."""
+    s = str(text)
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _field(embed: discord.Embed, name: object, value: object, *, inline: bool = True) -> None:
+    """add_field that clamps both name and value to their Discord limits."""
+    embed.add_field(
+        name=clip(name, FIELD_NAME_LIMIT),
+        value=clip(value, FIELD_VALUE_LIMIT),
+        inline=inline,
+    )
+
 
 def _fmt(value: object, suffix: str = "") -> str:
     if value is None:
@@ -26,33 +49,33 @@ def member_embed(member: Member, *, include_private: bool = False) -> discord.Em
         p for p in (member.active_spec, member.class_name) if p
     ) or "Unknown class"
     embed = discord.Embed(
-        title=member.display(),
-        description=spec_class,
+        title=clip(member.display(), TITLE_LIMIT),
+        description=clip(spec_class, DESC_LIMIT),
         color=class_color(member.class_name),
         url=member.profile_url or None,
     )
     if member.thumbnail_url:
         embed.set_thumbnail(url=member.thumbnail_url)
 
-    embed.add_field(name="Role", value=_fmt(member.role))
-    embed.add_field(name="Item Level", value=_fmt(member.item_level))
-    embed.add_field(name="M+ Score", value=_fmt(member.mythic_plus_score))
+    _field(embed, "Role", _fmt(member.role))
+    _field(embed, "Item Level", _fmt(member.item_level))
+    _field(embed, "M+ Score", _fmt(member.mythic_plus_score))
 
     if member.guild_rank is not None:
-        embed.add_field(name="Guild Rank", value=_fmt(member.guild_rank))
+        _field(embed, "Guild Rank", _fmt(member.guild_rank))
     if member.race:
-        embed.add_field(name="Race", value=member.race)
+        _field(embed, "Race", member.race)
     if member.level is not None:
-        embed.add_field(name="Level", value=_fmt(member.level))
+        _field(embed, "Level", _fmt(member.level))
     if member.best_parse_avg is not None:
-        embed.add_field(name="Best Parse Avg", value=_fmt(member.best_parse_avg))
+        _field(embed, "Best Parse Avg", _fmt(member.best_parse_avg))
     if member.raid_progression:
-        embed.add_field(name="Raid", value=member.raid_progression, inline=False)
+        _field(embed, "Raid", member.raid_progression, inline=False)
 
     if member.discord_id:
-        embed.add_field(name="Discord", value=f"<@{member.discord_id}>", inline=False)
+        _field(embed, "Discord", f"<@{member.discord_id}>", inline=False)
     if include_private and member.notes:
-        embed.add_field(name="Notes", value=member.notes, inline=False)
+        _field(embed, "Notes", member.notes, inline=False)
 
     footer = "Main" if member.is_main else "Alt"
     if member.last_synced:
@@ -83,7 +106,7 @@ def me_card(members: list[Member], *, display_name: str) -> discord.Embed:
     )
     lead = ordered[0]
     embed = discord.Embed(
-        title=brand.sanitize(f"🔥 {display_name}'s characters"),
+        title=clip(brand.sanitize(f"🔥 {display_name}'s characters"), TITLE_LIMIT),
         color=class_color(lead.class_name) or brand.GUILD_EMBER,
     )
     for m in ordered[:10]:  # Discord caps fields; nobody needs more on a card
@@ -94,9 +117,7 @@ def me_card(members: list[Member], *, display_name: str) -> discord.Embed:
         if m.wishlist_pct is not None:
             bits.append(f"wishlist {m.wishlist_pct:.0f}%")
         tag = "main" if m.is_main else "alt"
-        embed.add_field(
-            name=f"{m.character_name} · {tag}", value=" · ".join(bits), inline=False
-        )
+        _field(embed, f"{m.character_name} · {tag}", " · ".join(bits), inline=False)
     embed.set_footer(text="Linked by your officers. Mind the sparks.")
     return embed
 
@@ -105,13 +126,13 @@ def roster_embed(
     members: list[Member], *, title: str, color: int, per_page: int = 25
 ) -> discord.Embed:
     """A listing embed; truncates to ``per_page`` with a count footer."""
-    embed = discord.Embed(title=title, color=color)
+    embed = discord.Embed(title=clip(title, TITLE_LIMIT), color=color)
     shown = members[:per_page]
     if not shown:
         embed.description = "No matching members."
         return embed
     lines = [member_line(m, index=i + 1) for i, m in enumerate(shown)]
-    embed.description = "\n".join(lines)
+    embed.description = clip("\n".join(lines), DESC_LIMIT)
     if len(members) > per_page:
         embed.set_footer(text=f"Showing {per_page} of {len(members)} members.")
     else:
