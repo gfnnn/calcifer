@@ -38,13 +38,18 @@ live, and note the date + who/what confirmed it.
 ### Other integrations
 
 These follow the same pattern (offline tests pass; live verification tracked
-here as it happens). Add a smoke test + a checklist entry when each is first
-exercised live.
+here as it happens). Each now has a smoke command — run it from a **fresh**
+session (so the secret is injected) and tick the box on a ✓.
 
-- [ ] Blizzard API (`BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`) — live call not yet verified here.
-- [ ] Warcraft Logs API (`WARCRAFTLOGS_CLIENT_ID` / `WARCRAFTLOGS_CLIENT_SECRET`) — live call not yet verified here.
-- [ ] Raider.IO (keyless fallback) — live call not yet verified here.
-- [ ] Raid-Helper webhook receiver — live delivery not yet verified here.
+`python -m scripts.smoke_all` runs every check the injected credentials allow and
+prints a ✓/✗/– table in one shot; the per-service commands below give verbose
+output for one integration.
+
+- [ ] Blizzard API (`BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`) — `python -m scripts.check_blizzard`.
+- [ ] Warcraft Logs API (`WARCRAFTLOGS_CLIENT_ID` / `WARCRAFTLOGS_CLIENT_SECRET`) — `python -m scripts.check_warcraftlogs`.
+- [ ] Raider.IO (keyless fallback) — `python -m scripts.check_raiderio`.
+- [ ] Raid-Helper webhook receiver — `python -m scripts.check_raidhelper` (verifies the
+  secret + parser; live delivery still needs a real push to confirm end to end).
 
 ---
 
