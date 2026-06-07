@@ -261,6 +261,58 @@ class _Parser:
 _POSITIONAL = object()
 
 
+def _dump_string(s: str) -> str:
+    escaped = (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
+def _dump_value(value: LuaValue, indent: int) -> str:
+    if value is None:
+        return "nil"
+    if isinstance(value, bool):  # before int — bools are ints in Python
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return _dump_string(value)
+    if isinstance(value, dict):
+        return _dump_table(value, indent)
+    if isinstance(value, (list, tuple)):
+        return _dump_table({i + 1: v for i, v in enumerate(value)}, indent)
+    raise TypeError(f"cannot serialise {type(value).__name__} to Lua")
+
+
+def _dump_table(table: dict, indent: int) -> str:
+    if not table:
+        return "{}"
+    pad = "    " * (indent + 1)
+    close = "    " * indent
+    rows = []
+    for key, value in table.items():
+        bracket = f"[{key}]" if isinstance(key, int) else f"[{_dump_string(str(key))}]"
+        rows.append(f"{pad}{bracket} = {_dump_value(value, indent + 1)},")
+    return "{\n" + "\n".join(rows) + f"\n{close}}}"
+
+
+def dump(data: dict[str, LuaValue]) -> str:
+    """Serialise a parsed mapping back into a SavedVariables Lua file.
+
+    The inverse of :func:`parse_savedvariables` over the value types it produces
+    (nested tables, strings, numbers, booleans, nil). Tables are always written
+    in explicit ``[key] = value`` form, which round-trips faithfully — used to
+    write a sanitised fixture after redaction.
+    """
+    return "".join(f"{name} = {_dump_value(value, 0)}\n" for name, value in data.items())
+
+
 def parse_lua_value(text: str) -> LuaValue:
     """Parse a single Lua data value (table/string/number/bool/nil)."""
     p = _Parser(text)
