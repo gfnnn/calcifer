@@ -1,0 +1,42 @@
+# Free, no-server roster sync.
+#
+# Trigger it from the GitHub mobile app (Actions → Sync roster → Run workflow),
+# or let the schedule run it. It builds a fresh ftabot.db and uploads it as a
+# downloadable artifact. Raider.IO needs no key, so this works with zero
+# secrets; add WOWAUDIT_API_KEY / BLIZZARD_* as repo secrets for richer data.
+name: Sync roster
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          WOWAUDIT_API_KEY: ${{ secrets.WOWAUDIT_API_KEY }}
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+          GUILD_NAME: From the Ashes
+          GUILD_REALM: hellfire
+          GUILD_REGION: eu
+        run: python -m scripts.sync_cli --list
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftabot-db
+          path: ftabot.db
+          if-no-files-found: warn

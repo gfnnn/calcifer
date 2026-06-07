@@ -1,0 +1,17 @@
+# Ruff configuration — the project's lint baseline (see CONTRIBUTING.md).
+#
+# We keep the rule set deliberately small so it catches real bugs (unused
+# imports, undefined names, broken syntax) and keeps imports tidy, without
+# turning every PR into a style argument. Formatting is left to `ruff format`
+# and is NOT enforced in CI; run it locally if you like.
+target-version = "py312"
+line-length = 100
+
+[lint]
+# E4/E7/E9 + F are Ruff's defaults (pyflakes + the import/whitespace/syntax
+# subset of pycodestyle that flags genuine errors). I = isort import ordering.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[lint.per-file-ignores]
+# Test helpers occasionally import fixtures for their side effects.
+"tests/*" = ["F811"]

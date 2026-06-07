@@ -1,0 +1,54 @@
+# Continuous integration: lint + test on every PR and on pushes to main.
+#
+# This is the gate that protects `main`. Configure branch protection to require
+# the "lint" and "test" checks before merging (see docs/branching.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+# Cancel superseded runs on the same branch/PR so a rapid push doesn't queue
+# a backlog of stale jobs.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check ftabot scripts tests
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: >-
+          python -m pytest -q
+          --cov=ftabot --cov=scripts
+          --cov-report=term-missing
+          --cov-fail-under=80

@@ -1,0 +1,38 @@
+# Render Blueprint — deploy from your phone:
+#   1. Push this repo to GitHub.
+#   2. On render.com (mobile browser): New + → Blueprint → pick this repo.
+#   3. Fill in the secret env vars when prompted, then Apply.
+# Note: a persistent disk requires a paid instance type (free web services
+# spin down on idle, which disconnects the Discord bot).
+services:
+  - type: web
+    name: fta-guild
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_PATH
+        value: /data/ftabot.db
+      - key: SYNC_INTERVAL_MINUTES
+        value: "360"
+      - key: GUILD_NAME
+        value: From the Ashes
+      - key: GUILD_REALM
+        value: hellfire
+      - key: GUILD_REGION
+        value: eu
+      # Secrets — set these in the dashboard (sync: false keeps them out of git).
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_GUILD_ID
+        sync: false
+      - key: WOWAUDIT_API_KEY
+        sync: false
+      - key: BLIZZARD_CLIENT_ID
+        sync: false
+      - key: BLIZZARD_CLIENT_SECRET
+        sync: false
