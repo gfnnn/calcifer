@@ -1,0 +1,27 @@
+# Cut a GitHub Release whenever a version tag is pushed.
+#
+#   git tag -a v1.2.0 -m "v1.2.0" && git push origin v1.2.0
+#
+# Release notes are generated from the merged PRs/commits since the previous
+# tag. See docs/branching.md for the versioning policy.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

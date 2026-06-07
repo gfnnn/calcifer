@@ -1,0 +1,3 @@
+# Default owner for everything in the repo. Used to auto-request review on PRs.
+# When branch protection requires Code Owner review, this is who must approve.
+* @gfnnn

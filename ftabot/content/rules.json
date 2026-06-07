@@ -1,0 +1,22 @@
+{
+  "title": "Rules & Info",
+  "intro": "The house, in short. The live bits below refresh themselves, so they never drift stale.",
+  "sections": [
+    {
+      "heading": "Who we are",
+      "body": "A community-first guild on Hellfire EU, reforged from the ashes since 2008. We are {member_count} strong, with {active_pct} active in the last fortnight."
+    },
+    {
+      "heading": "Raiding",
+      "body": "Where we stand: {progression}. Team Chemistry pushes for Cutting Edge; everyone else raids at their own pace, zero pressure."
+    },
+    {
+      "heading": "Recruitment",
+      "body": "Currently recruiting: {recruiting}. Ask a Flamekeeper for a trial, whatever your spec."
+    },
+    {
+      "heading": "House rules",
+      "body": "Be kind, leave the drama at the door, and have patience with newer players. The hearth stays warm for everyone."
+    }
+  ]
+}
