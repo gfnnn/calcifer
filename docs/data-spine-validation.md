@@ -69,19 +69,27 @@ checked against a real `Guild_Roster_Manager.lua`:
 - [ ] **Character → Discord link** — out of scope by design; GRM holds no
       reliable Discord signal, so that hop stays a manual/officer link.
 
+## Tooling (built; ready for a live `.lua`)
+
+Two scripts turn "a real dump arrives" into a quick confirm-and-tick:
+
+- **`python -m scripts.inspect_savedvars <file.lua>`** — prints which globals /
+  addons are present, the top-level table shape (types only, no data), and a few
+  parsed sample records, so you can confirm or fix the assumptions above fast.
+- **`python -m scripts.redact_savedvars <file.lua> > fixture.lua`** — rewrites
+  character names to stable pseudonyms, GUIDs to hashes, and drops notes, while
+  preserving the table shape, so the output is **committable** (no guild PII) and
+  still valid Lua the parsers ingest. It warns on stderr if any original name
+  survives. Both are covered offline in `tests/test_redact_savedvars.py`.
+
 ## Validation plan (when a live `.lua` arrives)
 
-1. Drop a real (redacted is fine) `RCLootCouncil.lua` and
-   `Guild_Roster_Manager.lua` into a scratch dir (do **not** commit guild data).
-2. Run the parsers over them and eyeball the output:
-   ```bash
-   python -c "from ftabot.services.grm import parse_identities; \
-       import pprint, pathlib; \
-       pprint.pp(parse_identities(pathlib.Path('Guild_Roster_Manager.lua').read_text())[:5])"
-   python -c "from ftabot.services.rclootcouncil import parse_loot; \
-       import pathlib; print(len(parse_loot(pathlib.Path('RCLootCouncil.lua').read_text())))"
-   ```
-3. For each unchecked box above, confirm or fix the aliases/shape in the mapper,
-   then **add a sanitised regression fixture** to the test suite so the real
-   shape is locked in.
+1. Drop a real `RCLootCouncil.lua` / `Guild_Roster_Manager.lua` into a scratch
+   dir (do **not** commit the raw file).
+2. `python -m scripts.inspect_savedvars <file.lua>` and check each box above
+   against the reported shape; fix the aliases/shape in the mapper if they differ.
+3. `python -m scripts.redact_savedvars <file.lua> > tests/fixtures/<addon>.lua`
+   and add a regression test that parses the fixture and asserts the confirmed
+   shape (counts, a known main↔alts group, date parsing) — locking the real
+   shape into the suite.
 4. Tick the boxes here as they're confirmed.
