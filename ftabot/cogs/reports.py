@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from .. import views
 from ..models import DEFAULT_EMBED_COLOR
+from ..ui import TITLE_LIMIT, clip
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
@@ -119,7 +120,7 @@ class ReportsCog(commands.Cog):
                 )
                 return
             embed = discord.Embed(
-                title=f"Loot · {player}", color=DEFAULT_EMBED_COLOR,
+                title=clip(f"Loot · {player}", TITLE_LIMIT), color=DEFAULT_EMBED_COLOR,
                 description="\n".join(
                     f"`{(e.awarded_at or '')[:10]}` {e.item_name or e.item_id} "
                     f"({e.response or '–'}) · {e.boss or '–'}"
@@ -161,7 +162,7 @@ class ReportsCog(commands.Cog):
             for w in items[:20]
         ]
         embed = discord.Embed(
-            title=f"Wishlist · {player} ({got}/{total}, {pct:.0f}%)",
+            title=clip(f"Wishlist · {player} ({got}/{total}, {pct:.0f}%)", TITLE_LIMIT),
             description="\n".join(lines),
             color=DEFAULT_EMBED_COLOR,
         )
@@ -191,7 +192,7 @@ class ReportsCog(commands.Cog):
                 f"`{i:>2}.` **{c['character']}** · {c['priority']:.2f} · " + " · ".join(tags)
             )
         embed = discord.Embed(
-            title=f"Loot priority · {item}",
+            title=clip(f"Loot priority · {item}", TITLE_LIMIT),
             description="\n".join(lines),
             color=DEFAULT_EMBED_COLOR,
         )

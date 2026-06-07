@@ -9,20 +9,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..sync import sync_guild
+from ._guards import _is_admin, require_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
 
-
-def _is_admin(interaction: discord.Interaction, role_name: str) -> bool:
-    """Allow Manage-Server permission holders or members of the admin role."""
-    perms = interaction.permissions
-    if perms.manage_guild or perms.administrator:
-        return True
-    member = interaction.user
-    if isinstance(member, discord.Member):
-        return any(r.name == role_name for r in member.roles)
-    return False
+# _is_admin is re-exported here for the cogs/tests that import it from this cog.
+__all__ = ["AdminCog", "_is_admin"]
 
 
 class AdminCog(commands.Cog):
@@ -34,14 +27,7 @@ class AdminCog(commands.Cog):
         return self.bot.config
 
     async def _ensure_admin(self, interaction: discord.Interaction) -> bool:
-        if _is_admin(interaction, self.cfg.admin_role_name):
-            return True
-        await interaction.response.send_message(
-            f"You need the **{self.cfg.admin_role_name}** role or *Manage Server* "
-            "permission to use this command.",
-            ephemeral=True,
-        )
-        return False
+        return await require_admin(interaction, self.cfg.admin_role_name)
 
     @app_commands.command(name="sync", description="Refresh the roster from Raider.IO (+ Blizzard/WCL).")
     @app_commands.describe(prune="Remove characters no longer in the guild (default: yes)")

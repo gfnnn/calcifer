@@ -10,7 +10,7 @@ from discord.ext import commands
 
 from ..models import CLASSES, DEFAULT_EMBED_COLOR, ROLES
 from ..ui import me_card, member_embed, roster_embed
-from .admin import _is_admin
+from ._guards import _is_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
@@ -157,7 +157,9 @@ class MembersCog(commands.Cog):
         members = await self.bot.db.search_members(discord_id=str(user.id))
         if not members:
             await interaction.response.send_message(
-                f"No characters are linked to {user.mention}.", ephemeral=True
+                f"No characters are linked to {user.mention}.",
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
             )
             return
         embed = roster_embed(

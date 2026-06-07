@@ -11,7 +11,7 @@ from discord.ext import commands
 from .. import recruit, scout
 from ..models import class_color
 from ..scout import ScoutUnavailable
-from .admin import _is_admin
+from ._guards import _is_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot

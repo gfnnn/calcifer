@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from ftabot import brand
 from ftabot.models import Member
-from ftabot.ui import me_card, member_embed
+from ftabot.ui import (
+    FIELD_VALUE_LIMIT,
+    TITLE_LIMIT,
+    clip,
+    me_card,
+    member_embed,
+    roster_embed,
+)
 
 
 def _m(name, **kw):
@@ -67,3 +74,25 @@ def test_member_embed_shows_notes_for_officers():
     m = _m("Calcifer", notes="bench candidate")
     embed = member_embed(m, include_private=True)
     assert [f.value for f in _notes_fields(embed)] == ["bench candidate"]
+
+
+# --- embed-limit safety -----------------------------------------------------
+
+
+def test_clip_passes_short_and_truncates_long_with_ellipsis():
+    assert clip("short", 256) == "short"
+    out = clip("x" * 500, 256)
+    assert len(out) == 256
+    assert out.endswith("…")
+
+
+def test_member_embed_clamps_an_overlong_notes_field():
+    m = _m("Verbose", notes="n" * 5000)
+    embed = member_embed(m, include_private=True)
+    notes = next(f for f in embed.fields if f.name == "Notes")
+    assert len(notes.value) <= FIELD_VALUE_LIMIT
+
+
+def test_roster_embed_clamps_an_overlong_title():
+    embed = roster_embed([_m("A")], title="T" * 1000, color=0)
+    assert len(embed.title) <= TITLE_LIMIT
