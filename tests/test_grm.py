@@ -1,6 +1,7 @@
 """Tests for the GRM identity SavedVariables parser."""
 
-from ftabot.services.grm import parse_identities
+from ftabot.services.grm import alt_groups_from_savedvars, parse_identities
+from ftabot.services.savedvars import parse_savedvariables
 
 # A realistic GRM dump: GRM_GuildMemberHistory_Save[faction][guild][members],
 # member records with named keys, alts both positional and named, isMain,
@@ -142,3 +143,62 @@ def test_join_date_history_picks_earliest_event():
     """
     recs = parse_identities(lua)
     assert recs[0].join_date == "2020-01-15"  # 1579046400, the smallest
+
+
+# --- GRM_PlayerListOfAlts_Save (alt<->main grouping auxiliary table) ---
+
+ALTS_LUA = """
+GRM_PlayerListOfAlts_Save = {
+    ["From the Ashes"] = {
+        ["Calcifer-Hellfire"] = {
+            { ["name"] = "Emberling-Hellfire", ["class"] = "WARLOCK" },
+            { "Cinder-Hellfire", "ROGUE" },
+        },
+        ["Sparky-Hellfire"] = {
+            { ["name"] = "Sparkless-Hellfire" },
+        },
+    },
+}
+"""
+
+
+def test_alt_groups_named_and_positional_entries():
+    parsed = parse_savedvariables(ALTS_LUA)
+    groups = alt_groups_from_savedvars(parsed)
+    by_main = {g[0]: g for g in groups}
+    # The dict key is the main; entries become its alts (name only, never class).
+    assert by_main["Calcifer-Hellfire"] == [
+        "Calcifer-Hellfire",
+        "Emberling-Hellfire",
+        "Cinder-Hellfire",
+    ]
+    assert by_main["Sparky-Hellfire"] == ["Sparky-Hellfire", "Sparkless-Hellfire"]
+
+
+def test_alt_groups_accepts_flat_table_without_guild_wrapper():
+    lua = """
+    GRM_PlayerListOfAlts_Save = {
+        ["Calcifer-Hellfire"] = { { ["name"] = "Emberling-Hellfire" } },
+    }
+    """
+    groups = alt_groups_from_savedvars(parse_savedvariables(lua))
+    assert groups == [["Calcifer-Hellfire", "Emberling-Hellfire"]]
+
+
+def test_alt_groups_drop_singletons_and_dedup():
+    # A main with no alts (or only itself) carries no linking information.
+    lua = """
+    GRM_PlayerListOfAlts_Save = {
+        ["Lonely-Hellfire"] = { },
+        ["Calcifer-Hellfire"] = {
+            { ["name"] = "Calcifer-Hellfire" },
+            { ["name"] = "Emberling-Hellfire" },
+        },
+    }
+    """
+    groups = alt_groups_from_savedvars(parse_savedvariables(lua))
+    assert groups == [["Calcifer-Hellfire", "Emberling-Hellfire"]]
+
+
+def test_alt_groups_empty_when_table_absent():
+    assert alt_groups_from_savedvars({"GRM_GuildMemberHistory_Save": {}}) == []

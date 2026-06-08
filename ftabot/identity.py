@@ -61,9 +61,18 @@ def _ref_key(name_realm: str, default_realm: str) -> Key:
 
 
 def build_accounts(
-    records: list[IdentityRecord], *, default_realm: str = "hellfire"
+    records: list[IdentityRecord],
+    *,
+    default_realm: str = "hellfire",
+    extra_alt_groups: list[list[str]] | None = None,
 ) -> list[Account]:
-    """Group identity records into accounts (connected alt<->main components)."""
+    """Group identity records into accounts (connected alt<->main components).
+
+    ``extra_alt_groups`` are additional ``"Name-Realm"`` groupings (e.g. from
+    GRM's ``GRM_PlayerListOfAlts_Save`` table) whose members are unioned into
+    the same account. They only *link* characters; they never vote for a main,
+    so the main is still chosen from the per-member records.
+    """
     uf = _UnionFind()
     main_votes: dict[Key, int] = {}
     join_dates: dict[Key, str] = {}
@@ -82,6 +91,11 @@ def build_accounts(
             main_key = _ref_key(rec.main_name, default_realm)
             uf.union(key, main_key)
             main_votes[main_key] = main_votes.get(main_key, 0) + 1
+
+    for group in extra_alt_groups or []:
+        keys = [_ref_key(name, default_realm) for name in group if name]
+        for key in keys[1:]:
+            uf.union(keys[0], key)
 
     components: dict[Key, list[Key]] = {}
     for key in list(uf.parent):
