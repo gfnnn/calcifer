@@ -51,4 +51,4 @@ jobs:
           python -m pytest -q
           --cov=ftabot --cov=scripts
           --cov-report=term-missing
-          --cov-fail-under=80
+          --cov-fail-under=88

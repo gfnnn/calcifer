@@ -55,7 +55,7 @@ against a throwaway `.env` and a temp SQLite DB before merging.
 
 1. Push your branch and open a PR into `main`. The template prompts for what /
    why / how-tested and a checklist.
-2. CI must be green: **`lint`** (ruff) and **`test`** (pytest + 80% coverage).
+2. CI must be green: **`lint`** (ruff) and **`test`** (pytest + 88% coverage).
 3. At least one approving review (CODEOWNERS is auto-requested).
 4. **Squash-merge** so `main` keeps one tidy, Conventional-Commit-titled commit
    per change. Delete the branch after merge.

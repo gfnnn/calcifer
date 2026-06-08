@@ -67,7 +67,7 @@ is keyless); add these only for richer data:
 
 ## ☑ Already in the repo (no action needed)
 
-- CI lint + test + 80% coverage gate (`.github/workflows/ci.yml`)
+- CI lint + test + 88% coverage gate (`.github/workflows/ci.yml`)
 - Release-on-tag workflow (`.github/workflows/release.yml`)
 - Lint config (`ruff.toml`), PR/issue templates, `CONTRIBUTING.md`, `branching.md`
 
