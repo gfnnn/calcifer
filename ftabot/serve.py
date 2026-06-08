@@ -27,6 +27,22 @@ from .web import create_app
 
 log = logging.getLogger("ftabot.serve")
 
+# Consecutive-failure backoff for the long-running loops. A loop waits its normal
+# interval after a success; after N consecutive failures it waits up to
+# _MAX_BACKOFF_FACTOR x that interval, so a degraded upstream is polled
+# progressively less often instead of every interval — the loop can't spiral into
+# a self-inflicted rate-limit / Cloudflare ban. The count resets on first success.
+_MAX_BACKOFF_FACTOR = 8
+
+
+def _retry_delay(interval: float, failures: int) -> float:
+    """Seconds to sleep before a loop's next attempt given consecutive failures.
+
+    ``failures == 0`` returns the plain interval; each consecutive failure doubles
+    the wait, capped at ``_MAX_BACKOFF_FACTOR`` x the interval.
+    """
+    return interval * min(2 ** max(failures, 0), _MAX_BACKOFF_FACTOR)
+
 
 def _make_sender(bot, gate: PostGate):
     """A coroutine (channel_id, embed) -> None that posts via the bot.
@@ -77,6 +93,7 @@ async def _feed_loop(config: Config, bot, sources) -> None:
     send = _make_sender(bot, PostGate.from_config(config))
 
     interval = config.feed_poll_minutes * 60
+    failures = 0
     async with aiohttp.ClientSession(headers={"User-Agent": "ftabot-calcifer/1.0"}) as session:
         while True:
             try:
@@ -84,9 +101,11 @@ async def _feed_loop(config: Config, bot, sources) -> None:
                     posted = await poll_once(db, config, sources, session, send)
                 if posted:
                     log.info("feeds: posted %d alert(s)", posted)
+                failures = 0
             except Exception as exc:  # noqa: BLE001 - keep the loop alive
-                log.warning("feed loop error: %s", exc)
-            await asyncio.sleep(interval)
+                failures += 1
+                log.warning("feed loop error (failure %d): %s", failures, exc)
+            await asyncio.sleep(_retry_delay(interval, failures))
 
 
 async def _board_loop(config: Config, bot) -> None:
@@ -98,6 +117,7 @@ async def _board_loop(config: Config, bot) -> None:
     messenger = BotBoardMessenger(bot)
     gate = PostGate.from_config(config)
     interval = config.board_refresh_minutes * 60
+    failures = 0
     while True:
         try:
             async with Database(config.database_path) as db:
@@ -110,9 +130,11 @@ async def _board_loop(config: Config, bot) -> None:
                     except Exception as exc:  # noqa: BLE001 - one board never kills the loop
                         log.warning("board %s failed: %s", row["board_type"], exc)
                     await asyncio.sleep(1)  # stagger edits across channels
+            failures = 0
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
-            log.warning("board loop error: %s", exc)
-        await asyncio.sleep(interval)
+            failures += 1
+            log.warning("board loop error (failure %d): %s", failures, exc)
+        await asyncio.sleep(_retry_delay(interval, failures))
 
 
 async def _score_loop(config: Config, bot) -> None:
@@ -123,6 +145,7 @@ async def _score_loop(config: Config, bot) -> None:
     await bot.wait_until_ready()
     await asyncio.sleep(12)  # let startup + the first board render settle
     interval = config.score_refresh_minutes * 60
+    failures = 0
     async with aiohttp.ClientSession(headers={"Accept": "application/json"}) as session:
         while True:
             try:
@@ -133,9 +156,11 @@ async def _score_loop(config: Config, bot) -> None:
                     if changed:
                         await refresh_boards(db, config, bot)
                         log.info("scores: %d updated, boards refreshed", len(changed))
+                failures = 0
             except Exception as exc:  # noqa: BLE001 - keep the loop alive
-                log.warning("score loop error: %s", exc)
-            await asyncio.sleep(interval)
+                failures += 1
+                log.warning("score loop error (failure %d): %s", failures, exc)
+            await asyncio.sleep(_retry_delay(interval, failures))
 
 
 async def _digest_loop(config: Config, bot) -> None:
@@ -146,16 +171,19 @@ async def _digest_loop(config: Config, bot) -> None:
     await asyncio.sleep(10)
     send = _make_sender(bot, PostGate.from_config(config))
     interval = config.digest_flush_hours * 3600
+    failures = 0
     while True:
         # Wait first: digests should accumulate before the first flush.
-        await asyncio.sleep(interval)
+        await asyncio.sleep(_retry_delay(interval, failures))
         try:
             async with Database(config.database_path) as db:
                 n = await flush_digests(db, config, send)
             if n:
                 log.info("digest: flushed %d group(s)", n)
+            failures = 0
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
-            log.warning("digest loop error: %s", exc)
+            failures += 1
+            log.warning("digest loop error (failure %d): %s", failures, exc)
 
 
 async def _periodic_sync(config: Config) -> None:
@@ -165,14 +193,17 @@ async def _periodic_sync(config: Config) -> None:
     # render) before the first heavy sync, so a restart can't immediately stack
     # a sync on top of a still-starting process.
     await asyncio.sleep(45)
+    failures = 0
     while True:
         try:
             async with Database(config.database_path) as db:
                 result = await sync_guild(db, config)
             log.info("scheduled sync: %s", result.summary())
+            failures = 0
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
-            log.warning("scheduled sync failed: %s", exc)
-        await asyncio.sleep(interval)
+            failures += 1
+            log.warning("scheduled sync failed (failure %d): %s", failures, exc)
+        await asyncio.sleep(_retry_delay(interval, failures))
 
 
 async def _supervise(
@@ -226,6 +257,8 @@ async def _run(config: Config) -> None:
         from .bot import FtaBot
 
         bot = FtaBot(config)
+        # Expose the bot to the web app so /healthz can report gateway liveness.
+        app.state.bot = bot
         tasks.append(asyncio.create_task(bot.start(config.discord_token), name="bot"))
         log.info("Discord bot starting")
 

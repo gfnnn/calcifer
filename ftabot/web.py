@@ -103,6 +103,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     # None. When present, inbound webhooks post instantly; otherwise they queue
     # in feed_outbox for the bot's feed loop to drain.
     app.state.feed_sender = None
+    # Set by serve.py to the running bot in the all-in-one deploy, so /healthz can
+    # report Discord gateway liveness. Stays None when the web app runs standalone.
+    app.state.bot = None
     sync_manager = SyncManager(config)
     app.state.sync = sync_manager
 
@@ -119,7 +122,25 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
-        return {"status": "ok", "members": await db.count()}
+        # Liveness probe for the host (Render/Railway point healthCheckPath here):
+        # it stays 200 whenever the web process can serve and reach the DB, so a
+        # transient Discord gateway reconnect can't trip a restart storm. The bot's
+        # gateway state rides in the body instead, so an external monitor (or a
+        # future /status) can still catch the "process up, gateway dead" case — a
+        # fully-dead bot task is already caught by serve.py's supervisor.
+        payload: dict[str, object] = {"status": "ok", "members": await db.count()}
+        bot = app.state.bot
+        if bot is not None:
+            latency = bot.latency  # seconds; nan before the first heartbeat
+            ready = bot.is_ready() and not bot.is_closed()
+            payload["bot"] = {
+                "ready": ready,
+                # nan != nan, so this maps "no heartbeat yet" to null cleanly.
+                "latency_ms": round(latency * 1000) if latency == latency else None,
+            }
+            if not ready:
+                payload["status"] = "degraded"
+        return payload
 
     # -- integration hub: inbound webhooks -----------------------------------
 

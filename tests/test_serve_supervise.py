@@ -7,7 +7,23 @@ import asyncio
 
 import pytest
 
-from ftabot.serve import _supervise
+from ftabot.serve import _MAX_BACKOFF_FACTOR, _retry_delay, _supervise
+
+
+def test_retry_delay_is_interval_on_success():
+    # No consecutive failures -> the plain interval, the normal cadence.
+    assert _retry_delay(60, 0) == 60
+
+
+def test_retry_delay_backs_off_exponentially_then_caps():
+    # Each consecutive failure doubles the wait...
+    assert _retry_delay(60, 1) == 120
+    assert _retry_delay(60, 2) == 240
+    assert _retry_delay(60, 3) == 480
+    # ...until it hits the cap, so a long outage can't grow the wait unboundedly.
+    capped = 60 * _MAX_BACKOFF_FACTOR
+    assert _retry_delay(60, 4) == capped
+    assert _retry_delay(60, 99) == capped
 
 
 async def test_finished_oneshot_does_not_trigger_shutdown():
