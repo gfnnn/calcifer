@@ -83,6 +83,38 @@ async def test_ingest_grm_links_alts_in_roster(db):
     assert alt.is_main is False and alt.main_character_id == main.id
 
 
+async def test_ingest_grm_alt_list_links_when_records_do_not(db):
+    from ftabot.services.savedvars import parse_savedvariables
+
+    # The member records carry no alts/mainName cross-links; only GRM's
+    # GRM_PlayerListOfAlts_Save auxiliary table groups the two characters.
+    lua = """
+    GRM_GuildMemberHistory_Save = {
+        [1] = { ["From the Ashes"] = {
+            { ["name"] = "Calcifer-Hellfire", ["GUID"] = "g1", ["isMain"] = true },
+            { ["name"] = "Emberling-Hellfire", ["GUID"] = "g2" },
+        } },
+    }
+    GRM_PlayerListOfAlts_Save = {
+        ["From the Ashes"] = {
+            ["Calcifer-Hellfire"] = { { ["name"] = "Emberling-Hellfire" } },
+        },
+    }
+    """
+    await db.upsert_synced(Member("Calcifer", class_name="Mage"))
+    await db.upsert_synced(Member("Emberling", class_name="Warlock"))
+
+    summary = await ingest_savedvars(db, parse_savedvariables(lua))
+    assert summary["alt_groups"] == 1
+    assert summary["accounts"] == 1  # collapsed into one despite no record links
+    assert summary["alts_linked"] == 1
+
+    main = await db.get_member("Calcifer", "hellfire", "eu")
+    alt = await db.get_member("Emberling", "hellfire", "eu")
+    assert main.is_main is True
+    assert alt.is_main is False and alt.main_character_id == main.id
+
+
 async def test_ingest_grm_skips_account_whose_main_is_untracked(db):
     from ftabot.services.savedvars import parse_savedvariables
 
