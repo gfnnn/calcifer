@@ -85,3 +85,35 @@ def test_cross_realm_alt_is_grouped():
     accounts = build_accounts(recs)
     assert len(accounts) == 1
     assert ("emberling", "argent-dawn") in accounts[0].alts
+
+
+def test_extra_alt_groups_link_characters_records_missed():
+    # Per-member records don't connect these two, but the alt-list table does.
+    recs = [
+        _rec("Calcifer", is_main=True),
+        _rec("Emberling"),
+    ]
+    no_link = build_accounts(recs)
+    assert len(no_link) == 2
+
+    linked = build_accounts(
+        recs, extra_alt_groups=[["Calcifer-Hellfire", "Emberling-Hellfire"]]
+    )
+    assert len(linked) == 1
+    # The extra group only links; the main is still the isMain-flagged record.
+    assert linked[0].main == ("calcifer", "hellfire")
+    assert linked[0].alts == [("emberling", "hellfire")]
+
+
+def test_extra_alt_groups_do_not_vote_for_main():
+    # An alt-list group naming Emberling first must not make it the main; the
+    # earliest-join record still wins because the group casts no main vote.
+    recs = [
+        _rec("Emberling", join_date="2022-01-01"),
+        _rec("Calcifer", join_date="2019-05-05"),
+    ]
+    accounts = build_accounts(
+        recs, extra_alt_groups=[["Emberling-Hellfire", "Calcifer-Hellfire"]]
+    )
+    assert len(accounts) == 1
+    assert accounts[0].main == ("calcifer", "hellfire")

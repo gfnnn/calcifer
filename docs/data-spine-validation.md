@@ -48,8 +48,13 @@ checked against a real `Guild_Roster_Manager.lua`:
       and `joinDateHist` tuple are fallbacks built from guesses about their shape.
 - [ ] **Alts structure** — assumed `alts = { {name,class}, … }` (named or
       positional `[1]=name`). Real GRM may store alt GUIDs / richer records.
-- [ ] **Auxiliary tables** — `GRM_PlayerListOfAlts_Save` is **not** consumed yet;
-      grouping relies solely on per-member `alts`/`isMain`/`mainName`.
+- [ ] **Auxiliary tables** — `GRM_PlayerListOfAlts_Save` is now consumed
+      (`grm.alt_groups_from_savedvars` → extra union links in `build_accounts`),
+      but its exact nesting is unconfirmed. The walker is shape-agnostic and
+      **purely additive** (it only links characters; main selection still comes
+      from per-member `isMain`/`mainName`), so a wrong shape yields no groups
+      rather than bad grouping. Confirm the `[guild?][main] = { alts }` shape and
+      whether alt entries store names or GUIDs against a real dump.
 
 ### RCLootCouncil (`services/rclootcouncil.py`) — lower risk (schema is stable)
 - [ ] **`RCLootCouncilLootDB` top-level shape** — assumed `{ ["Name-Realm"]: [awards] }`.

@@ -48,7 +48,11 @@ async def ingest_savedvars(
         )
         summary["identities_parsed"] = len(records)
         summary["identities_stored"] = await db.upsert_identities(records)
-        accounts = build_accounts(records, default_realm=default_realm)
+        alt_groups = grm.alt_groups_from_savedvars(parsed, default_realm=default_realm)
+        summary["alt_groups"] = len(alt_groups)
+        accounts = build_accounts(
+            records, default_realm=default_realm, extra_alt_groups=alt_groups
+        )
         summary["accounts"] = len(accounts)
         summary.update(await db.apply_accounts(accounts, default_region=default_region))
 

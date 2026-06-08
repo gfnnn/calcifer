@@ -14,14 +14,14 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from ftabot.services.grm import identities_from_savedvars
+from ftabot.services.grm import alt_groups_from_savedvars, identities_from_savedvars
 from ftabot.services.rclootcouncil import loot_from_savedvars
 from ftabot.services.savedvars import parse_savedvariables
 
 _KNOWN = {
     "GRM_GuildMemberHistory_Save": "GRM (Guild Roster Manager) identity",
     "RCLootCouncilLootDB": "RCLootCouncil loot history",
-    "GRM_PlayerListOfAlts_Save": "GRM alt list (not yet consumed)",
+    "GRM_PlayerListOfAlts_Save": "GRM alt list (alt<->main grouping)",
 }
 
 
@@ -59,6 +59,11 @@ def summarize(parsed: dict[str, Any]) -> str:
                 f"  • {rec.character_name}-{rec.realm_slug} "
                 f"(main={rec.is_main}, joined={rec.join_date or '?'}, alts: {alts})"
             )
+    if "GRM_PlayerListOfAlts_Save" in parsed:
+        groups = alt_groups_from_savedvars(parsed)
+        lines.append(f"GRM alt groups parsed: {len(groups)}")
+        for group in groups[:3]:
+            lines.append(f"  • {' = '.join(group)}")
     if "RCLootCouncilLootDB" in parsed:
         loot = loot_from_savedvars(parsed)
         lines.append(f"RCLootCouncil loot rows parsed: {len(loot)}")
