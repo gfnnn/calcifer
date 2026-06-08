@@ -17,10 +17,7 @@ constraints in [vision §3](vision.md#3-how-we-build-it--architecture--approach)
 > (June 2026) across Discord's official developer docs, the discord.py/discord.js
 > guides, and the bots' own sites. Claims tied to **official Discord docs** are
 > high-confidence; **self-reported marketing figures** (server counts, "99.99%
-> uptime", premium prices) are directional only. One sweep surfaced a postmortem
-> from a likely-fabricated source; its specific citation was dropped, but the
-> mechanism it described (a no-backoff retry loop tripping a Cloudflare ban) is
-> independently documented and is kept on those grounds. Sources are listed in
+> uptime", premium prices) are directional only. Sources are listed in
 > [§7](#7-sources).
 
 ---
