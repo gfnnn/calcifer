@@ -116,7 +116,46 @@ def test_healthz(tmp_path):
     with TestClient(_app(tmp_path)) as client:
         resp = client.get("/healthz")
         assert resp.status_code == 200
+        # Standalone web app (no bot wired in): body is unchanged.
         assert resp.json() == {"status": "ok", "members": 2}
+
+
+class _FakeBot:
+    def __init__(self, *, ready: bool, latency: float):
+        self._ready = ready
+        self._latency = latency
+
+    def is_ready(self) -> bool:
+        return self._ready
+
+    def is_closed(self) -> bool:
+        return False
+
+    @property
+    def latency(self) -> float:
+        return self._latency
+
+
+def test_healthz_reports_gateway_liveness_when_ready(tmp_path):
+    app = _app(tmp_path)
+    app.state.bot = _FakeBot(ready=True, latency=0.042)  # 42 ms
+    with TestClient(app) as client:
+        body = client.get("/healthz").json()
+        assert body["status"] == "ok"
+        assert body["bot"] == {"ready": True, "latency_ms": 42}
+
+
+def test_healthz_degrades_but_stays_200_when_gateway_down(tmp_path):
+    # The "process up, gateway dead" case: the host probe must still see 200 (no
+    # restart storm on a transient reconnect), but the body flags it degraded.
+    app = _app(tmp_path)
+    app.state.bot = _FakeBot(ready=False, latency=float("nan"))
+    with TestClient(app) as client:
+        resp = client.get("/healthz")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "degraded"
+        assert body["bot"] == {"ready": False, "latency_ms": None}
 
 
 def test_api_members_sorted_by_score(tmp_path):

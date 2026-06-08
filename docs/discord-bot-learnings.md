@@ -136,35 +136,40 @@ receiving API data is "processing." There is no privacy surface today.
 costs little: one route + one template + a documented process. Maps to the
 identity-graph work in [vision §5c](vision.md#5c-the-data-spine--the-long-term-core).
 
-### P1 — Make `/healthz` reflect gateway liveness, not just the DB
+### P1 — Make `/healthz` reflect gateway liveness, not just the DB — ✅ done
 
-**The gap.** [`web.py:120`](../ftabot/web.py) returns `{"status": "ok"}` after a DB
-count. The research's clearest reliability lesson is the **"process up but gateway
-dead"** failure mode — the web server answers 200 while the bot's Discord
-connection is silently dead, so an external uptime check sees green during an
-outage.
+**The gap (was).** `/healthz` returned `{"status": "ok"}` after a DB count only.
+The research's clearest reliability lesson is the **"process up but gateway dead"**
+failure mode — the web server answers 200 while the bot's Discord connection is
+silently dead, so an external uptime check sees green during an outage.
 
-**The borrow.** Give the FastAPI app a reference to the bot (already co-located in
-[`serve.py`](../ftabot/serve.py)) and have `/healthz` also report
-`bot.is_ready()` / `not bot.is_closed()` and `bot.latency`. An external monitor
-hitting that endpoint then catches a dead gateway, not just a dead process. Low
-cost, directly closes the gap, and it's the natural place to surface a status
-signal.
+**What shipped.** [`serve.py`](../ftabot/serve.py) now hands the running bot to the
+web app (`app.state.bot`), and [`web.py`](../ftabot/web.py)'s `/healthz` reports a
+`bot: {ready, latency_ms}` object and flips `status` to `degraded` when the gateway
+is down. It deliberately **stays HTTP 200**: Render and Railway both point their
+restart-triggering `healthCheckPath` at `/healthz`, so a transient reconnect must
+not trip a restart storm (a fully-dead bot *task* is already caught by the
+`_supervise` shutdown). The gateway signal therefore rides in the body, where a
+monitor or a future `/status` reads it. Covered by `tests/test_web.py`.
 
-### P1 — Confirm backoff on the loops; never tight-retry on error
+### P1 — Backoff on the loops; never tight-retry on error — ✅ done
 
 **The gap (preventive).** The canonical way community bots *die* is a **no-backoff
 retry loop**: transient API failures → hammer retries → trip Discord's
 invalid-request threshold (**~10,000 invalid responses per 10 min → a 24-hour
 Cloudflare ban**, where an "invalid" response is a 401/403/429). discord.py's
-gateway reconnect already backs off; the risk lives in *our* loops.
+gateway reconnect already backs off, and the `services/` clients already honour
+`Retry-After` ([`_http.py`](../ftabot/services/_http.py)); the residual risk was a
+*persistently* failing upstream being re-hit every fixed interval.
 
-**The borrow.** Audit the feed/score/sync loops in [`serve.py`](../ftabot/serve.py)
-and the `services/` clients to confirm that on repeated failure they **back off
-exponentially** (and honour `Retry-After`) rather than retry on a fixed tight
-interval. The loops already swallow-and-continue to stay alive; the addition is a
-growing sleep on consecutive failures so a degraded upstream can't turn into a
-self-inflicted ban.
+**What shipped.** A shared `_retry_delay(interval, failures)` in
+[`serve.py`](../ftabot/serve.py) gives the normal interval after a success and an
+**exponential backoff capped at 8× the interval** after consecutive failures,
+resetting on the next success. Every long-running loop (feeds, boards, scores,
+digest, sync) tracks its consecutive-failure count and sleeps `_retry_delay(...)`,
+so a degraded upstream is polled progressively less often instead of every interval
+and can't spiral into a self-inflicted ban. The pure helper is unit-tested in
+`tests/test_serve_supervise.py`.
 
 ### P2 — A lightweight, honest status signal
 
@@ -191,7 +196,7 @@ on each:
 
 | Failure mode | What happens | Calcifer's exposure |
 | --- | --- | --- |
-| **No-backoff retry → Cloudflare ban** | Tight retries on transient errors cross ~10k invalid/10min → **24h API ban**; retries re-trigger it, extending the outage. | **Low, verify (P1).** Loops swallow errors to stay alive; confirm they back off, not tight-loop. |
+| **No-backoff retry → Cloudflare ban** | Tight retries on transient errors cross ~10k invalid/10min → **24h API ban**; retries re-trigger it, extending the outage. | **Low, hardened.** Loops now back off exponentially on consecutive failures (`_retry_delay`); clients honour `Retry-After`. |
 | **Privileged-intent break** | Message Content became privileged (**Sept 1 2022**); without it, `content`/`embeds`/`attachments` come back empty. Requesting an unapproved intent → gateway close **4014 (Disallowed intent)**. | **None.** We never request Message Content; default intents only. |
 | **The 100-server growth gate** | An unverified bot crossing 100 servers can't join more, and portal intent toggles stop being honoured. | **None.** Single guild is far below the 75/100 thresholds. |
 | **Token leakage** | A leaked token = full control of the bot; common via hardcoding, public repos, logging. Discord auto-scans public GitHub and invalidates found tokens. | **Low.** Token via env/`Config`; keep it out of logs and Git (`.gitignore`), rotate if exposed. |
