@@ -247,6 +247,62 @@ _BANKS: dict[str, list[str]] = {
         "Let's see what the embers remember.",
         "The logs don't lie. Pity.",
     ],
+    # recruitment + talent context
+    "recruiting": [
+        "Come stake your claim.",
+        "We're looking for your kind.",
+        "New blood warms the hearth.",
+        "Prove yourself.",
+    ],
+    # loot + distribution context
+    "loot": [
+        "The spoils are waiting.",
+        "Fair share to those who earn it.",
+        "The vault remembers.",
+        "Good loot makes for warm nights.",
+    ],
+    # attendance + signup context
+    "attendance": [
+        "Every hand at the hearth counts.",
+        "The bench grows cold.",
+        "Fresh faces keep the fire burning.",
+    ],
+    # warnings: something needs attention soon
+    "alert_warning": [
+        "Things are getting thin.",
+        "Watch the embers here.",
+        "This one needs eyes on it.",
+    ],
+    # critical: urgent action needed
+    "alert_critical": [
+        "The moment's here.",
+        "This changes things.",
+        "Mark this well.",
+    ],
+    # celebration: achievement/milestone
+    "success": [
+        "Well earned.",
+        "The fire blazes tonight.",
+        "That's the stuff legends are made of.",
+    ],
+    # empty recruitment board
+    "empty_recruiting": [
+        "The guild's full. For now.",
+        "All hands on deck here.",
+        "Room to spare later, maybe.",
+    ],
+    # empty event signups
+    "empty_signups": [
+        "The bench is waiting.",
+        "No takers yet.",
+        "Quieter than usual.",
+    ],
+    # errors: something broke
+    "error": [
+        "The flames flicker. Something's not right.",
+        "My sight's clouded. Try again?",
+        "The embers won't tell me. The forge is troubled.",
+    ],
     "_default": [
         "Something's crackling.",
         "Mind the sparks.",
