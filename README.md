@@ -322,7 +322,7 @@ python -m pytest                    # full test suite
 ```
 
 The test suite runs entirely offline (no network, real SQLite via temp files).
-CI (`.github/workflows/ci.yml`) runs **lint + tests + 80% coverage** on every PR
+CI (`.github/workflows/ci.yml`) runs **lint + tests + 88% coverage** on every PR
 and on pushes to `main`. Before opening a PR, see
 [`CONTRIBUTING.md`](CONTRIBUTING.md) and the branching/release model in
 [`docs/branching.md`](docs/branching.md).

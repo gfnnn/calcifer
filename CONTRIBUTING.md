@@ -57,7 +57,7 @@ ruff check --fix ftabot scripts tests   # auto-fix what it can
 python -m pytest -q                 # full suite, how CI runs it
 ```
 
-CI also enforces **≥ 80% coverage** (`--cov-fail-under=80`), so add tests for new
+CI also enforces **≥ 88% coverage** (`--cov-fail-under=88`), so add tests for new
 behaviour. Code **formatting** (`ruff format`) is available but *not* enforced —
 run it if you like, but it won't fail your PR.
 

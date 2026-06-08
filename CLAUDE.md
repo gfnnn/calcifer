@@ -46,7 +46,7 @@ python -m scripts.redact_savedvars in.lua out.lua   # sanitise a real dump into 
 python -m scripts.upload_savedvars dump.lua         # POST a dump to /api/upload/savedvars
 ```
 
-Python 3.12. CI (`.github/workflows/ci.yml`) runs **ruff lint + `pytest` with 80%
+Python 3.12. CI (`.github/workflows/ci.yml`) runs **ruff lint + `pytest` with 88%
 coverage** on every PR and on pushes to `main`; formatting (`ruff format`) is
 available but not enforced. `.github/workflows/sync.yml` runs the sync on a
 schedule, and `.github/workflows/release.yml` cuts a GitHub Release on `v*` tags.
