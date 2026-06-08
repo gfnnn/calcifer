@@ -172,6 +172,80 @@ def _record(member: dict, default_region: str, default_realm: str) -> IdentityRe
     )
 
 
+_ALT_LIST_KEY = "GRM_PlayerListOfAlts_Save"
+
+
+def _is_array_like(value: Any) -> bool:
+    """True for a positional alts container: an int-keyed table.
+
+    GRM stores a main's alts as an array (``{ {alt}, {alt} }``), which the Lua
+    reader yields as an int-keyed dict. A *name-keyed* dict is a deeper bucket
+    (e.g. the guild) we should recurse into, not consume.
+    """
+    return bool(value) and isinstance(value, dict) and all(isinstance(k, int) for k in value)
+
+
+def _alt_names_from_container(container: dict) -> list[str]:
+    """Names pulled from an alts container, one per entry (name only, no class)."""
+    return [name for item in container.values() if (name := _alt_name(item))]
+
+
+def _collect_alt_groups(node: Any, out: list[list[str]], depth: int = 0) -> None:
+    """Walk ``GRM_PlayerListOfAlts_Save`` and gather ``[main, *alts]`` name groups.
+
+    Shape-agnostic like ``_collect_members``: at every ``key -> alts-array`` we
+    treat ``key`` as the main and the array's entries as its alts; any other
+    nested dict (faction/guild wrappers) is recursed into. Purely additive —
+    the groups only *link* characters; ``isMain``/main selection stays with the
+    per-member records in ``build_accounts``.
+    """
+    if depth > 8 or not isinstance(node, dict):
+        return
+    for key, value in node.items():
+        if isinstance(key, str) and _is_array_like(value):
+            names = _alt_names_from_container(value)
+            if names:
+                out.append([key, *names])
+        elif isinstance(value, dict):
+            _collect_alt_groups(value, out, depth + 1)
+
+
+def alt_groups_from_savedvars(
+    data: dict, *, default_realm: str = "hellfire"
+) -> list[list[str]]:
+    """Pull alt groupings from GRM's ``GRM_PlayerListOfAlts_Save`` auxiliary table.
+
+    Accepts the whole file or that table directly, and returns ``"Name-Realm"``
+    groups (a main plus its alts) for ``build_accounts`` to union. Names are
+    de-duplicated within a group; groups with fewer than two distinct members
+    carry no linking information and are dropped. ``default_realm`` is unused
+    today (names are passed through verbatim and resolved downstream) but kept
+    for signature parity with the other parsers.
+    """
+    node: Any = data
+    if isinstance(data, dict):
+        if _ALT_LIST_KEY in data:
+            node = data[_ALT_LIST_KEY]
+        elif "GRM_GuildMemberHistory_Save" in data or "RCLootCouncilLootDB" in data:
+            # A full SavedVariables file without the alt table: nothing to
+            # consume. Walking the file blindly would mistake the history's
+            # member arrays for alt groups, so bail out explicitly.
+            return []
+    raw: list[list[str]] = []
+    _collect_alt_groups(node, raw)
+
+    groups: list[list[str]] = []
+    for group in raw:
+        unique: list[str] = []
+        for name in group:
+            cleaned = _str(name)
+            if cleaned and cleaned not in unique:
+                unique.append(cleaned)
+        if len(unique) >= 2:
+            groups.append(unique)
+    return groups
+
+
 def identities_from_savedvars(
     data: dict, *, default_region: str = "eu", default_realm: str = "hellfire"
 ) -> list[IdentityRecord]:
