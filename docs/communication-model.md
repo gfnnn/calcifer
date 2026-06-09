@@ -6,7 +6,8 @@
 > board, or alert. If a new feature doesn't fit cleanly into a cell of the matrix
 > in §4, that's a signal to stop and design it properly first.
 >
-> Pairs with [`vision.md`](vision.md) (the why), [`MESSAGING.md`](../MESSAGING.md)
+> Pairs with [`vision.md`](vision.md) (the why), [`ROADMAP.md`](ROADMAP.md) and
+> [`DECISIONS.md`](DECISIONS.md) (what's planned and what's open), [`MESSAGING.md`](../MESSAGING.md)
 > (the voice banks), and [`communication.md`](communication.md) (the Discord
 > formatting toolbox). This doc is the **bridge**: it says *which* tool, in *which*
 > voice, to *which* audience, for every feature.
@@ -244,29 +245,17 @@ path, and it's worth deciding deliberately: *do we gate by code, or gate by chan
 
 ---
 
-## 7. What each audience actually experiences (the walkthroughs)
+## 7. The experience from each seat (a sanity check)
 
-A sanity check — read the model from each person's seat.
+**Visitor:** Sees tidy `#rules`, `#guides`, `#news`, and recruitment board (front door). Clean, inviting, no noise.
 
-**A visitor** lands in the server, sees a tidy `#rules`, `#guides`, `#news`, and a
-`#recruitment` board telling them exactly what trials are open and how to apply.
-Clean, legible, inviting. No spam, no noise.
+**Guild member:** Opens `#m-plus` and sees the Hot 20 leaderboard; opens `#events` and sees the week with local timestamps; gets pings only for feeds they subscribed to; asks `/loot` and gets a private answer.
 
-**A guild member** opens `#m-plus` and sees the Hot 20 living leaderboard; opens
-`#events` and sees the week laid out with their-local-time stamps; gets a ping only
-for the one feed they subscribed to; asks `/loot` and gets a private answer. The
-community runs itself.
+**Prog raider:** All of the above, plus a `#prog` channel with pull-by-pull WCL detail and rival-guild movement (the war room) that the guild never sees.
 
-**A prog raider** has all that, plus a `#prog` channel where Calcifer posts
-pull-by-pull WCL detail and rival-guild movement — the war room — that the wider
-guild never sees.
+**Officer:** Runs `/scout` (find recruit), `/setteam` (slot them), `/recruit slots dps 2` (open trial), `/board promote` (push live) — all from Discord, all ephemeral, all gated.
 
-**An officer** runs `/scout` to find a recruit, `/setteam` to slot them, `/recruit
-slots dps 2` to open a trial, `/board promote` to push a board live — all from
-Discord, all ephemeral, all gated.
-
-**Harry** does all of the above, and (once the register lands) gets a Calcifer who
-talks to him like the bound demon he is.
+**Harry (GM):** Does all of the above, and (once the register lands) gets a Calcifer who talks to him like the bound demon he is.
 
 ---
 
@@ -289,27 +278,17 @@ talks to him like the bound demon he is.
 
 ---
 
-## 9. Open questions to resolve next (the fleshing-out backlog)
+## 9. Open questions (see `DECISIONS.md` for the full discussion)
 
-These are the decisions that will sharpen the model. Worth working through
-deliberately:
+These are the decisions that will sharpen the model:
 
-1. **Prog-team gating: channel or code?** Do we lean on a read-restricted `#prog`
-   channel + feed routing (cheap, available now), or build real `raid_team`-aware
-   command gating (more work, more precise)? *Recommendation: channel + routing
-   first.*
-2. **Should `/gmreport` and `/raidcheck` stay public?** Today they're open to
-   everyone (Type-4, public embed). They're Pillar-B management views — arguably
-   they should be officer/prog-gated or at least ephemeral. *Flag for decision.*
-3. **Does Harry's register ship now or later?** It's a small change (check
-   `GM_DISCORD_ID`, swap a bank) but it's pure charm, not function. *Defer until the
-   functional tiers feel right.*
-4. **One notice-board channel or several?** Rules + Guides + News + Recruitment in
-   one `#info` channel, or split? (See recruitment discussion — leaning a dedicated
-   `#recruitment` for the front-door URL.)
-5. **What's the canonical channel layout?** This model implies a channel map:
-   read-only notice channels, community channels, a prog channel, an officer
-   channel. Worth drawing it explicitly and mapping each board/feed to its home.
+1. **Prog-team gating: channel or code?** (Recommendation: channel + routing first)
+2. **Should `/gmreport` and `/raidcheck` stay public?**
+3. **Does Harry's register ship now or later?** (Recommendation: defer to Phase 4)
+4. **One notice-board channel or several?**
+5. **What's the canonical channel layout?**
+
+See **[`DECISIONS.md`](DECISIONS.md)** for detailed options, reasoning, and status.
 
 ---
 
@@ -324,6 +303,5 @@ deliberately:
   is whether we *also* want a Type-1 prog roster board (team page) later.
 
 The next concrete build step is still the **recruitment board + `/recruit`
-commands** (designed in [`board-messaging-spec.md`](board-messaging-spec.md) §7 and
-the prior discussion). This doc is the frame that confirms it sits in the right
+commands** (fully designed in [`sticky-posts-spec.md`](sticky-posts-spec.md) §4c). This doc is the frame that confirms it sits in the right
 place.

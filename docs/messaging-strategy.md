@@ -12,48 +12,10 @@ The raw material — context-keyed lines that express Calcifer's personality. Ev
 - **Flavour lines** — optional garnish, tone-gated (off/light/full). These disappear in `off` mode, are 50/50 in `light`, always show in `full`.
 - **Domain flavour** — paced to the content: M+ is fast/excited, raids/logs are measured/patient.
 
-**Current banks:**
-- `thinking` (structural) — search in progress
-- `not_found` (structural) — member/data lookup failed
-- `denied` (structural) — permission denied
-- `empty` (structural) — no data to show
-- `board_signoff` (structural) — footer of all boards
-- `mplus` (flavour) — Mythic+ domain voice
-- `raid` (flavour) — raid progression domain voice
-- `logs` (flavour) — WCL/stats domain voice
-- `_default` (fallback for unknown keys)
-
-**Gaps (to add):**
-- `recruiting` — recruitment context (scout, open slots, talent)
-- `loot` — loot distribution context (vault, priority, bids)
-- `attendance` — signups/attendance context (thin turnout, full bench, turnover)
-- `alert_warning` — warnings (prog stall, downed bosses, low DPS)
-- `alert_critical` — urgent (first kill, patch notes, major changes)
-- `success` — celebration (achievement, new rank, milestone)
-- `empty_recruiting` — specific flavor when recruit board is empty
-- `empty_signups` — specific flavor when event signups are thin
-- `error` — something broke (API down, parse failed)
+**See [`MESSAGING.md`](MESSAGING.md) for the complete bank reference and how to add new lines.**
 
 ### Layer 2: Board-specific messaging
-Each board has its own **header**, **empty state**, and **signoff**, drawing from the voice banks but customized per board type.
-
-**Current boards:**
-| Board | Header | Empty state | Signoff source |
-| --- | --- | --- | --- |
-| **Hot 20** | "🔥 Topping the embers" | Return `None` (no post) | `board_signoff` flavour (M+) |
-| **Events** | "📅 This week at the hearth" | Return `None` (no post) | `board_signoff` + manual note |
-| **News** | "📰 Highlights" | Return `None` (no post) | `board_signoff` |
-| **Pulse** | (TBD) | (TBD) | `board_signoff` |
-| **Guides** | (TBD) | (TBD) | `board_signoff` |
-| **Rules** | (TBD) | (TBD) | `board_signoff` |
-
-**Planned boards:**
-| Board | Purpose | Header pattern | Signoff context |
-| --- | --- | --- | --- |
-| **Recruitment** | Open slots, talent needed, guild perks | `recruit` flavour | recruiting |
-| **Roster** | All members, at-a-glance, swappable views | guild data | none |
-| **Loot Queue** | Wishlist, priority, next in line | `loot` flavour | loot |
-| **Announcements** | Sticky; GM-posted callouts | situational | none |
+Each board has its own **header**, **empty state**, and **signoff**, drawing from the voice banks but customized per board type. **See [`sticky-posts-spec.md`](sticky-posts-spec.md) for comprehensive board specifications** (live boards, planned boards, detailed copy templates, voice patterns).
 
 ### Layer 3: Situational responses
 Command replies, errors, and confirmations draw from banks but are composed ad-hoc. Examples:
@@ -128,28 +90,7 @@ SIGNOFF: voice.flavour("recruiting") or "Come stake your claim, <@...>"
 
 ## 4. Quick reference — what lines exist where
 
-**Structural (always return):**
-- `thinking` — query in progress
-- `not_found` — member lookup failed
-- `denied` — permission denied
-- `empty` — no data to show
-- `board_signoff` — board footer
-
-**Flavour (tone-gated):**
-- `mplus` — Mythic+ domain
-- `raid` — raid progression
-- `logs` — WCL analysis
-- `recruiting` (new) — recruitment context
-- `loot` (new) — loot context
-- `attendance` (new) — signup context
-- `alert_warning` (new) — warning/attention needed
-- `alert_critical` (new) — urgent action
-- `success` (new) — celebrate
-- `error` (new) — something broke
-
-**Empty-state variants:**
-- `empty_recruiting` (new) — no open slots
-- `empty_signups` (new) — events with thin signup
+See **[`MESSAGING.md`](../MESSAGING.md)** for the current bank reference (structural lines, flavour lines, empty-state variants, and examples).
 
 ---
 
@@ -178,42 +119,21 @@ When you define a new bank (e.g., `recruiting`):
 
 ---
 
-## 7. Examples — how surfaces use the banks
+## 7. Code examples
 
-### Board footer (all boards)
-```python
-signoff = brand.Voice(tone=config.persona_tone).line("board_signoff")
-embed.set_footer(text=signoff)
-```
-
-### M+ leaderboard (hot20.py)
-```python
-# Already uses: header = "🔥 Topping the embers", climb callout
-# Could add: voice.flavour("mplus") in footer or header
-```
-
-### Recruitment board (planned)
-```python
-voice = brand.Voice(tone=config.persona_tone)
-recruitment_callout = voice.flavour("recruiting")  # "Come stake your claim"
-# Format: "🔎 [open slots] ... [callout] ... Calcifer"
-```
-
-### Admin command (e.g., /admin sync)
-```python
-await ctx.defer(thinking=voice.line("thinking"))
-# ... do work ...
-return f"{result}. {voice.flavour('success') or ''}"
-```
+See **[`voice-usage-examples.md`](voice-usage-examples.md)** for working patterns:
+- Board footers and headers
+- Domain-specific flavour
+- Empty states and error handling
+- Command thinking/success flows
+- Testing voice integration
 
 ---
 
-## 8. What's next (after this round)
+## 8. Related references
 
-Once the voice banks are built:
-- [ ] Board messaging spec per board (headers, empty, signoff patterns)
-- [ ] Recruitment board design + render
-- [ ] Command messaging guidelines (how cogs use voice)
-- [ ] Mood-per-message system (author icon expressions for boards)
-- [ ] Digest modes for feeds (weekly roundup flavor)
+- **[`MESSAGING.md`](../MESSAGING.md)** — Quick-start guide for working with voice
+- **[`sticky-posts-spec.md`](sticky-posts-spec.md)** — Complete board specifications with copy templates
+- **[`voice-usage-examples.md`](voice-usage-examples.md)** — Working code patterns for integrating voice into new features
+- **[`board-messaging-spec.md`](board-messaging-spec.md)** — Legacy reference (see sticky-posts-spec.md for current specs)
 

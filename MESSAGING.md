@@ -29,23 +29,24 @@ Where all Calcifer's lines live: 16 banks for different contexts (thinking, recr
 - `brand.color_for(severity)` — colour system (GUILD_EMBER, BLUE_FLAME, AMBER, EMBER_RED)
 - `brand.Mood` + `mood_emoji()` — Calcifer's expressions (thinking, smug, grumpy, delighted, etc.)
 
-### 2. `docs/messaging-strategy.md` — the architecture
-How the system is designed: what the banks are, why they're structured this way, phases for building it out.
+### 2. `docs/messaging-strategy.md` — the design philosophy
+Why the system is structured this way: tone dial, domain pacing, the em-dash rule, and design principles.
 
 **Read this if:**
 - You're adding a new board or feature
 - You want to understand the tone dial or memory system
 - You're designing a new surface (command, feed, etc.)
 
-### 3. `docs/board-messaging-spec.md` — the board templates
-Detailed specs for every board: what header to use, which voice bank to draw from, how to handle empty states, footer patterns.
+### 3. `docs/sticky-posts-spec.md` — the comprehensive board reference
+Every sticky post (living board and planned board): detailed headers, empty states, voice patterns, copy templates, and update triggers.
 
 **Read this if:**
 - You're building a board renderer
-- You need to know what copy a board should have
-- You're deciding between "show nothing" vs. "show a custom empty state"
+- You need the exact copy and voice bank for a board
+- You're designing a new sticky post type
 
-**Bonus:** `docs/voice-usage-examples.md` has working code examples for every pattern.
+### 4. `docs/voice-usage-examples.md` — the code patterns
+Working examples for every pattern: board footers, domain flavor, error handling, command flows, testing.
 
 ---
 
@@ -130,7 +131,7 @@ More examples in `docs/voice-usage-examples.md`.
 
 1. **Identify the voice context.** Does it fit an existing bank (mplus, raid, recruiting, loot)? Or do you need a new one?
 
-2. **Add to board-messaging-spec.md.** Define the header, empty state, and signoff pattern in the spec.
+2. **Check sticky-posts-spec.md.** See if the board is already designed; if new, add a detailed spec (header, empty state, signoff pattern, voice bank, update triggers).
 
 3. **In your renderer:**
    ```python
@@ -215,13 +216,13 @@ See `tests/test_brand.py` for the full suite.
 
 ## Next steps
 
-Once the voice system is solid:
+The voice system is live. Next:
 
-1. **Flesh out existing boards** — update hot20, events, news to use the new banks
-2. **Build new boards** — recruitment, roster, loot queue, announcements
-3. **Command messaging** — standardize how slash commands use voice (thinking → work → result)
-4. **Mood system** — add author-icon expressions to key boards (Calcifer thinking, smug, delighted, etc.)
-5. **Digest modes** — weekly roundup flavour for feeds
+1. **Implement recruitment board** — see `sticky-posts-spec.md` §4c for the detailed spec
+2. **Roll out new boards** — roster, loot queue, announcements (specs in `sticky-posts-spec.md`)
+3. **Command messaging** — standardize slash command replies (thinking → work → result)
+4. **Digest mode flavor** — weekly roundup voice for feeds
+5. **Mood system** (future) — add author-icon expressions to key boards
 
 ---
 
@@ -230,9 +231,9 @@ Once the voice system is solid:
 | Need | File | What's there |
 | --- | --- | --- |
 | Voice banks | `ftabot/brand.py` | 16 banks + `Voice` class + colour system |
-| Board specs | `docs/board-messaging-spec.md` | Header/footer/empty patterns for each board |
-| Strategy | `docs/messaging-strategy.md` | Architecture, phases, design rules |
-| Code examples | `docs/voice-usage-examples.md` | Worked examples for every pattern |
+| Board/sticky specs | `docs/sticky-posts-spec.md` | Complete board reference with copy templates |
+| Design philosophy | `docs/messaging-strategy.md` | Tone dial, domain pacing, design rules |
+| Code examples | `docs/voice-usage-examples.md` | Worked patterns for every use case |
 | Tests | `tests/test_brand.py` | Ensure lines are unique, no em dashes |
 
 ---

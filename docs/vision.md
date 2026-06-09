@@ -17,7 +17,8 @@ disagree, fix whichever is wrong — but keep them in step.
 > first boards (Hot 20, Events, News, Guides, Rules, Pulse) are live. The data
 > spine (GRM/RCLootCouncil) landed in Phase 2. Phases 3–5 (feeds, recruitment,
 > advanced scoring) are in design or early build. This doc is the stable vision;
-> see `ROADMAP.md` (forthcoming) for detailed feature planning.
+> see [`ROADMAP.md`](ROADMAP.md) for detailed feature planning and [`DECISIONS.md`](DECISIONS.md)
+> for open questions.
 
 ---
 
