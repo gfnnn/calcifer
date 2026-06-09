@@ -587,7 +587,7 @@ Two minor items remain (tracked separately in `DECISIONS.md`):
 - Raid-Helper webhook replay binding (static secret is acceptable for now)
 
 > These are low-impact hardening items. When addressed, move to the roadmap or
-> close the decision. Open questions live in `DECISIONS.md` (forthcoming).
+> close the decision. Open questions live in [`DECISIONS.md`](DECISIONS.md).
 
 ---
 

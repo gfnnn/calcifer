@@ -304,7 +304,9 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/web.py` | FastAPI browser/JSON query layer + HTML pages. |
 | `ftabot/ui.py` | Renders members into Discord embeds. |
 | `scripts/sync_cli.py` | Headless sync entry point. |
-| `docs/vision.md` · `docs/data-sources.md` | The project vision + roadmap · API capability reference. |
+| `docs/vision.md` | The project vision and pillars. |
+| `docs/ROADMAP.md` · `docs/DECISIONS.md` | Feature planning (phases 0–5, delivery contracts) · decisions locked + open questions. |
+| `docs/data-sources.md` | API capability reference (what each service exposes). |
 | `tests/` | Pytest suite (DB, metrics, views, WoW Audit mapping, web API). |
 
 A roster sync only ever overwrites **API-sourced** columns. Manually entered
