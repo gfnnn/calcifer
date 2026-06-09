@@ -126,35 +126,7 @@ SIGNOFF: voice.flavour("recruiting") or "Come stake your claim, <@...>"
 
 ---
 
-## 4. Implementation plan
-
-### Phase 1: Expand voice banks (brand.py)
-- Add the 7 new banks (recruiting, loot, attendance, alert_warning, alert_critical, success, error)
-- Add empty-state-specific variants (empty_recruiting, empty_signups)
-- Populate with 3–5 lines each, GM-curated
-- Keep lines short; save richer flavor for boards
-- Test: `pytest tests/test_brand.py` (ensure no em dashes, lines are unique per bank)
-
-### Phase 2: Board signoff refactor
-- Update each board's render to use `voice.flavour(board_context)` or stick with `board_signoff`
-- Examples:
-  - Hot 20: `voice.flavour("mplus")` (M+ context)
-  - Recruitment: `voice.flavour("recruiting")` (recruiting context)
-  - Events: `voice.line("board_signoff")` (neutral)
-
-### Phase 3: New boards (per your roadmap)
-- Recruitment board (slots + culture summary)
-- Roster board (at-a-glance, swappable views)
-- Loot queue board (wishlist + priority)
-- Announcements (sticky, GM-posted)
-
-### Phase 4: Command messaging
-- Standardize how commands use voice (thinking → work → result)
-- Examples in cogs (e.g., `/recruit scout`, `/loot bid`, `/admin sync`)
-
----
-
-## 5. Quick reference — what lines exist where
+## 4. Quick reference — what lines exist where
 
 **Structural (always return):**
 - `thinking` — query in progress
@@ -181,7 +153,7 @@ SIGNOFF: voice.flavour("recruiting") or "Come stake your claim, <@...>"
 
 ---
 
-## 6. Tone dial and config
+## 5. Tone dial and config
 
 `Config.persona_tone` controls all Voice instances:
 - `off`: no flavour lines ever
@@ -192,7 +164,7 @@ This is a single dial for the whole server, not per-user. Keep it simple.
 
 ---
 
-## 7. Checklist for adding a new line bank
+## 6. Checklist for adding a new line bank
 
 When you define a new bank (e.g., `recruiting`):
 
@@ -206,7 +178,7 @@ When you define a new bank (e.g., `recruiting`):
 
 ---
 
-## 8. Examples — how surfaces use the banks
+## 7. Examples — how surfaces use the banks
 
 ### Board footer (all boards)
 ```python
@@ -236,7 +208,7 @@ return f"{result}. {voice.flavour('success') or ''}"
 
 ---
 
-## 9. What's next (after this round)
+## 8. What's next (after this round)
 
 Once the voice banks are built:
 - [ ] Board messaging spec per board (headers, empty, signoff patterns)

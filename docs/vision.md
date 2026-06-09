@@ -13,6 +13,12 @@ references: [`data-sources.md`](data-sources.md) (what each API exposes) and
 [`deploy.md`](deploy.md) (how to run and operate it). When this doc and the code
 disagree, fix whichever is wrong — but keep them in step.
 
+> **Status:** Phases 0–1 shipped as of June 2026. The architecture, core bot, and
+> first boards (Hot 20, Events, News, Guides, Rules, Pulse) are live. The data
+> spine (GRM/RCLootCouncil) landed in Phase 2. Phases 3–5 (feeds, recruitment,
+> advanced scoring) are in design or early build. This doc is the stable vision;
+> see `ROADMAP.md` (forthcoming) for detailed feature planning.
+
 ---
 
 ## 1. The vision — two pillars, one bot
@@ -575,25 +581,12 @@ timezone* (raid/event times now resolve through `Config.raid_timezone` —
 Europe/Paris as an IANA `zoneinfo` zone, DST-correct — instead of the static
 `RAID_TZ_OFFSET_HOURS`).
 
-Two items remain, roughly highest-value first:
+Two minor items remain (tracked separately in `DECISIONS.md`):
+- The scout's land-odds baseline (no signal for guilded candidates yet)
+- Raid-Helper webhook replay binding (static secret is acceptable for now)
 
-- **The scout's land-odds carry no signal for guilded leads.** `run_scout`
-  (`scout.py`) ranks candidates without an `our_strength`/`guild_strength`
-  baseline, so `recruit.poachability` returns a flat 0.5 for every guilded
-  candidate (and 1.0 for unguilded) and the `land-odds X%` shown in `/scout`
-  output is effectively constant. Either thread the incumbent and each
-  candidate's guild progression through so the figure means something, or stop
-  presenting it as a probability until it does.
-
-- **The Raid-Helper webhook has no replay binding.** It verifies a static shared
-  secret in constant time, and the `seen_items` dedup already blocks re-posting a
-  captured event, so the practical impact is low. A true timestamp-bound HMAC
-  would need Raid-Helper's (undocumented, Cloudflare-gated) signing scheme;
-  adding a speculative one risks breaking the integration, so this waits until a
-  real payload confirms the format.
-
-> When one of these is done, move it into the roadmap (§7) or just delete the
-> bullet — this list should shrink, not grow stale.
+> These are low-impact hardening items. When addressed, move to the roadmap or
+> close the decision. Open questions live in `DECISIONS.md` (forthcoming).
 
 ---
 

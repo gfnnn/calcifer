@@ -1,5 +1,7 @@
 # Board Messaging Specification — headers, footers, empty states
 
+> **Note:** This is an older spec for existing boards. For comprehensive board design (shipped + planned) and the unified visual/voice system, see **[`sticky-posts-spec.md`](sticky-posts-spec.md)** instead. This document is retained as a reference for the first six boards built before the consolidated spec.
+
 This document specifies the voice + copy for each board. Each board follows the same pattern: **header** → **content** → **footer (signoff)** + **timestamp**.
 
 ---
