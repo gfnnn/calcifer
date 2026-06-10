@@ -28,6 +28,17 @@ class SafeDict(dict):
         return "{" + key + "}"
 
 
+def safe_format(text: str, tokens: SafeDict) -> str:
+    """``format_map`` that never takes the render down. ``SafeDict`` keeps
+    unknown ``{tokens}`` visible, but a stray ``{`` or a malformed spec in the
+    GM's JSON (or an officer's ``/recruit message``) still raises — fall back
+    to the raw text so the board renders it verbatim instead of going stale."""
+    try:
+        return text.format_map(tokens)
+    except (ValueError, LookupError, AttributeError, TypeError):
+        return text
+
+
 async def live_tokens(db, config) -> dict[str, str]:
     """The live ``{token}`` values shared by the managed-prose boards
     (Rules & Info here, Recruitment in ``recruitment.py``)."""
@@ -57,7 +68,7 @@ class RulesInfoBoard(Board):
         material: list[str] = []  # the substituted text, for the fingerprint
         for s in sections:
             heading = brand.sanitize(str(s.get("heading") or "")).strip()
-            body = brand.sanitize(str(s.get("body") or "").format_map(tokens))
+            body = brand.sanitize(safe_format(str(s.get("body") or ""), tokens))
             if not body:
                 continue
             blocks.append(f"**{heading}**\n{body}" if heading else body)
