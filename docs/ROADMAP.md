@@ -99,6 +99,12 @@ Every surface must clear this gate before deployment:
 |---------|--------|-------|-----------|
 | **LFG intent feeds** | WoWProgress + Raider.IO recruitment endpoints | Two pull `FeedSource`s for recruitment intent (names vetted by scorer); `scout_leads` lifecycle table | Raised hands ingested, vetted, cached |
 | **Recruitment board** | `RECRUIT_ROLES_OPEN` + ilvl floor (config); mgmt-only channel | Board: open slots × fresh, un-contacted leads (ranked above cold); officer slash commands mark state | Listings dump becomes one curated board |
+
+> ✅ Shipped early (June 2026): the *public-facing* Recruitment board ("We're
+> Looking", `boards/recruitment.py` + `/recruit` commands, per
+> [`sticky-posts-spec.md`](sticky-posts-spec.md) Board 7) — officer-configured
+> open slots, trial rules and pitch. The leads-driven officer board above
+> (scout_leads lifecycle) is still planned.
 | **`/recruit` commands** | (scorer + `scout_leads`) | `/recruit` command over lead lifecycle | Officers act on leads from Discord |
 
 ---

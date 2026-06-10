@@ -28,6 +28,7 @@ _BOARD_NAMES = {
     "guides": "Guides & Resources",
     "rules_info": "Rules & Info",
     "roster_pulse": "Roster Pulse",
+    "recruitment": "Recruitment",
 }
 _BOARD_CHOICES = [
     app_commands.Choice(name=_BOARD_NAMES.get(key, key), value=key) for key in REGISTRY

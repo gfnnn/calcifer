@@ -1158,6 +1158,33 @@ class Database:
         )
         await self.conn.commit()
 
+    # -- recruitment board state ----------------------------------------------
+
+    async def recruitment_state(self) -> dict:
+        """The officer-configured recruitment state ({} when never configured)."""
+        cur = await self.conn.execute(
+            "SELECT state_json FROM recruitment_config WHERE id = 1"
+        )
+        row = await cur.fetchone()
+        if row is None or not row["state_json"]:
+            return {}
+        try:
+            state = json.loads(row["state_json"])
+        except json.JSONDecodeError:
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    async def set_recruitment_state(self, state: dict) -> None:
+        """Replace the recruitment state (officer edits via /recruit)."""
+        await self.conn.execute(
+            "INSERT INTO recruitment_config (id, state_json, updated_at) "
+            "VALUES (1, ?, ?) "
+            "ON CONFLICT (id) DO UPDATE SET state_json = excluded.state_json, "
+            "updated_at = excluded.updated_at",
+            (json.dumps(state), now_iso()),
+        )
+        await self.conn.commit()
+
     # -- M+ affixes -------------------------------------------------------------
 
     async def upsert_affix_week(

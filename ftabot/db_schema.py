@@ -344,6 +344,15 @@ CREATE TABLE IF NOT EXISTS feed_subscriptions (
     subscribed_at   TEXT DEFAULT (datetime('now', 'utc')),
     PRIMARY KEY (discord_user_id, source)
 );
+
+-- Recruitment board: officer-configured state (open slots per role, trial
+-- rules, pitch override) kept as one JSON document.  Edited via the /recruit
+-- commands; the recruitment board renders from it on every refresh.
+CREATE TABLE IF NOT EXISTS recruitment_config (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    state_json TEXT,
+    updated_at TEXT
+);
 """
 
 class ColumnOwner(Enum):

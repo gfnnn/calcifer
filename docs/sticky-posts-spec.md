@@ -81,7 +81,7 @@ Every sticky post has:
 | 4 | **Guides & Resources** | Guild | Reference, warm | ✅ Live | Polish: headers, emoji per link |
 | 5 | **Rules & Info** | Guild + Visitor | House values, live | ✅ Live | Warm up intro, section callouts |
 | 6 | **Roster Pulse** | Guild | Health check | ✅ Live | Add sparkline, flavor callouts |
-| 7 | **Recruitment** | Guild + Visitor | Direct, inviting | 🚧 Planned | Build renderer, detailed spec below |
+| 7 | **Recruitment** | Guild + Visitor | Direct, inviting | ✅ Live | `boards/recruitment.py` + `/recruit` commands |
 | 8 | **Roster** | Officers + Raid Leads | Reference | 🚧 Planned | Design pagination, access gates |
 | 9 | **Announcements** | Situational | Situational tone | 🚧 Planned | Design `/announce` command system |
 
@@ -678,14 +678,15 @@ Each command updates the DB; the board re-renders on next tick.
 
 #### **Current Implementation**
 
-🚧 **Status:** Designed, not yet coded  
-🚧 **Missing:** Renderer file (`boards/recruitment.py`), `/recruit` command group
+✅ **Status:** Shipped (June 2026)
 
-**What needs to be built:**
-1. `boards/recruitment.py` renderer
-2. `cogs/recruit.py` expansion for `/recruit slots/rule/message/...` commands
-3. `recruitment_config` table (or extend existing schema)
-4. Tests for the renderer and commands
+- `ftabot/boards/recruitment.py` — the renderer (board type `recruitment`)
+- `ftabot/cogs/recruit.py` — the `/recruit slots|ilvl|note|rule|message|show|reset` group
+- `recruitment_config` table — one JSON row of officer-configured state
+- `ftabot/content/recruitment.json` — GM-editable cultural prose (values, expectations, about, CTA, empty state) with live `{tokens}`
+- Tests: `tests/test_recruitment_board.py` + `tests/test_recruit_commands.py`
+
+The CTA ships without hard-coded officer mentions ("DM an officer, or say hello in #recruitment"); the GM can put `<@id>` mentions into `recruitment.json` (boards always post with `allowed_mentions=none`, so they render without pinging).
 
 ---
 
@@ -784,12 +785,11 @@ flavor = voice.flavour("attendance")  # Warn (Events or Pulse if thin)
 - Board 5: Rules & Info — Warm up copy, ensure live tokens work
 - Board 6: Roster Pulse — Add health score flavor, emoji, sparkline future
 
-🚧 **NEXT (ready to implement)**
-- Board 7: Recruitment — Build renderer + `/recruit` commands
-  - Fully specified above with exact copy, voice patterns, update triggers
-  - Officer control system designed
-  - Empty state copy ready
-  - Brand tone set (direct, inviting, culture-first)
+✅ **SHIPPED (June 2026)**
+- Board 7: Recruitment — renderer + `/recruit` commands live
+  - Built exactly to the spec above (copy, voice patterns, update triggers)
+  - Officer control via `/recruit slots|ilvl|note|rule|message|show|reset`
+  - Empty state + culture-first layout as designed
 
 📋 **PLANNED (defer to next phase)**
 - Board 8: Roster directory

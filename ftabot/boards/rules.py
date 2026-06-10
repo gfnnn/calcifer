@@ -21,14 +21,16 @@ from .base import Board, BoardPayload, register
 RULES_TYPE = "rules_info"
 
 
-class _SafeDict(dict):
+class SafeDict(dict):
     """Leaves an unknown ``{token}`` visible instead of raising KeyError."""
 
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
 
 
-async def _live_tokens(db, config) -> dict[str, str]:
+async def live_tokens(db, config) -> dict[str, str]:
+    """The live ``{token}`` values shared by the managed-prose boards
+    (Rules & Info here, Recruitment in ``recruitment.py``)."""
     members = await db.all_members()
     rate = metrics.activity_rate(members, window_days=config.activity_window_days)
     progression, _ = metrics.guild_progression(members)
@@ -50,7 +52,7 @@ class RulesInfoBoard(Board):
         if not sections:
             return None
 
-        tokens = _SafeDict(await _live_tokens(db, config))
+        tokens = SafeDict(await live_tokens(db, config))
         blocks: list[str] = []
         material: list[str] = []  # the substituted text, for the fingerprint
         for s in sections:
