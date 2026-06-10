@@ -177,8 +177,10 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   payload`, offline-tested like `metrics.py`, and self-register into `REGISTRY` on
   import. Current boards: `hot20` (Calcifer's Hot 20 M+ leaderboard), `news`
   (News Highlights), `events` (Weekly Events from Raid-Helper), `guides`
-  (Guides & Resources), `rules` (Rules & Info), `pulse` (Roster Pulse). The
-  `/board` cog and the `_board_loop`/`_score_loop` in `serve.py` drive them.
+  (Guides & Resources), `rules` (Rules & Info), `pulse` (Roster Pulse),
+  `recruitment` (We're Looking; officer-configured via `/recruit`, state in
+  `recruitment_config`). The `/board` cog and the `_board_loop`/`_score_loop`
+  in `serve.py` drive them.
 - **`posting.py`** — the **deny-by-default posting guardrail**. *Every* outbound
   message (boards and feed alerts) resolves its destination through a `PostGate`
   first: `POSTING_MODE=off` posts nothing, `test` redirects to `TEST_CHANNEL_ID`,
@@ -193,7 +195,8 @@ Raid-Helper webhooks) and posts branded Discord alerts.
 points); feed hub: `seen_items`, `feed_rules`, `feed_outbox`, `feed_mutes`,
 `feed_digest_queue`, `feed_subscriptions`, `news_items`, `mythic_affixes`,
 `realm_progress`, `calendar_events`, `mplus_bests`; boards: `boards`,
-`board_baselines`; and `schema_migrations` (migration bookkeeping).
+`board_baselines`, `recruitment_config` (officer-set recruitment board state);
+and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
 

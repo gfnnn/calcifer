@@ -1,0 +1,22 @@
+{
+  "title": "We're Looking",
+  "values_heading": "What we value in trials",
+  "values": [
+    "✓ You show up on time, prepared.",
+    "✓ You help guildmates.",
+    "✓ You're curious: ask questions, give feedback.",
+    "✓ You play your class well (no parsing contest required).",
+    "✗ We don't care for: drama, ego, silent disappears."
+  ],
+  "expectations_heading": "Trial expectations",
+  "expectations": [
+    "Your first 4 raids are a trial (typically a 2-week window).",
+    "Discord is required during raids (comms and callouts).",
+    "Loot: raiders > trial > social. Fair and transparent.",
+    "If it's not working, we talk about it early."
+  ],
+  "about_heading": "About us",
+  "about": "From the Ashes is a community-first guild on Hellfire (EU), {member_count} members strong and {active_pct} active, currently {progression}. Mythic prog on one end; casuals, alts and zero-pressure socials on the other. We're here to have fun and support each other.",
+  "cta": "Interested? DM an officer, or say hello in #recruitment first. We'd love to hear from you.",
+  "empty": "The guild's full for now. But we're always happy to hear from you. DM an officer if you're interested; we rotate trials seasonally."
+}

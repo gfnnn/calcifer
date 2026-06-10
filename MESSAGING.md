@@ -122,7 +122,7 @@ More examples in `docs/voice-usage-examples.md`.
 | **Guides** | `board_signoff` | none | Hand-curated reference, neutral |
 | **Rules** | `board_signoff` | none | House rules, no flavor |
 | **Pulse** | `board_signoff` | `success` if healthy | Guild health, measured |
-| **Recruitment** | recruiting flavor | always | Direct CTA, exciting |
+| **Recruitment** | `board_signoff` | `recruiting` (or `empty_recruiting` when full) | Direct CTA, culture-first |
 | **Announcements** | situational | always | Varied per announcement type |
 
 ---
@@ -218,7 +218,7 @@ See `tests/test_brand.py` for the full suite.
 
 The voice system is live. Next:
 
-1. **Implement recruitment board** — see `sticky-posts-spec.md` §4c for the detailed spec
+1. ~~**Implement recruitment board**~~ — ✅ shipped: `boards/recruitment.py` + `/recruit` commands (spec in `sticky-posts-spec.md`)
 2. **Roll out new boards** — roster, loot queue, announcements (specs in `sticky-posts-spec.md`)
 3. **Command messaging** — standardize slash command replies (thinking → work → result)
 4. **Digest mode flavor** — weekly roundup voice for feeds

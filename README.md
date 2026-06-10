@@ -145,6 +145,7 @@ switch to the richer WoW Audit data set.
 | `/setteam <name> [team]` | Assign a character to a raid team. |
 | `/setofficer <name> [role]` | Set/clear a character's officer responsibility. |
 | `/scout [wow_class]` | **Recruitment scout**: find roster upgrades for weak slots (like-for-like by class) from Warcraft Logs + Raider.IO. |
+| `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
 | `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards**: create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
@@ -178,7 +179,7 @@ poll of each source primes silently, so there's no history dump.
 ## Living boards & the posting guardrail
 
 **Living boards** are bot-owned messages that re-render from the database on an
-interval and edit themselves in place (never re-post). Two have shipped:
+interval and edit themselves in place (never re-post). The shipped boards:
 
 - **Calcifer's Hot 20** — the guild's top-20 Mythic+ leaderboard with weekly
   rank movement.
@@ -194,6 +195,12 @@ interval and edit themselves in place (never re-post). Two have shipped:
   keeps current. Their content is GM-editable JSON in
   [`ftabot/content/`](ftabot/content/); Rules & Info carries live `{tokens}`
   (progression, member count, recruiting) so its facts never drift stale.
+- **Roster Pulse** — the guild's heartbeat: member count, activity, readiness
+  and composition at a glance.
+- **Recruitment ("We're Looking")** — the guild's open front door: open slots
+  per role (count, ilvl floor, note), the trial rules, and a live-token pitch.
+  Officers configure it from Discord with the `/recruit` commands; the cultural
+  prose is GM-editable in [`ftabot/content/recruitment.json`](ftabot/content/recruitment.json).
 
 Create one with `/board create`, refresh on a schedule with
 `BOARD_REFRESH_MINUTES`, and keep M+ scores current with `SCORE_REFRESH_MINUTES`
