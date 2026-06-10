@@ -100,6 +100,15 @@ async def test_rule_add_rejects_blank(db):
     assert await db.recruitment_state() == {}
 
 
+async def test_rule_remove_last_rule_warns_about_defaults(db):
+    cog = _cog(db)
+    await RecruitCog.rule_add.callback(cog, _officer(), "Only rule.")
+    it = _officer()
+    await RecruitCog.rule_remove.callback(cog, it, 1)
+    assert "bundled default" in it.response.content
+    assert (await db.recruitment_state())["rules"] == []
+
+
 async def test_rule_remove_out_of_range(db):
     cog = _cog(db)
     it = _officer()
@@ -132,9 +141,11 @@ async def test_show_previews_the_board_embed(db):
     await RecruitCog.slots.callback(cog, _officer(), _TANK, 1)
     it = _officer()
     await RecruitCog.show.callback(cog, it)
-    assert isinstance(it.response.embed, discord.Embed)
-    assert it.response.ephemeral is True
-    assert "TANK" in it.response.embed.description
+    # Render scans the roster, so the command defers and answers via followup.
+    assert it.response.deferred is True
+    assert isinstance(it.followup.embed, discord.Embed)
+    assert it.followup.ephemeral is True
+    assert "TANK" in it.followup.embed.description
 
 
 async def test_reset_clears_everything(db):

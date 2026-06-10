@@ -173,8 +173,12 @@ class RecruitCog(commands.Cog):
             return
         removed = rules.pop(number - 1)
         await self.bot.db.set_recruitment_state(state)
+        # With no officer rules left, the board falls back to the bundled
+        # defaults; say so, or the officer thinks the section just emptied.
+        fallback = "" if rules else " The board now shows the bundled default expectations."
         await interaction.response.send_message(
-            f"Removed rule **#{number}**: {removed}\n{_BOARD_NOTE}", ephemeral=True
+            f"Removed rule **#{number}**: {removed}{fallback}\n{_BOARD_NOTE}",
+            ephemeral=True,
         )
 
     @recruit_rule.command(name="list", description="List the configured trial rules.")
@@ -213,14 +217,15 @@ class RecruitCog(commands.Cog):
     async def show(self, interaction: discord.Interaction) -> None:
         if not await self._guard(interaction):
             return
+        # Rendering scans the whole roster for the live tokens; defer so a
+        # slow DB can't blow the 3-second interaction deadline.
+        await interaction.response.defer(ephemeral=True)
         board = REGISTRY[RECRUITMENT_TYPE]
         payload = await board.render(self.bot.db, self.cfg, {})
         if payload is None or payload.embed is None:
-            await interaction.response.send_message(
-                "Nothing to preview yet.", ephemeral=True
-            )
+            await interaction.followup.send("Nothing to preview yet.", ephemeral=True)
             return
-        await interaction.response.send_message(embed=payload.embed, ephemeral=True)
+        await interaction.followup.send(embed=payload.embed, ephemeral=True)
 
     @recruit_cfg.command(
         name="reset", description="Clear all officer-set recruitment config (slots, rules, pitch)."

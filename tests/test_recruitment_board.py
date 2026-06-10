@@ -143,3 +143,29 @@ async def test_garbage_slot_counts_are_treated_as_closed(db):
     await db.set_recruitment_state({"slots": {"tank": {"open": "lots"}}})
     payload = await RecruitmentBoard().render(db, Config(), {"content": _CONTENT})
     assert "The guild's full for now" in payload.embed.description
+
+
+async def test_stray_brace_in_officer_message_renders_verbatim(db):
+    # str.format_map raises ValueError on an unmatched brace; the board must
+    # render the raw text instead of going stale.
+    await db.set_recruitment_state(
+        {"slots": {"tank": {"open": 1}}, "message": "100% recruiting {"}
+    )
+    payload = await RecruitmentBoard().render(db, Config(), {"content": _CONTENT})
+    assert "100% recruiting {" in payload.embed.description
+
+
+async def test_garbage_ilvl_is_hidden_not_fatal(db):
+    await db.set_recruitment_state({"slots": {"tank": {"open": 1, "ilvl": "high"}}})
+    payload = await RecruitmentBoard().render(db, Config(), {"content": _CONTENT})
+    desc = payload.embed.description
+    assert "**TANK**: 1 slot open" in desc
+    assert "ilvl" not in desc
+
+
+async def test_description_is_clamped_to_discord_limit(db):
+    await db.set_recruitment_state(
+        {"slots": {"tank": {"open": 1}}, "rules": ["x" * 200 for _ in range(50)]}
+    )
+    payload = await RecruitmentBoard().render(db, Config(), {"content": _CONTENT})
+    assert len(payload.embed.description) <= 4096

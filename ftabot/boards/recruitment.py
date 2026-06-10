@@ -18,7 +18,7 @@ import discord
 
 from .. import brand, content
 from .base import Board, BoardPayload, register
-from .rules import SafeDict, live_tokens
+from .rules import SafeDict, live_tokens, safe_format
 
 RECRUITMENT_TYPE = "recruitment"
 
@@ -35,9 +35,12 @@ def _slot_line(role: str, slot: dict) -> str | None:
     if open_n <= 0:
         return None
     bits = [f"{open_n} slot{'s' if open_n != 1 else ''} open"]
-    ilvl = slot.get("ilvl")
-    if ilvl:
-        bits.append(f"ilvl {int(ilvl)}+")
+    try:
+        ilvl = int(slot.get("ilvl") or 0)
+    except (TypeError, ValueError):
+        ilvl = 0
+    if ilvl > 0:
+        bits.append(f"ilvl {ilvl}+")
     note = brand.sanitize(str(slot.get("note") or "")).strip()
     if note:
         bits.append(note)
@@ -59,7 +62,7 @@ class RecruitmentBoard(Board):
         ]
 
         about = brand.sanitize(
-            str(state.get("message") or data.get("about") or "").format_map(tokens)
+            safe_format(str(state.get("message") or data.get("about") or ""), tokens)
         ).strip()
         about_heading = brand.sanitize(str(data.get("about_heading") or "About us"))
 
@@ -87,32 +90,37 @@ class RecruitmentBoard(Board):
             if about:
                 blocks.append(f"**{about_heading}**\n{about}")
 
-            cta = brand.sanitize(str(data.get("cta") or "").format_map(tokens)).strip()
+            cta = brand.sanitize(safe_format(str(data.get("cta") or ""), tokens)).strip()
             if cta:
                 blocks.append(cta)
         else:
             # No openings: stay warm, keep the pitch visible.
-            empty = brand.sanitize(str(data.get("empty") or "").format_map(tokens)).strip()
+            empty = brand.sanitize(safe_format(str(data.get("empty") or ""), tokens)).strip()
             blocks.append(empty or "The guild's full for now. Always happy to hear from you.")
             if about:
                 blocks.append(f"**{about_heading}**\n{about}")
 
-        # Flavour is garnish only: excluded from the fingerprint so a random
-        # line never forces a re-edit of an otherwise unchanged board.
+        # Flavour is garnish only: the fingerprint is taken before it so a
+        # random line never forces a re-edit of an otherwise unchanged board.
+        material = list(blocks)
         flavour = voice.flavour("recruiting" if slot_lines else "empty_recruiting")
         if flavour:
             blocks.append(f"*{flavour}*")
 
         title = brand.sanitize(str(data.get("title") or "We're Looking"))
         signoff = voice.line("board_signoff") or "Kept warm by Calcifer."
+        # The officer-entered rules/notes/pitch are unbounded; stay inside
+        # Discord's 4096-char description limit rather than fail the edit.
+        description = "\n\n".join(blocks)
+        if len(description) > 4096:
+            description = description[:4095] + "…"
         embed = discord.Embed(
             title=f"{brand.icon('recruit')} {title}",
-            description="\n\n".join(blocks),
+            description=description,
             color=brand.GUILD_EMBER,
         )
         embed.set_footer(text=brand.sanitize(signoff))
 
-        material = [b for b in blocks if not flavour or b != f"*{flavour}*"]
         fingerprint = hashlib.sha1(
             json.dumps([title, material], ensure_ascii=False).encode()
         ).hexdigest()
