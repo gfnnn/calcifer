@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from ..boards import REGISTRY, BotBoardMessenger, refresh_board
 from ..posting import PostGate, PostingMode
-from ._guards import require_admin
+from ._guards import require_gm_or_discord_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
@@ -44,8 +44,8 @@ class BoardsCog(commands.Cog):
         self.bot = bot
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
-        return await require_admin(
-            interaction, self.bot.config.admin_role_name, action="manage boards"
+        return await require_gm_or_discord_admin(
+            interaction, self.bot.config.gm_discord_id, action="manage boards"
         )
 
     @board.command(name="create", description="Register a board in a channel (starts sandboxed).")

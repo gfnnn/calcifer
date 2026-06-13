@@ -245,6 +245,11 @@ def _fake_wowaudit():
                      "difficulty": "Mythic",
                      "signups": [("Alpha", "present"), ("Bravo", "absent")]}]
 
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return {"date": "2026-06-10", "time": "20:00", "start": None,
+                    "instance": "The Voidspire", "difficulty": "Mythic",
+                    "signups": [("Alpha", "present"), ("Bravo", "tentative")]}
+
     return _FakeWA
 
 
@@ -325,6 +330,11 @@ async def test_sync_full_overlay_persists_everything(db, monkeypatch):
 
     wishlist = await db.get_wishlist("Alpha")
     assert [w.item_name for w in wishlist] == ["Ashen Blade"]
+
+    # The next raid's sign-ups are stored for the team-chemistry roster view.
+    state = await db.roster_signups()
+    assert state["raid"]["instance"] == "The Voidspire"
+    assert {s["name"] for s in state["signups"]} == {"Alpha", "Bravo"}
 
 
 async def test_sync_wowaudit_overlay_failure_is_non_fatal(db, monkeypatch):

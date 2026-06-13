@@ -92,6 +92,7 @@ async def sync_guild(
     #    identifies the raiders so we can prioritise their enrichment.
     wishlists: list = []
     attendance: list = []
+    roster_state: dict | None = None
     raiders = 0
     raider_names: set[str] = set()
     if config.wowaudit_enabled:
@@ -107,6 +108,9 @@ async def sync_guild(
                 vault = await wa.vault_slots()
                 wishlists = await wa.wishlists()
                 attendance = await wa.recent_attendance()
+                roster_state = await wa.upcoming_raid_signups(
+                    tz=config.raid_timezone
+                )
 
             raiders = len(wa_members)
             for wm in wa_members:
@@ -229,6 +233,24 @@ async def sync_guild(
         for char_name, status in event.get("signups", []):
             await db.add_attendance(event_id, char_name, status=status or "present")
         attendance_events += 1
+
+    # 5c: persist the next raid's sign-ups (the team-chemistry roster source).
+    if roster_state is not None:
+        await db.set_roster_signups(
+            {
+                "raid": {
+                    "date": roster_state.get("date"),
+                    "time": roster_state.get("time"),
+                    "start": roster_state.get("start"),
+                    "instance": roster_state.get("instance"),
+                    "difficulty": roster_state.get("difficulty"),
+                },
+                "signups": [
+                    {"name": name, "status": status}
+                    for name, status in roster_state.get("signups", [])
+                ],
+            }
+        )
 
     # 6: snapshot the guild for trend lines. Pass the previous snapshot's member
     #    count so the stored health_score carries the retention component the live

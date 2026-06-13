@@ -5,7 +5,19 @@ from __future__ import annotations
 import discord
 
 from . import brand
-from .models import Member, class_color
+from .models import MAX_LEVEL, Member, class_color
+
+# Pretty names for the current tier's raid slugs (Raider.IO keys raid_progression
+# by slug). Anything not listed falls back to a title-cased slug, so a new raid
+# still renders sensibly without a code change.
+RAID_DISPLAY_NAMES: dict[str, str] = {
+    "the-voidspire": "The Voidspire",
+    "voidspire": "The Voidspire",
+    "dreamrift": "Dreamrift",
+    "the-dreamrift": "Dreamrift",
+    "march-of-quel-dorei": "March of Quel'Dorei",
+    "march-of-queldorei": "March of Quel'Dorei",
+}
 
 # Discord embed limits — interpolated roster/officer data (notes, raid strings,
 # user-supplied search terms) must be clamped so a long value never raises an
@@ -39,11 +51,43 @@ def _fmt(value: object, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
-def member_embed(member: Member, *, include_private: bool = False) -> discord.Embed:
+def _raid_progress_lines(progression: dict) -> list[str]:
+    """One line per raid from a Raider.IO ``raid_progression`` dict.
+
+    Raider.IO orders the current tier first, so the season's raids (Voidspire,
+    Dreamrift, March) render in tier order. Each line prefers the API's own
+    ``summary`` and falls back to an N/H/M breakdown.
+    """
+    lines: list[str] = []
+    for slug, raid in progression.items():
+        if not isinstance(raid, dict):
+            continue
+        title = RAID_DISPLAY_NAMES.get(slug) or slug.replace("-", " ").title()
+        summary = raid.get("summary")
+        if summary:
+            lines.append(f"**{title}**: {summary}")
+            continue
+        total = raid.get("total_bosses", 0)
+        n = raid.get("normal_bosses_killed", 0)
+        h = raid.get("heroic_bosses_killed", 0)
+        m = raid.get("mythic_bosses_killed", 0)
+        lines.append(f"**{title}**: {n}/{total} N, {h}/{total} H, {m}/{total} M")
+    return lines
+
+
+def member_embed(
+    member: Member,
+    *,
+    include_private: bool = False,
+    rank_name: str | None = None,
+    max_level: int = MAX_LEVEL,
+) -> discord.Embed:
     """A detailed card for a single character.
 
     ``include_private`` reveals officer-owned fields (notes); leave it off for
     surfaces any guild member can reach so manual notes don't leak publicly.
+    ``rank_name`` is the guild's in-game rank name (from GRM identity) shown in
+    place of the raw rank number when known.
     """
     spec_class = " ".join(
         p for p in (member.active_spec, member.class_name) if p
@@ -57,19 +101,33 @@ def member_embed(member: Member, *, include_private: bool = False) -> discord.Em
     if member.thumbnail_url:
         embed.set_thumbnail(url=member.thumbnail_url)
 
-    _field(embed, "Role", _fmt(member.role))
+    # Role as a glyph rather than the word (falls back to the word if no icon).
+    role_glyph = brand.icon((member.role or "").lower()) or member.role
+    _field(embed, "Role", role_glyph or "–")
     _field(embed, "Item Level", _fmt(member.item_level))
-    _field(embed, "M+ Score", _fmt(member.mythic_plus_score))
-
-    if member.guild_rank is not None:
-        _field(embed, "Guild Rank", _fmt(member.guild_rank))
-    if member.race:
-        _field(embed, "Race", member.race)
-    if member.level is not None:
+    # Level and M+ score share one slot: a sub-cap character is still levelling
+    # (and has no current-season M+ score), so show the level; at the cap show
+    # the M+ score instead, and only when they actually have one.
+    if member.level is not None and member.level < max_level:
         _field(embed, "Level", _fmt(member.level))
+    elif member.mythic_plus_score:
+        _field(embed, "M+ Score", _fmt(member.mythic_plus_score))
+
+    rank_display = rank_name or (
+        _fmt(member.guild_rank) if member.guild_rank is not None else None
+    )
+    if rank_display:
+        _field(embed, "Guild Rank", rank_display)
     if member.best_parse_avg is not None:
         _field(embed, "Best Parse Avg", _fmt(member.best_parse_avg))
-    if member.raid_progression:
+
+    progression = (member.details or {}).get("raid_progression")
+    raid_lines = (
+        _raid_progress_lines(progression) if isinstance(progression, dict) else []
+    )
+    if raid_lines:
+        _field(embed, "Raid Progress", "\n".join(raid_lines), inline=False)
+    elif member.raid_progression:
         _field(embed, "Raid", member.raid_progression, inline=False)
 
     if member.discord_id:

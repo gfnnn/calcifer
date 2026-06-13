@@ -50,7 +50,7 @@ async def test_board_create_denied_for_non_admin(db):
     it = _Interaction(perms=_Perms())  # plain user
     await BoardsCog.create.callback(cog, it, _choice("hot20"), _Channel(123))
     assert it.response.ephemeral is True
-    assert "Officer" in it.response.content
+    assert "Guild Master" in it.response.content
     assert await db.boards(enabled_only=False) == []  # nothing registered
 
 
@@ -182,7 +182,7 @@ async def test_board_remove(db):
 
 
 async def test_board_commands_gated(db):
-    """Every board command bounces a non-officer before doing any work."""
+    """Every board command bounces a non-(GM/Discord-admin) before doing work."""
     cog = BoardsCog(_Bot(db, _cfg()))
     board_id = await db.add_board("hot20", "123")
     for invoke in (
@@ -195,7 +195,7 @@ async def test_board_commands_gated(db):
         it = _Interaction(perms=_Perms())
         await invoke(it)
         assert it.response.ephemeral is True
-        assert "Officer" in it.response.content
+        assert "Guild Master" in it.response.content
     # The denied refresh/promote/etc left the board untouched.
     assert (await db.get_board(board_id))["promoted"] is False
 

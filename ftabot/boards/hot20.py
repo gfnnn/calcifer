@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 
 import discord
 
@@ -19,23 +19,41 @@ from .base import Board, BoardPayload, register
 
 HOT20_TYPE = "hot20"
 _TOP_N = 20
-_ROLL_AFTER_DAYS = 7
+
+# EU weekly reset: Wednesday 07:00 server time (CE(S)T). The board's movement
+# arrows mean "since the last weekly reset", so the baseline rolls forward the
+# first time it is rendered after a reset boundary has passed.
+_RESET_WEEKDAY = 2  # Monday=0 ... Wednesday=2
+_RESET_HOUR = 7
 
 
 def _entity_key(member) -> str:
     return f"{member.character_name}|{member.realm_slug}|{member.region}".lower()
 
 
-def _age_days(iso: str | None) -> float:
+def _parse_dt(iso: str | None) -> datetime | None:
     if not iso:
-        return 1e9
+        return None
     try:
-        then = datetime.fromisoformat(iso)
+        dt = datetime.fromisoformat(iso)
     except ValueError:
-        return 1e9
-    if then.tzinfo is None:
-        then = then.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - then).total_seconds() / 86400.0
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def weekly_reset_before(now: datetime, tz: tzinfo) -> datetime:
+    """The most recent EU weekly-reset instant (Wed 07:00 local) at/before ``now``.
+
+    Returned in UTC so it compares directly against the stored baseline
+    timestamp. Pure and timezone-aware (DST-correct via the IANA ``tz``).
+    """
+    local = now.astimezone(tz)
+    reset = local.replace(
+        hour=_RESET_HOUR, minute=0, second=0, microsecond=0
+    ) - timedelta(days=(local.weekday() - _RESET_WEEKDAY) % 7)
+    if reset > local:  # before this week's reset, so the boundary is last week's
+        reset -= timedelta(days=7)
+    return reset.astimezone(timezone.utc)
 
 
 def _movement(prev_rank: int | None, cur_rank: int) -> str:
@@ -131,9 +149,12 @@ class Hot20Board(Board):
             json.dumps(material, ensure_ascii=False).encode()
         ).hexdigest()
 
-        # Weekly reset: roll the baseline forward about once a week, so the arrows
-        # always mean "movement since the last reset" (skip if we just seeded it).
-        if not seeded_now and _age_days(captured_at) >= _ROLL_AFTER_DAYS:
+        # Weekly reset: roll the baseline forward the first render after the EU
+        # Wednesday reset, so the arrows always mean "movement since the last
+        # reset" (skip if we just seeded it this render).
+        captured_dt = _parse_dt(captured_at)
+        last_reset = weekly_reset_before(datetime.now(timezone.utc), config.raid_timezone)
+        if not seeded_now and (captured_dt is None or captured_dt < last_reset):
             await db.roll_board_baseline(HOT20_TYPE, ranking)
 
         return BoardPayload(fingerprint=fingerprint, embed=embed)

@@ -354,6 +354,17 @@ CREATE TABLE IF NOT EXISTS recruitment_config (
     updated_at TEXT
 );
 
+-- Team chemistry roster: the next raid's WoW Audit sign-ups, kept as one JSON
+-- document {raid: {...}, signups: [{name, status}], fetched_at}.  Replaced
+-- wholesale by each sync; /roster renders the grouped (confirmed/benched/absent)
+-- view from it.  A new table (no migration needed: connect() runs the schema
+-- with IF NOT EXISTS on every open, so existing databases gain it on upgrade).
+CREATE TABLE IF NOT EXISTS roster_signups (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    state_json TEXT,
+    updated_at TEXT
+);
+
 -- Sticky pages: multi-message, GM-authored markdown pages (Rules & Info etc.)
 -- placed with /page post.  channel_id is the officer-requested destination;
 -- posted_channel_id + message_ids_json record where the live copy actually

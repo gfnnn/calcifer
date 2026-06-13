@@ -15,7 +15,7 @@ from ftabot.cogs.recruit import RecruitCog
 from ftabot.cogs.reports import ReportsCog
 from ftabot.models import LootEntry, WishlistItem
 
-from .test_cogs import _Bot, _cfg, _Interaction, _Perms, _seed
+from .test_cogs import _Bot, _cfg, _Interaction, _Perms, _seed, _team_caller
 
 # --- reports cog: populated render paths -------------------------------------
 
@@ -48,6 +48,7 @@ async def test_loot_for_a_player_with_history(db):
                       response="BiS", boss="Council", awarded_at="2026-05-01T20:00:00+00:00"),
         ]
     )
+    await _team_caller(db)
     cog = ReportsCog(_Bot(db, _cfg()))
     it = _Interaction()
     await ReportsCog.loot.callback(cog, it, player="Ashbringer")
@@ -64,6 +65,7 @@ async def test_loot_fairness_overview(db):
             LootEntry("Emberlyn", item_id=3, awarded_at="2026-05-08T20:00:00+00:00"),
         ]
     )
+    await _team_caller(db)
     cog = ReportsCog(_Bot(db, _cfg()))
     it = _Interaction()
     await ReportsCog.loot.callback(cog, it, player=None)  # no player => overview
@@ -83,6 +85,7 @@ async def test_wishlist_with_items(db):
                          obtained=True, boss="Boss"),
         ],
     )
+    await _team_caller(db)
     cog = ReportsCog(_Bot(db, _cfg()))
     it = _Interaction()
     await ReportsCog.wishlist.callback(cog, it, player="Ashbringer")
@@ -103,6 +106,7 @@ async def test_lootpriority_with_candidates(db):
         [WishlistItem("Emberlyn", item_id=99, item_name="Shiny Trinket",
                       is_bis=False, upgrade_pct=2.0)],
     )
+    await _team_caller(db)
     cog = ReportsCog(_Bot(db, _cfg()))
     it = _Interaction()
     await ReportsCog.lootpriority.callback(cog, it, item="Shiny")
@@ -120,8 +124,8 @@ async def test_trends_with_history(db):
         dict(member_count=12, active_count=11, health_score=78,
              avg_item_level=628, avg_mythic_plus=2600)
     )
-    cog = ReportsCog(_Bot(db, _cfg()))
-    it = _Interaction()
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=42)))
+    it = _Interaction()  # default user id 42 == GM
     await ReportsCog.trends.callback(cog, it)
     assert isinstance(it.followup.embed, discord.Embed)
     assert "Members" in it.followup.embed.description

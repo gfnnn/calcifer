@@ -120,19 +120,17 @@ switch to the richer WoW Audit data set.
 
 | Command | Description |
 | --- | --- |
-| `/member <name> [realm]` | Full profile card for a character. |
-| `/roster [sort]` | List the roster (by M+ score, ilvl, parse, rank, or name). |
-| `/search [class] [role] [name]` | Filter the roster. |
-| `/alts <name>` | Show a main's alts. |
+| `/member <name> [realm]` | Full profile card for a character (role icons, class/spec, rank name, the season's raids; level for sub-cap characters, M+ score at cap). |
+| `/roster` | The team's sign-up roster for the next raid, grouped confirmed / benched / absent (from WoW Audit). |
 | `/whois <@user>` | Characters linked to a Discord user. |
-| `/me` | Your own linked characters at a glance (ilvl / M+ / vault / wishlist). |
-| `/stats` | Roster summary (counts by role/class, average M+). |
+| `/me` | Your own team characters at a glance (ilvl / M+ / vault / wishlist). *Team roster only.* |
+| `/stats` | Team roster summary (counts by role/class, average M+). *Team roster only.* |
 | `/gmreport` | **GM view**: guild health score, officers, composition, buff coverage. |
 | `/raidcheck [team]` | **Raid Leader view**: readiness board with per-raider flags. |
-| `/loot [player]` | Loot history for a player, or the fairness overview. |
-| `/wishlist <player>` | A player's BiS wishlist progress. |
-| `/lootpriority <item>` | Advisory loot-council priority for a dropped item. |
-| `/trends` | Guild trends (health, members, ilvl, M+) over recent snapshots. |
+| `/loot [player]` | Loot history for a team player, or the team fairness overview. *Team roster only.* |
+| `/wishlist <player>` | A team player's BiS wishlist progress. *Team roster only.* |
+| `/lootpriority <item>` | Advisory loot-council priority for a dropped item. *Team roster only.* |
+| `/trends` | Guild trends (health, members, ilvl, M+) over recent snapshots. *GM only.* |
 
 **Officers** (the `ADMIN_ROLE_NAME` role or *Manage Server* permission):
 
@@ -147,7 +145,7 @@ switch to the richer WoW Audit data set.
 | `/scout [wow_class]` | **Recruitment scout**: find roster upgrades for weak slots (like-for-like by class) from Warcraft Logs + Raider.IO. |
 | `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
-| `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards**: create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
+| `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
 | `/page post\|list\|refresh\|remove` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy is edited in the dashboard's **Content** section. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
 

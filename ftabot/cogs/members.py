@@ -8,20 +8,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..models import CLASSES, DEFAULT_EMBED_COLOR, ROLES
-from ..ui import me_card, member_embed, roster_embed
-from ._guards import _is_admin
+from .. import brand, views
+from ..models import DEFAULT_EMBED_COLOR
+from ..ui import clip, me_card, member_embed, roster_embed
+from ._guards import _is_admin, require_team_member
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
-
-_SORT_CHOICES = [
-    app_commands.Choice(name="Mythic+ score", value="mythic_plus_score"),
-    app_commands.Choice(name="Item level", value="item_level"),
-    app_commands.Choice(name="Best parse avg", value="best_parse_avg"),
-    app_commands.Choice(name="Guild rank", value="guild_rank"),
-    app_commands.Choice(name="Name", value="name"),
-]
 
 
 class MembersCog(commands.Cog):
@@ -52,100 +45,66 @@ class MembersCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        # The in-game rank name (when GRM identity has been ingested) is shown in
+        # place of the raw rank number.
+        identity = await self.bot.db.get_identity(
+            m.character_name, m.realm_slug, m.region
+        )
+        rank_name = identity.get("rank_name") if identity else None
         officer = _is_admin(interaction, self.cfg.admin_role_name)
         await interaction.response.send_message(
-            embed=member_embed(m, include_private=officer)
+            embed=member_embed(m, include_private=officer, rank_name=rank_name)
         )
 
-    @app_commands.command(name="roster", description="List the guild roster.")
-    @app_commands.describe(sort="How to order the list")
-    @app_commands.choices(sort=_SORT_CHOICES)
-    async def roster(
-        self,
-        interaction: discord.Interaction,
-        sort: app_commands.Choice[str] | None = None,
-    ) -> None:
-        order = sort.value if sort else "mythic_plus_score"
-        members = await self.bot.db.all_members(order_by=order)
-        label = sort.name if sort else "Mythic+ score"
-        embed = roster_embed(
-            members,
-            title=f"{self.cfg.guild_name} · roster (by {label})",
-            color=DEFAULT_EMBED_COLOR,
-        )
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name="search", description="Search members by class/role/name.")
-    @app_commands.describe(
-        wow_class="Filter by class",
-        role="Filter by role",
-        name="Filter by (partial) character name",
+    @app_commands.command(
+        name="roster", description="The team's sign-up roster for the next raid."
     )
-    @app_commands.choices(
-        wow_class=[app_commands.Choice(name=c, value=c) for c in CLASSES],
-        role=[app_commands.Choice(name=r.title(), value=r) for r in ROLES],
-    )
-    async def search(
-        self,
-        interaction: discord.Interaction,
-        wow_class: app_commands.Choice[str] | None = None,
-        role: app_commands.Choice[str] | None = None,
-        name: str | None = None,
-    ) -> None:
-        members = await self.bot.db.search_members(
-            name=name,
-            class_name=wow_class.value if wow_class else None,
-            role=role.value if role else None,
-        )
-        filters = ", ".join(
-            f for f in (
-                wow_class.value if wow_class else None,
-                role.name if role else None,
-                f'"{name}"' if name else None,
-            ) if f
-        ) or "all"
-        embed = roster_embed(
-            members,
-            title=f"Search results ({filters})",
-            color=DEFAULT_EMBED_COLOR,
-        )
-        await interaction.response.send_message(embed=embed)
-
-    @app_commands.command(name="alts", description="Show a member's alts.")
-    @app_commands.describe(name="Main character name")
-    async def alts(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        realm: str | None = None,
-    ) -> None:
-        realm = realm or self.cfg.guild_realm
-        main = await self.bot.db.get_member(name, realm, self.cfg.guild_region)
-        if main is None or main.id is None:
+    async def roster(self, interaction: discord.Interaction) -> None:
+        data = await views.roster_board(self.bot.db, self.cfg)
+        if not data["groups"]:
             await interaction.response.send_message(
-                f"No member named **{name}** on **{realm}**.", ephemeral=True
+                "No upcoming raid sign-ups yet. They appear once WoW Audit has "
+                "the next raid scheduled and the roster has synced.",
+                ephemeral=True,
             )
             return
-        alts = await self.bot.db.alts_of(main.id)
-        embed = roster_embed(
-            alts,
-            title=f"Alts of {main.character_name}",
-            color=DEFAULT_EMBED_COLOR,
-        )
+        raid = data["raid"]
+        title_bits = [b for b in (raid.get("instance"), raid.get("difficulty")) if b]
+        title = "Team roster · " + (" ".join(title_bits) if title_bits else "next raid")
+        embed = discord.Embed(title=clip(title, 256), color=DEFAULT_EMBED_COLOR)
+        if raid.get("date"):
+            when = raid["date"]
+            if raid.get("time"):
+                when += f" {raid['time']}"
+            embed.description = f"Next raid: {when}"
+        for bucket, rows in data["groups"].items():
+            lines = []
+            for r in rows:
+                glyph = brand.icon((r.get("role") or "").lower())
+                klass = r.get("class") or ""
+                tail = f" · {klass}" if klass else ""
+                lines.append(f"{glyph + ' ' if glyph else ''}**{r['name']}**{tail}")
+            embed.add_field(
+                name=f"{bucket} ({len(rows)})",
+                value=clip("\n".join(lines), 1024),
+                inline=False,
+            )
+        embed.set_footer(text=f"{data['count']} signed up.")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="me", description="Your linked characters at a glance.")
     async def me(self, interaction: discord.Interaction) -> None:
         members = await self.bot.db.search_members(discord_id=str(interaction.user.id))
-        if not members:
+        team = [m for m in members if m.raid_team]
+        if not team:
             await interaction.response.send_message(
-                "No characters are linked to you yet. Ask a Flamekeeper to link "
-                "your mains and alts, and your hearth will light up here.",
+                "No team characters are linked to you yet. `/me` is for the raid "
+                "team roster, so ask a Flamekeeper to link your raiding mains.",
                 ephemeral=True,
             )
             return
         await interaction.response.send_message(
-            embed=me_card(members, display_name=interaction.user.display_name),
+            embed=me_card(team, display_name=interaction.user.display_name),
             ephemeral=True,
         )
 
@@ -169,15 +128,16 @@ class MembersCog(commands.Cog):
         )
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="stats", description="Show guild roster statistics.")
+    @app_commands.command(name="stats", description="Show team roster statistics.")
     async def stats(self, interaction: discord.Interaction) -> None:
-        members = await self.bot.db.all_members()
-        total = len(members)
-        if total == 0:
-            await interaction.response.send_message(
-                "No members tracked yet. An officer can run `/sync`.", ephemeral=True
-            )
+        if not await require_team_member(
+            self.bot.db, interaction, action="see team stats"
+        ):
             return
+        # The gate guarantees the caller has a team character, so the roster is
+        # never empty here.
+        members = await self.bot.db.team_roster()
+        total = len(members)
 
         by_role: dict[str, int] = {}
         by_class: dict[str, int] = {}
@@ -189,10 +149,10 @@ class MembersCog(commands.Cog):
                 by_class[m.class_name] = by_class.get(m.class_name, 0) + 1
 
         embed = discord.Embed(
-            title=f"{self.cfg.guild_name} · statistics",
+            title=f"{self.cfg.guild_name} · team statistics",
             color=DEFAULT_EMBED_COLOR,
         )
-        embed.add_field(name="Members tracked", value=str(total))
+        embed.add_field(name="Team members", value=str(total))
         if scores:
             embed.add_field(name="Avg M+ score", value=f"{sum(scores) / len(scores):.0f}")
             embed.add_field(name="Top M+ score", value=f"{max(scores):.0f}")

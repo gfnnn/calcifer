@@ -96,16 +96,31 @@ class _Bot:
         self.config = config
 
 
-def _cfg():
+def _cfg(*, gm_discord_id=None):
     return Config(guild_name="From the Ashes", guild_realm="hellfire",
-                  guild_region="eu", admin_role_name="Officer")
+                  guild_region="eu", admin_role_name="Officer",
+                  gm_discord_id=gm_discord_id)
 
 
 async def _seed(db):
-    await db.upsert_synced(Member("Ashbringer", class_name="Paladin", role="TANK",
-                                  mythic_plus_score=3000, item_level=632))
-    await db.upsert_synced(Member("Emberlyn", class_name="Mage", role="DPS",
-                                  mythic_plus_score=3200, item_level=630))
+    """Seed two characters, both on the team-chemistry roster (raid_team set).
+
+    ``raid_team`` is a manual column, so it is written via ``set_raid_team``
+    after the sync upsert rather than on the Member.
+    """
+    aid = await db.upsert_synced(Member("Ashbringer", class_name="Paladin", role="TANK",
+                                        mythic_plus_score=3000, item_level=632))
+    eid = await db.upsert_synced(Member("Emberlyn", class_name="Mage", role="DPS",
+                                        mythic_plus_score=3200, item_level=630))
+    await db.set_raid_team(aid, "Cinder")
+    await db.set_raid_team(eid, "Cinder")
+
+
+async def _team_caller(db, user_id=42):
+    """Link the default interaction user to a team character so the team-gated
+    member commands let them through."""
+    m = await db.get_member("Ashbringer", "hellfire", "eu")
+    await db.set_discord_link(m.id, str(user_id))
 
 
 # --- admin gating (_is_admin) ----------------------------------------------
@@ -266,41 +281,57 @@ async def test_member_command_found_and_missing(db):
     assert "No member" in missing.response.content
 
 
-async def test_roster_and_search_render_embeds(db):
+async def test_roster_empty_then_signups(db):
     await _seed(db)
     cog = MembersCog(_Bot(db, _cfg()))
 
+    # No sign-ups synced yet -> friendly ephemeral nudge, no board.
+    empty_it = _Interaction()
+    await MembersCog.roster.callback(cog, empty_it)
+    assert empty_it.response.ephemeral is True
+    assert "No upcoming raid sign-ups" in empty_it.response.content
+
+    # With the next raid's sign-ups stored, the grouped board renders.
+    await db.set_roster_signups(
+        {
+            "raid": {"instance": "The Voidspire", "difficulty": "Mythic",
+                     "date": "2026-06-10", "time": "20:00"},
+            "signups": [
+                {"name": "Ashbringer", "status": "present"},
+                {"name": "Emberlyn", "status": "bench"},
+            ],
+        }
+    )
     roster_it = _Interaction()
-    await MembersCog.roster.callback(cog, roster_it, sort=None)
-    assert isinstance(roster_it.response.embed, discord.Embed)
+    await MembersCog.roster.callback(cog, roster_it)
+    embed = roster_it.response.embed
+    assert isinstance(embed, discord.Embed)
+    names = [f.name for f in embed.fields]
+    assert any("Confirmed" in n for n in names)
+    assert any("Benched" in n for n in names)
 
-    search_it = _Interaction()
-    await MembersCog.search.callback(cog, search_it, wow_class=None, role=None,
-                                     name="Ember")
-    assert isinstance(search_it.response.embed, discord.Embed)
 
-
-async def test_stats_empty_then_populated(db):
+async def test_stats_team_gated_then_populated(db):
+    await _seed(db)
     cog = MembersCog(_Bot(db, _cfg()))
 
-    empty = _Interaction()
-    await MembersCog.stats.callback(cog, empty)
-    assert empty.response.ephemeral is True
-    assert "No members tracked" in empty.response.content
+    # A caller with no team character is turned away.
+    denied = _Interaction()
+    await MembersCog.stats.callback(cog, denied)
+    assert denied.response.ephemeral is True
+    assert "team roster" in denied.response.content
 
-    await _seed(db)
+    # A team member sees the team statistics.
+    await _team_caller(db)
     populated = _Interaction()
     await MembersCog.stats.callback(cog, populated)
     assert isinstance(populated.response.embed, discord.Embed)
+    assert "team statistics" in populated.response.embed.title
 
 
-async def test_alts_and_whois(db):
+async def test_whois(db):
     await _seed(db)
     cog = MembersCog(_Bot(db, _cfg()))
-
-    alts_it = _Interaction()
-    await MembersCog.alts.callback(cog, alts_it, "Ashbringer")
-    assert isinstance(alts_it.response.embed, discord.Embed)
 
     whois_it = _Interaction()
     await MembersCog.whois.callback(cog, whois_it, _User(id=7))
@@ -339,17 +370,38 @@ async def test_gmreport_renders(db):
     assert isinstance(it.followup.embed, discord.Embed)
 
 
-async def test_trends_needs_history(db):
+async def test_trends_denied_for_non_gm(db):
     await _seed(db)
-    cog = ReportsCog(_Bot(db, _cfg()))
-    it = _Interaction()
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=7)))
+    it = _Interaction()  # default user id 42, not the GM
+    await ReportsCog.trends.callback(cog, it)
+    assert it.response.ephemeral is True
+    assert "Guild Master" in it.response.content
+
+
+async def test_trends_needs_history_for_gm(db):
+    await _seed(db)
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=42)))
+    it = _Interaction()  # default user id 42 == GM
     await ReportsCog.trends.callback(cog, it)
     assert it.followup.ephemeral is True
     assert "Not enough history" in it.followup.content
 
 
+async def test_loot_wishlist_lootpriority_require_team(db):
+    await _seed(db)
+    cog = ReportsCog(_Bot(db, _cfg()))
+
+    # A non-team caller is turned away before any work.
+    denied = _Interaction()
+    await ReportsCog.loot.callback(cog, denied, player="Ashbringer")
+    assert denied.response.ephemeral is True
+    assert "team roster" in denied.response.content
+
+
 async def test_loot_and_wishlist_empty_paths(db):
     await _seed(db)
+    await _team_caller(db)
     cog = ReportsCog(_Bot(db, _cfg()))
 
     loot_it = _Interaction()
@@ -365,6 +417,21 @@ async def test_loot_and_wishlist_empty_paths(db):
     lp_it = _Interaction()
     await ReportsCog.lootpriority.callback(cog, lp_it, item="Nothing")
     assert lp_it.followup.ephemeral is True
+
+
+async def test_loot_and_wishlist_reject_non_team_target(db):
+    await _seed(db)
+    await _team_caller(db)  # caller is on the team
+    await db.upsert_synced(Member("Pug", class_name="Rogue", role="DPS"))  # not on team
+    cog = ReportsCog(_Bot(db, _cfg()))
+
+    loot_it = _Interaction()
+    await ReportsCog.loot.callback(cog, loot_it, player="Pug")
+    assert "isn't on the team roster" in loot_it.followup.content
+
+    wl_it = _Interaction()
+    await ReportsCog.wishlist.callback(cog, wl_it, player="Pug")
+    assert "isn't on the team roster" in wl_it.followup.content
 
 
 # --- recruit cog ------------------------------------------------------------
