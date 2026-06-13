@@ -178,6 +178,10 @@ class RaiderIOClient(BaseHTTPClient):
 
         progression = data.get("raid_progression") or {}
         member.raid_progression = _summarize_progression(progression)
+        # Keep the full per-raid breakdown so /member can show every raid of the
+        # current tier (Voidspire / Dreamrift / March), not just the summary line.
+        if progression:
+            member.details = {**(member.details or {}), "raid_progression": progression}
         return member
 
     async def character_card(

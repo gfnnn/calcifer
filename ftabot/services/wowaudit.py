@@ -299,6 +299,40 @@ class WowAuditClient(BaseHTTPClient):
             )
         return out
 
+    async def upcoming_raid_signups(
+        self, *, tz: tzinfo = timezone.utc, now: datetime | None = None
+    ) -> dict | None:
+        """The next scheduled raid plus its per-character sign-up statuses.
+
+        Returns ``{date, time, start, instance, difficulty, signups: [(name,
+        status)]}`` for the soonest raid starting at/after ``now`` (one
+        ``/raids/{id}`` call), or ``None`` when nothing is scheduled. This backs
+        the team-chemistry roster view (confirmed / benched / absent groupings).
+        """
+        data = await self._get("raids")
+        raids = data.get("raids") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        now = now or datetime.now(timezone.utc)
+        chosen = select_next_raid(raids or [], now, tz)
+        if chosen is None:
+            return None
+        raid, start = chosen
+        rid = raid.get("id")
+        signups: list[tuple[str, str]] = []
+        if rid is not None:
+            try:
+                detail = await self._get(f"raids/{rid}")
+                signups = parse_signups(detail)
+            except WowAuditError:
+                signups = []
+        return {
+            "date": raid.get("date"),
+            "time": _first(raid, "start_time", "time"),
+            "start": start.isoformat(),
+            "instance": _first(raid, "instance", "title", "name"),
+            "difficulty": _first(raid, "difficulty"),
+            "signups": signups,
+        }
+
 
 # Nested structures we surface in the browser/Discord, if WoW Audit provides
 # them. Anything not listed is still kept under details["raw"].
@@ -451,6 +485,27 @@ def select_upcoming_raids(
             out.append((raid, start))
     out.sort(key=lambda pair: pair[1])
     return out
+
+
+def select_next_raid(
+    raids: list, now: datetime, tz: tzinfo = timezone.utc
+) -> tuple[dict, datetime] | None:
+    """The soonest raid starting at/after ``now`` (with its UTC start), or None.
+
+    Unlike :func:`select_upcoming_raids` (which bounds by a reminder window),
+    this looks ahead with no horizon so the roster always reflects the genuine
+    next raid night, however far out it is scheduled.
+    """
+    candidates: list[tuple[dict, datetime]] = []
+    for raid in raids:
+        if not isinstance(raid, dict):
+            continue
+        start = raid_start_dt(raid, tz)
+        if start is not None and start >= now:
+            candidates.append((raid, start))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda pair: pair[1])
 
 
 def parse_signups(detail: Any) -> list[tuple[str, str]]:

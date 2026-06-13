@@ -40,9 +40,10 @@ async def test_admin_commands_denied_for_non_admin(db):
         await invoke(it)
         assert it.response.ephemeral is True
         assert "Officer" in it.response.content
-    # The roster was never mutated by a denied command.
+    # The roster was never mutated by a denied command (raid_team stays as the
+    # seed set it; setmain didn't flip is_main).
     m = await db.get_member("Emberlyn", "hellfire", "eu")
-    assert m.is_main is True and m.raid_team is None
+    assert m.is_main is True and m.raid_team == "Cinder"
 
 
 # --- admin: link unlink + not found -----------------------------------------

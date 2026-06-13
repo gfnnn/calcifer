@@ -28,6 +28,11 @@ CLASSES: tuple[str, ...] = (
 # The three combat roles. Raider.IO reports specs as one of these.
 ROLES: tuple[str, ...] = ("TANK", "HEALER", "DPS")
 
+# The current character level cap (Midnight). A character below this is still
+# levelling, so surfaces show their level; at the cap the level is hidden and
+# the slot is reused for their Mythic+ score (a sub-cap character has none yet).
+MAX_LEVEL: int = 90
+
 # Class colours (hex) — handy for Discord embeds. Sourced from Blizzard's
 # canonical class colour palette.
 CLASS_COLORS: dict[str, int] = {

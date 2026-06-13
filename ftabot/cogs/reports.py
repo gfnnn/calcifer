@@ -11,6 +11,7 @@ from discord.ext import commands
 from .. import views
 from ..models import DEFAULT_EMBED_COLOR
 from ..ui import TITLE_LIMIT, clip
+from ._guards import require_gm, require_team_member
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
@@ -111,8 +112,20 @@ class ReportsCog(commands.Cog):
     async def loot(
         self, interaction: discord.Interaction, player: str | None = None
     ) -> None:
+        if not await require_team_member(
+            self.bot.db, interaction, action="see loot"
+        ):
+            return
         await interaction.response.defer(thinking=True)
         if player:
+            target = await self.bot.db.get_member(
+                player, self.cfg.guild_realm, self.cfg.guild_region
+            )
+            if target is None or not target.raid_team:
+                await interaction.followup.send(
+                    f"**{player}** isn't on the team roster.", ephemeral=True
+                )
+                return
             entries = await self.bot.db.get_loot(character=player, limit=15)
             if not entries:
                 await interaction.followup.send(
@@ -131,7 +144,11 @@ class ReportsCog(commands.Cog):
             return
 
         r = await views.loot_overview(self.bot.db, self.cfg)
-        top = [f for f in r["fairness"] if f["items_won"]][:15]
+        team = {m.character_name.lower() for m in await self.bot.db.team_roster()}
+        top = [
+            f for f in r["fairness"]
+            if f["items_won"] and f["name"].lower() in team
+        ][:15]
         embed = discord.Embed(
             title=f"Loot fairness · {r['total_awards']} awards",
             color=DEFAULT_EMBED_COLOR,
@@ -147,7 +164,19 @@ class ReportsCog(commands.Cog):
     @app_commands.command(name="wishlist", description="Show a player's BiS wishlist progress.")
     @app_commands.describe(player="Character name")
     async def wishlist(self, interaction: discord.Interaction, player: str) -> None:
+        if not await require_team_member(
+            self.bot.db, interaction, action="see wishlists"
+        ):
+            return
         await interaction.response.defer(thinking=True)
+        target = await self.bot.db.get_member(
+            player, self.cfg.guild_realm, self.cfg.guild_region
+        )
+        if target is None or not target.raid_team:
+            await interaction.followup.send(
+                f"**{player}** isn't on the team roster.", ephemeral=True
+            )
+            return
         items = await self.bot.db.get_wishlist(player)
         if not items:
             await interaction.followup.send(
@@ -171,6 +200,10 @@ class ReportsCog(commands.Cog):
     @app_commands.command(name="lootpriority", description="Advisory loot-council priority for an item.")
     @app_commands.describe(item="Item name (matches wishlists)")
     async def lootpriority(self, interaction: discord.Interaction, item: str) -> None:
+        if not await require_team_member(
+            self.bot.db, interaction, action="run loot priority"
+        ):
+            return
         await interaction.response.defer(thinking=True)
         r = await views.loot_priority(self.bot.db, self.cfg, item_name=item)
         if not r["ranked"]:
@@ -199,8 +232,12 @@ class ReportsCog(commands.Cog):
         embed.set_footer(text="Advisory only. The loot council decides.")
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="trends", description="Guild trends over recent snapshots.")
+    @app_commands.command(name="trends", description="Guild trends over recent snapshots (GM only).")
     async def trends(self, interaction: discord.Interaction) -> None:
+        if not await require_gm(
+            interaction, self.cfg.gm_discord_id, action="view guild trends"
+        ):
+            return
         await interaction.response.defer(thinking=True)
         t = await views.trends(self.bot.db, self.cfg)
         if t["count"] < 2:

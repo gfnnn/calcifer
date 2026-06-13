@@ -237,6 +237,21 @@ class Database:
         rows = await cur.fetchall()
         return [self._row_to_member(r) for r in rows]
 
+    async def team_roster(self) -> list[Member]:
+        """Every character assigned to a raid team (the team-chemistry roster).
+
+        A populated ``raid_team`` is what marks a character as "on the team" (the
+        sync tags WoW Audit roster characters with the team name), so this is the
+        single definition the team-gated commands filter against.
+        """
+        cur = await self.conn.execute(
+            "SELECT * FROM members "
+            "WHERE raid_team IS NOT NULL AND trim(raid_team) != '' "
+            "ORDER BY character_name COLLATE NOCASE ASC"
+        )
+        rows = await cur.fetchall()
+        return [self._row_to_member(r) for r in rows]
+
     # -- writes --------------------------------------------------------------
 
     async def upsert_synced(self, member: Member) -> int:
@@ -1178,6 +1193,33 @@ class Database:
         """Replace the recruitment state (officer edits via /recruit)."""
         await self.conn.execute(
             "INSERT INTO recruitment_config (id, state_json, updated_at) "
+            "VALUES (1, ?, ?) "
+            "ON CONFLICT (id) DO UPDATE SET state_json = excluded.state_json, "
+            "updated_at = excluded.updated_at",
+            (json.dumps(state), now_iso()),
+        )
+        await self.conn.commit()
+
+    # -- team chemistry roster (next raid's sign-ups) -------------------------
+
+    async def roster_signups(self) -> dict:
+        """The stored next-raid sign-up state ({} when never synced)."""
+        cur = await self.conn.execute(
+            "SELECT state_json FROM roster_signups WHERE id = 1"
+        )
+        row = await cur.fetchone()
+        if row is None or not row["state_json"]:
+            return {}
+        try:
+            state = json.loads(row["state_json"])
+        except json.JSONDecodeError:
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    async def set_roster_signups(self, state: dict) -> None:
+        """Replace the next-raid sign-up state (written by the sync)."""
+        await self.conn.execute(
+            "INSERT INTO roster_signups (id, state_json, updated_at) "
             "VALUES (1, ?, ?) "
             "ON CONFLICT (id) DO UPDATE SET state_json = excluded.state_json, "
             "updated_at = excluded.updated_at",

@@ -140,6 +140,83 @@ async def trends(db: Database, config: Config, *, limit: int = 30) -> dict:
     return await _trend_series(db, limit=limit)
 
 
+# --- team chemistry roster (next raid sign-ups) -----------------------------
+
+# Buckets the roster is grouped into, in display order. Raw WoW Audit sign-up
+# statuses are normalised onto these; anything unrecognised falls into "Other".
+ROSTER_BUCKETS: tuple[str, ...] = (
+    "Confirmed",
+    "Tentative",
+    "Benched",
+    "Late",
+    "Absent",
+    "Other",
+)
+
+_STATUS_BUCKETS: dict[str, str] = {
+    "present": "Confirmed",
+    "confirmed": "Confirmed",
+    "signed": "Confirmed",
+    "selected": "Confirmed",
+    "accepted": "Confirmed",
+    "tentative": "Tentative",
+    "maybe": "Tentative",
+    "bench": "Benched",
+    "benched": "Benched",
+    "backup": "Benched",
+    "late": "Late",
+    "absent": "Absent",
+    "declined": "Absent",
+    "decline": "Absent",
+    "no": "Absent",
+}
+
+
+def bucket_for_status(status: str | None) -> str:
+    """Normalise a raw WoW Audit sign-up status onto a roster bucket."""
+    return _STATUS_BUCKETS.get((status or "").strip().lower(), "Other")
+
+
+def group_signups(
+    signups: list[dict], members_by_name: dict[str, Member]
+) -> dict[str, list[dict]]:
+    """Group raw sign-ups into ordered buckets, enriched with class/role.
+
+    Pure (no I/O): the caller supplies the sign-up rows and a name->Member map,
+    so this is unit-testable like the rest of the view layer. Only buckets with
+    at least one member are returned, in :data:`ROSTER_BUCKETS` order.
+    """
+    grouped: dict[str, list[dict]] = {b: [] for b in ROSTER_BUCKETS}
+    for s in signups:
+        name = s.get("name")
+        if not name:
+            continue
+        m = members_by_name.get(str(name).lower())
+        grouped[bucket_for_status(s.get("status"))].append(
+            {
+                "name": name,
+                "status": s.get("status"),
+                "class": m.class_name if m else None,
+                "role": m.role if m else None,
+            }
+        )
+    for rows in grouped.values():
+        rows.sort(key=lambda r: str(r["name"]).lower())
+    return {b: rows for b in ROSTER_BUCKETS if (rows := grouped[b])}
+
+
+async def roster_board(db: Database, config: Config) -> dict:
+    """The next raid's sign-ups, grouped confirmed/benched/absent for /roster."""
+    state = await db.roster_signups()
+    members_by_name = {m.character_name.lower(): m for m in await db.all_members()}
+    groups = group_signups(state.get("signups") or [], members_by_name)
+    return {
+        "raid": state.get("raid") or {},
+        "groups": groups,
+        "count": sum(len(rows) for rows in groups.values()),
+    }
+
+
 # --- GM view ----------------------------------------------------------------
 
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from ftabot import brand
 from ftabot.boards import REGISTRY
-from ftabot.boards.hot20 import HOT20_TYPE, Hot20Board
+from ftabot.boards.hot20 import HOT20_TYPE, Hot20Board, weekly_reset_before
 from ftabot.config import Config
 from ftabot.models import Member
 
@@ -83,3 +86,41 @@ async def test_movement_arrows_track_rank_changes(db):
     ember_line = next(line for line in rows if "Emberlyn" in line)
     assert "▲" in ash_line
     assert "▼" in ember_line
+
+
+def test_weekly_reset_before_lands_on_wednesday_morning():
+    tz = ZoneInfo("Europe/Paris")
+    # A Friday: the most recent reset is the Wednesday 07:00 just before it.
+    now = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+    reset = weekly_reset_before(now, tz)
+    local = reset.astimezone(tz)
+    assert local.weekday() == 2  # Wednesday
+    assert local.hour == 7
+    assert reset <= now
+
+
+def test_weekly_reset_before_wednesday_pre_reset_uses_last_week():
+    tz = ZoneInfo("Europe/Paris")
+    # Wednesday 04:00 UTC is 06:00 Paris (CEST), before the 07:00 reset, so the
+    # boundary is the previous Wednesday, not today.
+    now = datetime(2026, 6, 10, 4, 0, tzinfo=timezone.utc)
+    reset = weekly_reset_before(now, tz)
+    assert reset < now
+    assert (now - reset).days >= 6
+
+
+async def test_baseline_rolls_after_a_weekly_reset(db):
+    await _seed(db, [("Emberlyn", 3000.0), ("Ashbringer", 2000.0)])
+    board = Hot20Board()
+    await board.render(db, Config(), {})  # seeds the baseline at "now"
+
+    # Backdate the baseline so a Wednesday reset has since passed.
+    await db.conn.execute(
+        "UPDATE board_baselines SET captured_at = ? WHERE board_type = ?",
+        ("2020-01-01T00:00:00+00:00", HOT20_TYPE),
+    )
+    await db.conn.commit()
+
+    await board.render(db, Config(), {})  # this render should roll the baseline
+    _ranks, captured = await db.board_baseline(HOT20_TYPE)
+    assert captured != "2020-01-01T00:00:00+00:00"  # rolled forward to now
