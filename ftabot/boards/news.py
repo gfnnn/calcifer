@@ -1,14 +1,17 @@
 """News Highlights — Calcifer's two-zone news page, as a living board.
 
-Replaces the three news bots that each re-post the same article: the Wowhead
-feed archives items into ``news_items`` (deduped across all three's worth of
+Replaces the news bots that each re-post the same article: the Wowhead feed
+archives items into ``news_items`` (deduped across the bots' worth of
 duplicates for free), and this board renders them as one calm page that edits
-itself in place. Two zones, per design-system §4c:
+itself in place whenever the feed picks up a new post. Two priority zones:
 
-* **Highlights** — the high-tier drops (patch notes, blue posts, PTR), with a
-  glyph and a masked link, freshest first.
-* **Latest** — a clean list of the most recent items across every tier.
+* **Top stories** — the high-tier drops (retail blue-tracker posts, live patch
+  notes/hotfixes, general WoW news), the larger list, freshest first.
+* **PTR & Blizzard** — the lower-priority corner (test-realm coverage, other
+  Blizzard games), a shorter list underneath.
 
+The split is the tier recorded at archive time (``feeds/wowhead.news_tier``);
+per-board ``config_json`` keys ``highlights``/``latest`` resize the two zones.
 Renders straight from the DB (no network I/O of its own). The news *headlines*
 are relayed external text, so they are shown verbatim; only Calcifer's own
 framing (the header, zone labels, signoff) obeys the no-em-dash house rule.
@@ -26,15 +29,17 @@ from .. import brand
 from .base import Board, BoardPayload, register
 
 NEWS_TYPE = "news_highlights"
-_DEFAULT_HIGHLIGHTS = 3
-_DEFAULT_LATEST = 7
+_DEFAULT_HIGHLIGHTS = 8  # the high-priority zone is the page's larger list
+_DEFAULT_LATEST = 4  # the PTR/Blizzard corner stays short
 
-# Per-event-type glyphs for the highlight zone (unicode fallbacks; the cog/board
-# layer can override by custom emoji name later, like the rest of brand.ICONS).
+# Per-event-type glyphs (unicode fallbacks; the cog/board layer can override by
+# custom emoji name later, like the rest of brand.ICONS).
 _TYPE_GLYPH = {
     "wowhead.patch-notes": "🛠️",
     "wowhead.blue-post": "🔵",
     "wowhead.news": "📰",
+    "wowhead.ptr": "🧪",
+    "wowhead.blizzard": "❄️",
 }
 
 
@@ -76,20 +81,20 @@ class NewsHighlightsBoard(Board):
 
     async def render(self, db, config, board_config) -> BoardPayload | None:
         n_high = int(board_config.get("highlights", _DEFAULT_HIGHLIGHTS))
-        n_latest = int(board_config.get("latest", _DEFAULT_LATEST))
+        n_low = int(board_config.get("latest", _DEFAULT_LATEST))
 
-        highlights = await db.recent_news(limit=n_high, tier="high")
-        latest = await db.recent_news(limit=n_latest)
-        if not highlights and not latest:
+        top = await db.recent_news(limit=n_high, tier="high")
+        lower = await db.recent_news(limit=n_low, tier="low")
+        if not top and not lower:
             return None  # nothing archived yet; post nothing
 
         sections: list[str] = []
-        if highlights:
-            lines = [_dated_line(i, glyph=_glyph(i.get("event_type"))) for i in highlights]
-            sections.append("**📰 Highlights**\n" + "\n".join(lines))
-        if latest:
-            lines = [f"• {_dated_line(i)}" for i in latest]
-            sections.append("**Latest**\n" + "\n".join(lines))
+        if top:
+            lines = [_dated_line(i, glyph=_glyph(i.get("event_type"))) for i in top]
+            sections.append("**🔥 Top stories**\n" + "\n".join(lines))
+        if lower:
+            lines = [_dated_line(i, glyph=_glyph(i.get("event_type"))) for i in lower]
+            sections.append("**🧪 PTR & Blizzard**\n" + "\n".join(lines))
 
         signoff = (
             brand.Voice(tone=config.persona_tone).line("board_signoff")
@@ -108,7 +113,7 @@ class NewsHighlightsBoard(Board):
         # re-edits when the news changes but not merely to bump a relative stamp.
         material = [
             (i["external_id"], i.get("tier"))
-            for i in (highlights + latest)
+            for i in (top + lower)
         ]
         fingerprint = hashlib.sha1(
             json.dumps(material, ensure_ascii=False).encode()

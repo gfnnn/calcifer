@@ -86,11 +86,18 @@ async def _wire_webhook_sender(app, config: Config, bot) -> None:
 
 async def _feed_loop(config: Config, bot, sources) -> None:
     """Poll the integration-hub feeds and post alerts through the bot."""
+    from .boards.news import NEWS_TYPE
     from .feeds.runner import poll_once
+    from .scores import refresh_boards
 
     await bot.wait_until_ready()
     await asyncio.sleep(5)  # let slash-command sync settle first
     send = _make_sender(bot, PostGate.from_config(config))
+
+    # The Wowhead poll is the moment new items land in the news archive, so the
+    # News board is nudged right here (diff-before-edit: an unchanged page costs
+    # no Discord traffic) instead of waiting for the slower board tick.
+    nudge_news = any(getattr(s, "name", "") == "wowhead" for s in sources)
 
     interval = config.feed_poll_minutes * 60
     failures = 0
@@ -99,6 +106,8 @@ async def _feed_loop(config: Config, bot, sources) -> None:
             try:
                 async with Database(config.database_path) as db:
                     posted = await poll_once(db, config, sources, session, send)
+                    if nudge_news:
+                        await refresh_boards(db, config, bot, only_type=NEWS_TYPE)
                 if posted:
                     log.info("feeds: posted %d alert(s)", posted)
                 failures = 0
@@ -109,8 +118,9 @@ async def _feed_loop(config: Config, bot, sources) -> None:
 
 
 async def _board_loop(config: Config, bot) -> None:
-    """Re-render the living boards on an interval, editing each in place."""
+    """Re-render the living boards (and placed sticky pages) on an interval."""
     from .boards import REGISTRY, BotBoardMessenger, refresh_board
+    from .pages import PAGES, refresh_page
 
     await bot.wait_until_ready()
     await asyncio.sleep(8)  # let slash-command sync + feeds settle first
@@ -130,6 +140,17 @@ async def _board_loop(config: Config, bot) -> None:
                     except Exception as exc:  # noqa: BLE001 - one board never kills the loop
                         log.warning("board %s failed: %s", row["board_type"], exc)
                     await asyncio.sleep(1)  # stagger edits across channels
+                # Sticky pages ride the same tick, so a dashboard copy edit goes
+                # live within one refresh interval without an officer command.
+                for row in await db.sticky_pages():
+                    page = PAGES.get(row["page_name"])
+                    if page is None:
+                        continue
+                    try:
+                        await refresh_page(db, config, page, row, messenger, gate)
+                    except Exception as exc:  # noqa: BLE001 - one page never kills the loop
+                        log.warning("page %s failed: %s", row["page_name"], exc)
+                    await asyncio.sleep(1)
             failures = 0
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
             failures += 1

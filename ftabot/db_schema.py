@@ -353,6 +353,30 @@ CREATE TABLE IF NOT EXISTS recruitment_config (
     state_json TEXT,
     updated_at TEXT
 );
+
+-- Sticky pages: multi-message, GM-authored markdown pages (Rules & Info etc.)
+-- placed with /page post.  channel_id is the officer-requested destination;
+-- posted_channel_id + message_ids_json record where the live copy actually
+-- sits (ordered, one id per message) so a channel move deletes the old copy
+-- before re-posting, and content_hash lets a refresh skip unchanged copy.
+CREATE TABLE IF NOT EXISTS sticky_pages (
+    page_name         TEXT PRIMARY KEY,
+    channel_id        TEXT NOT NULL,
+    posted_channel_id TEXT,
+    message_ids_json  TEXT,
+    content_hash      TEXT,
+    created_at        TEXT,
+    updated_at        TEXT
+);
+
+-- Dashboard-edited copy: overrides for the bundled ftabot/content/*.json
+-- documents, one JSON body per document name.  A row here beats the bundled
+-- file; deleting the row reverts to the shipped copy.
+CREATE TABLE IF NOT EXISTS content_docs (
+    name       TEXT PRIMARY KEY,
+    body_json  TEXT NOT NULL,
+    updated_at TEXT
+);
 """
 
 class ColumnOwner(Enum):

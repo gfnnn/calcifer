@@ -86,16 +86,21 @@ async def refresh_scores(
     return changed
 
 
-async def refresh_boards(db: Database, config: Config, bot) -> int:
+async def refresh_boards(
+    db: Database, config: Config, bot, *, only_type: str | None = None
+) -> int:
     """Re-render every enabled board (diff-before-edit, so it only edits on a
     real change). Returns how many boards were rendered. Safe to call after a
-    score change so the board reflects it immediately."""
+    score change so the board reflects it immediately. ``only_type`` narrows
+    the nudge to one board type (the feed loop uses it for the News board)."""
     from .boards import REGISTRY, BotBoardMessenger, refresh_board
 
     gate = PostGate.from_config(config)
     messenger = BotBoardMessenger(bot)
     rendered = 0
     for row in await db.boards(enabled_only=True):
+        if only_type is not None and row["board_type"] != only_type:
+            continue
         board = REGISTRY.get(row["board_type"])
         if board is None:
             continue

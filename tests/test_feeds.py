@@ -103,11 +103,11 @@ _RSS = """<?xml version="1.0"?>
 def test_parse_rss_classifies_and_cleans():
     events = parse_rss(_RSS)
     assert len(events) == 2
-    patch, blue = events
-    assert patch.event_type == "wowhead.patch-notes"
-    assert patch.external_id == "https://www.wowhead.com/news/ptr-1"
-    assert patch.summary == "Class changes & more."  # tags stripped, entities decoded
-    assert patch.published_at.startswith("2026-06-03")
+    ptr, blue = events
+    assert ptr.event_type == "wowhead.ptr"  # test-realm coverage, low priority
+    assert ptr.external_id == "https://www.wowhead.com/news/ptr-1"
+    assert ptr.summary == "Class changes & more."  # tags stripped, entities decoded
+    assert ptr.published_at.startswith("2026-06-03")
     assert blue.event_type == "wowhead.blue-post"
 
 

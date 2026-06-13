@@ -51,6 +51,14 @@ _LINES: dict[str, list[str]] = {
         "Big logs on the fire today: patch notes.",
         "Everything's changing again. Typical.",
     ],
+    "wowhead.ptr": [
+        "Test-realm whispers. Subject to change.",
+        "The future, still in the forge.",
+    ],
+    "wowhead.blizzard": [
+        "From the rest of the Blizzard hearth.",
+        "Not our fire, but worth a glance.",
+    ],
     "digest": [
         "A week's worth of embers, swept up neatly.",
         "Here's everything I held back. You're welcome.",
