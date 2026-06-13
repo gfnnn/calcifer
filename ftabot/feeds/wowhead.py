@@ -21,25 +21,81 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
 
+# Wowhead's RSS marks each item with a <category> naming its section (verified
+# against the live /news/rss/all feed): "WoW" and "Live" are retail news, "PTR"
+# is test-realm coverage, "Blizzard" is company/industry news, and the classic
+# games run under "Classic"/"Mists"/"TBC" etc. The category is the authoritative
+# signal — titles often omit the section (a PTR datamining post rarely says
+# "PTR") — so classification is category-first, keyword fallback.
+_RETAIL_SECTIONS = {"wow", "live"}
+_PTR_SECTIONS = {"ptr", "beta", "alpha"}
+_BLIZZARD_SECTIONS = {"blizzard"}
+_CLASSIC_SECTIONS = {
+    "classic", "mists", "tbc", "wrath", "cata", "sod",
+    "season of discovery", "hardcore", "era", "anniversary",
+}
+
+# Keyword fallbacks for items without a recognisable section category.
+# Test-realm markers are word-bounded so e.g. "sceptre" can't match "ptr";
+# other Blizzard franchises are matched as names (never the bare word
+# "blizzard", which appears in ordinary WoW news).
+_TEST_REALM_RE = re.compile(r"\b(ptr|beta|alpha)\b")
+_OTHER_GAMES = (
+    "diablo",
+    "overwatch",
+    "hearthstone",
+    "warcraft rumble",
+    "starcraft",
+    "heroes of the storm",
+)
+
+
 def _classify(title: str, categories: list[str]) -> str:
-    """Map a Wowhead item onto an event type used for routing/branding."""
+    """Map a Wowhead item onto an event type used for routing/branding/tiering.
+
+    Order matters: a blue post stays a blue post even when it discusses the
+    PTR, and a recognised section category outranks any stray keyword in the
+    title (a "WoW Weekly" roundup mentioning Mists Classic is still WoW news).
+    """
     haystack = " ".join([title, *categories]).lower()
-    if "patch notes" in haystack or "ptr" in haystack:
-        return "wowhead.patch-notes"
     if "blue post" in haystack or "blue tracker" in haystack:
         return "wowhead.blue-post"
+
+    sections = {c.strip().lower() for c in categories if c.strip()}
+    if sections & _PTR_SECTIONS:
+        return "wowhead.ptr"
+    if sections & _CLASSIC_SECTIONS:
+        return "wowhead.classic"
+    if sections & _BLIZZARD_SECTIONS:
+        return "wowhead.blizzard"
+    if not sections & _RETAIL_SECTIONS:
+        # No recognised section: fall back to keywords (covers feeds without
+        # categories and any section names Wowhead adds later).
+        if _TEST_REALM_RE.search(haystack):
+            return "wowhead.ptr"
+        if any(game in haystack for game in _OTHER_GAMES):
+            return "wowhead.blizzard"
+    if "patch notes" in haystack or "hotfix" in haystack:
+        return "wowhead.patch-notes"
     return "wowhead.news"
 
 
-# Event types that earn the News Highlights board's top "highlight" zone — the
-# things worth surfacing (patch notes, blue posts, PTR). Everything else is the
-# low-tier latest-list filler (design-system §4c).
-_HIGH_TIER_TYPES = {"wowhead.patch-notes", "wowhead.blue-post"}
+# The guild's priority split for the News board's two zones: retail blue-tracker
+# posts, live patch notes/hotfixes and general WoW news lead the page (high);
+# PTR/beta coverage and other-Blizzard-game news sit in the smaller lower zone.
+# Classic-section items (Mists/TBC/era …) match none of the guild's subscribed
+# feeds, so they are left off the board entirely (tier None = not archived).
+_LOW_TIER_TYPES = {"wowhead.ptr", "wowhead.blizzard"}
 
 
-def news_tier(event_type: str | None) -> str:
-    """'high' for board-highlight news, 'low' for the latest-list filler."""
-    return "high" if event_type in _HIGH_TIER_TYPES else "low"
+def news_tier(event_type: str | None) -> str | None:
+    """'high' for the board's top zone, 'low' for the PTR/Blizzard lower zone,
+    ``None`` for items the board doesn't cover (the classic-games sections)."""
+    if not event_type or not event_type.startswith("wowhead."):
+        return "low"  # unknown provenance never leads the page
+    if event_type == "wowhead.classic":
+        return None
+    return "low" if event_type in _LOW_TIER_TYPES else "high"
 
 
 def _clean_summary(html: str | None, *, limit: int = 280) -> str | None:
@@ -136,6 +192,11 @@ class WowheadSource(FeedSource):
                 "published_at": e.published_at,
             }
             for e in events
+            # tier None = a section the board doesn't cover (classic games);
+            # the event still flows to the alert router like any other.
+            if news_tier(e.event_type) is not None
         ]
+        if not rows:
+            return
         async with Database(self.config.database_path) as db:
             await db.record_news(rows)

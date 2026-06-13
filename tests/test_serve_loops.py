@@ -201,6 +201,48 @@ async def test_feed_loop_survives_a_poll_error(tmp_path, monkeypatch, caplog):
     assert "feed loop error" in caplog.text
 
 
+async def test_feed_loop_nudges_news_board_after_a_wowhead_poll(tmp_path, monkeypatch):
+    # A poll is the moment new Wowhead items land in the archive, so the loop
+    # nudges the News board right after it (and only the News board).
+    nudges: list[str | None] = []
+
+    async def _refresh(db, config, bot, *, only_type=None):
+        nudges.append(only_type)
+        return 0
+
+    poll = _RaiseOnNth(2, result=0)
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr("ftabot.feeds.runner.poll_once", poll)
+    monkeypatch.setattr("ftabot.scores.refresh_boards", _refresh)
+
+    class _WowheadSrc:
+        name = "wowhead"
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve._feed_loop(_cfg(tmp_path), _Bot(_Channel()), sources=[_WowheadSrc()])
+    assert nudges == ["news_highlights"]  # one nudge per completed poll
+
+
+async def test_feed_loop_skips_news_nudge_without_wowhead(tmp_path, monkeypatch):
+    nudges: list[str | None] = []
+
+    async def _refresh(db, config, bot, *, only_type=None):
+        nudges.append(only_type)
+        return 0
+
+    poll = _RaiseOnNth(2, result=0)
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr("ftabot.feeds.runner.poll_once", poll)
+    monkeypatch.setattr("ftabot.scores.refresh_boards", _refresh)
+
+    class _OtherSrc:
+        name = "raiderio_mplus"
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve._feed_loop(_cfg(tmp_path), _Bot(_Channel()), sources=[_OtherSrc()])
+    assert nudges == []  # nothing archived news, so no board nudge
+
+
 # --- _board_loop ------------------------------------------------------------
 
 

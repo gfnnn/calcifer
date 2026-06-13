@@ -18,10 +18,12 @@ from urllib.parse import quote
 from fastapi import Cookie, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import content as content_lib
 from . import views
 from .config import Config
 from .db import Database
 from .models import Member, now_iso
+from .pages import MAX_POST_CHARS, PAGES, PageDef
 from .sync import sync_guild
 
 
@@ -357,6 +359,99 @@ def create_app(config: Config | None = None) -> FastAPI:
     async def api_sync_status() -> JSONResponse:
         return JSONResponse(sync_manager.status())
 
+    # -- dashboard content (sticky-page copy) ---------------------------------
+    # The GM edits the sticky pages' Discord markdown here; a save stores an
+    # override in content_docs (the bundled content/*.json stays the default).
+    # Gated by the same sync token / cookie as the manual sync trigger.
+
+    def _page_or_404(page_name: str) -> PageDef:
+        page = PAGES.get(page_name)
+        if page is None:
+            raise HTTPException(status_code=404, detail="Unknown page.")
+        return page
+
+    async def _content_payload(page: PageDef) -> dict:
+        doc = await db.get_content_doc(page.content_doc)
+        source = "custom" if doc is not None else "bundled"
+        if doc is None:
+            doc = content_lib.load(page.content_doc)
+        posts = [p for p in doc.get("posts") or [] if isinstance(p, str)]
+        return {
+            "page": page.name,
+            "title": page.title,
+            "source": source,
+            "updated_at": await db.content_doc_updated_at(page.content_doc),
+            "posts": posts,
+        }
+
+    @app.get("/api/content")
+    async def api_content_list(
+        token: str | None = None,
+        x_sync_token: str | None = Header(default=None),
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _check_sync_token(token or x_sync_token or fta_sync_token)
+        return JSONResponse([await _content_payload(p) for p in PAGES.values()])
+
+    @app.get("/api/content/{page_name}")
+    async def api_content_get(
+        page_name: str,
+        token: str | None = None,
+        x_sync_token: str | None = Header(default=None),
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _check_sync_token(token or x_sync_token or fta_sync_token)
+        return JSONResponse(await _content_payload(_page_or_404(page_name)))
+
+    @app.put("/api/content/{page_name}")
+    async def api_content_put(
+        page_name: str,
+        request: Request,
+        token: str | None = None,
+        x_sync_token: str | None = Header(default=None),
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _check_sync_token(token or x_sync_token or fta_sync_token)
+        page = _page_or_404(page_name)
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            raise HTTPException(status_code=400, detail="Body must be JSON.")
+        posts = body.get("posts") if isinstance(body, dict) else None
+        if not isinstance(posts, list) or not posts:
+            raise HTTPException(
+                status_code=400, detail="Provide a non-empty 'posts' list."
+            )
+        if len(posts) > 10:
+            raise HTTPException(status_code=400, detail="At most 10 messages per page.")
+        for i, post in enumerate(posts, start=1):
+            if not isinstance(post, str) or not post.strip():
+                raise HTTPException(
+                    status_code=400, detail=f"Message {i} is empty or not text."
+                )
+            if len(post) > MAX_POST_CHARS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Message {i} is {len(post)} characters; Discord allows "
+                        f"{MAX_POST_CHARS} per message. Split it into two messages."
+                    ),
+                )
+        await db.set_content_doc(page.content_doc, {"title": page.title, "posts": posts})
+        return JSONResponse({"status": "saved", "posts": len(posts)})
+
+    @app.delete("/api/content/{page_name}")
+    async def api_content_delete(
+        page_name: str,
+        token: str | None = None,
+        x_sync_token: str | None = Header(default=None),
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _check_sync_token(token or x_sync_token or fta_sync_token)
+        page = _page_or_404(page_name)
+        removed = await db.delete_content_doc(page.content_doc)
+        return JSONResponse({"status": "reverted" if removed else "already_bundled"})
+
     # -- HTML pages ----------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
@@ -399,6 +494,24 @@ def create_app(config: Config | None = None) -> FastAPI:
                 status_code=404,
             )
         return HTMLResponse(_render_member(config.guild_name, data))
+
+    @app.get("/content", response_class=HTMLResponse)
+    async def content_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        supplied = token if token is not None else fta_sync_token
+        authed = bool(config.sync_token) and _secret_matches(supplied, config.sync_token)
+        if not authed:
+            return HTMLResponse(
+                _render_content_locked(config, error=bool(token) and not authed)
+            )
+        items = []
+        for page in PAGES.values():
+            item = await _content_payload(page)
+            item["placement"] = await db.get_sticky_page(page.name)
+            items.append(item)
+        return HTMLResponse(_render_content(config, items))
 
     @app.get("/admin", response_class=HTMLResponse)
     async def admin_page(
@@ -518,6 +631,17 @@ _CSS = """
   .pill { display:inline-block; background:#3a2820; border-radius:10px; padding:.05rem .5rem; margin:.1rem; font-size:.8rem; }
   .ok { color:#9ccc65; } .bad { color:#ef5350; } .warn { color:#ffca28; }
   .flags { font-size:.8rem; color:#ddd; }
+  textarea { width:100%; min-height:180px; box-sizing:border-box; padding:.6rem .7rem;
+    border-radius:8px; border:1px solid #543; background:#1c1310; color:#eee;
+    font-family: ui-monospace, monospace; font-size:.85rem; line-height:1.4; resize:vertical; }
+  .doc { background:#221712; border:1px solid #3a2820; border-radius:10px;
+    padding:1rem 1.2rem; margin-bottom:1.4rem; }
+  .doc h2 { margin-top:0; }
+  .doc label { display:flex; justify-content:space-between; font-size:.8rem;
+    color:#bbb; margin:.8rem 0 .25rem; }
+  .count.over { color:#ef5350; font-weight:700; }
+  button.ghost { background:#3a2820; }
+  .status { margin-left:.6rem; font-size:.85rem; }
 """
 
 
@@ -551,6 +675,7 @@ def _layout(guild_name: str, subtitle: str, body: str, active: str) -> str:
         + link("/gm", "GM", "gm")
         + link("/raid", "Raid Leader", "raid")
         + link("/loot", "Loot", "loot")
+        + link("/content", "Content", "content")
         + link("/admin", "Sync", "admin")
     )
     return f"""<!doctype html>
@@ -972,6 +1097,134 @@ def _render_member(guild_name: str, d: dict) -> str:
 
 def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value:.0f}%"
+
+
+# JS for the Content editor: gather the section's textareas (dropping empty
+# ones), PUT them as JSON (the auth cookie rides along), and keep a live
+# per-message character count against the Discord limit. A plain string, not an
+# f-string, so the JS braces stay readable.
+_CONTENT_SCRIPT = """
+<script>
+async function savePage(name){
+  const sec=document.querySelector('[data-page="'+name+'"]');
+  const posts=Array.from(sec.querySelectorAll('textarea'))
+    .map(t=>t.value).filter(v=>v.trim().length);
+  const st=document.getElementById('st-'+name);
+  st.className='status'; st.textContent='Saving…';
+  try{
+    const r=await fetch('/api/content/'+name,{method:'PUT',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({posts:posts})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){st.className='status ok';
+      st.textContent='Saved. Goes live on the next refresh, or /page refresh in Discord.';}
+    else{st.className='status bad'; st.textContent=j.detail||'Save failed.';}
+  }catch(e){st.className='status bad'; st.textContent='Save failed: '+e;}
+}
+async function revertPage(name){
+  if(!confirm('Discard the custom copy and return to the bundled default?'))return;
+  await fetch('/api/content/'+name,{method:'DELETE'});
+  location.reload();
+}
+document.querySelectorAll('.doc textarea').forEach(t=>{
+  const count=t.closest('.post').querySelector('.count');
+  const update=()=>{count.textContent=t.value.length+'/'+t.maxLength;
+    count.classList.toggle('over', t.value.length>=t.maxLength);};
+  t.addEventListener('input',update); update();
+});
+</script>
+"""
+
+
+def _render_content(config: Config, items: list[dict]) -> str:
+    sections = []
+    for item in items:
+        source = (
+            "<span class='pill ok'>custom copy</span>"
+            if item["source"] == "custom"
+            else "<span class='pill'>bundled copy</span>"
+        )
+        updated = (
+            f" · saved {html.escape(item['updated_at'])}" if item["updated_at"] else ""
+        )
+        placement = item.get("placement")
+        if placement and placement["message_ids"]:
+            where = (
+                f"Posted in channel <code>{html.escape(placement['posted_channel_id'] or '?')}</code>"
+                f" ({len(placement['message_ids'])} message(s))."
+            )
+        elif placement:
+            where = "Registered but not posted yet (guardrail or pending refresh)."
+        else:
+            where = "Not placed in Discord yet. Use <code>/page post</code>."
+
+        posts_html = ""
+        for i, post in enumerate(item["posts"], start=1):
+            posts_html += (
+                "<div class='post'>"
+                f"<label>Message {i} <span class='count'></span></label>"
+                f"<textarea maxlength='{MAX_POST_CHARS}'>{html.escape(post)}</textarea>"
+                "</div>"
+            )
+        posts_html += (
+            "<div class='post'>"
+            "<label>New message (optional) <span class='count'></span></label>"
+            f"<textarea maxlength='{MAX_POST_CHARS}' "
+            "placeholder='Leave empty, or add another message to the page.'></textarea>"
+            "</div>"
+        )
+        name = html.escape(item["page"])
+        sections.append(
+            f"<section class='doc' data-page='{name}'>"
+            f"<h2>{html.escape(item['title'])} {source}<span style='font-size:.75rem;"
+            f"color:#888;font-weight:400'>{updated}</span></h2>"
+            f"<p style='color:#bbb;font-size:.85rem'>{where}</p>"
+            f"{posts_html}"
+            f"<p><button onclick=\"savePage('{name}')\">Save</button> "
+            f"<button class='ghost' onclick=\"revertPage('{name}')\">Revert to bundled copy</button>"
+            f"<span class='status' id='st-{name}'></span></p>"
+            "</section>"
+        )
+
+    body = (
+        "<p style='color:#bbb'>The copy for Calcifer's sticky pages. Each box is one "
+        "Discord message (markdown headers, <code>-#</code> subtext, emoji and "
+        "<code>{tokens}</code> like <code>{member_count}</code> all work; pages post "
+        "without pinging). An empty box is dropped on save. Edits go live on the "
+        "next page refresh, or instantly with <code>/page refresh</code> in Discord.</p>"
+        + "".join(sections)
+        + _CONTENT_SCRIPT
+    )
+    return _layout(config.guild_name, "Content — sticky page copy", body, "content")
+
+
+def _render_content_locked(config: Config, *, error: bool = False) -> str:
+    if not config.sync_token:
+        body = (
+            "<h2>Content editing</h2>"
+            "<p class='bad'>The dashboard editor is disabled.</p>"
+            "<p>Set the <code>SYNC_TOKEN</code> environment variable to enable it "
+            "(it shares the Sync page's unlock).</p>"
+        )
+        return _layout(config.guild_name, "Content", body, "content")
+    wrong = "<p class='bad'>Invalid token.</p>" if error else ""
+    body = f"""
+  <h2>Content — enter token</h2>
+  <p>Provide the sync token to edit the sticky pages' copy.</p>
+  <form id="unlock" onsubmit="return unlock(event)">
+    <input id="tok" type="password" placeholder="SYNC_TOKEN" autofocus>
+    <button type="submit">Unlock</button>
+  </form>{wrong}
+  <p id="err" class="bad"></p>
+  <script>
+  async function unlock(e){{e.preventDefault();
+    const r=await fetch('/api/sync/unlock',{{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{token:document.getElementById('tok').value}})}});
+    if(r.ok){{location.href='/content';}}
+    else{{document.getElementById('err').textContent='Invalid token.';}}
+    return false;}}
+  </script>"""
+    return _layout(config.guild_name, "Content", body, "content")
 
 
 def _render_admin(

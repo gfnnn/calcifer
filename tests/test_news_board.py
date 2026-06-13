@@ -28,10 +28,68 @@ def _item(ext_id, title, *, tier="low", event_type="wowhead.news", url=None, pub
 
 
 def test_news_tier_classifies_high_vs_low():
-    assert news_tier("wowhead.patch-notes") == "high"
+    # The guild's priority split: blue tracker, live patch notes and general WoW
+    # news lead the page; PTR coverage and other Blizzard games sit lower; the
+    # classic-games sections aren't on the page at all.
     assert news_tier("wowhead.blue-post") == "high"
-    assert news_tier("wowhead.news") == "low"
+    assert news_tier("wowhead.patch-notes") == "high"
+    assert news_tier("wowhead.news") == "high"
+    assert news_tier("wowhead.ptr") == "low"
+    assert news_tier("wowhead.blizzard") == "low"
+    assert news_tier("wowhead.classic") is None
     assert news_tier(None) == "low"
+    assert news_tier("somebot.unknown") == "low"  # unknown provenance never leads
+
+
+def test_classify_uses_the_rss_section_category():
+    # Real <category> values from wowhead.com/news/rss/all: the section is the
+    # authoritative signal, since titles often omit it.
+    from ftabot.feeds.wowhead import _classify
+
+    assert _classify("Mythic L'ura Macros and Positioning Assignments", ["Live"]) == "wowhead.news"
+    assert _classify("Blizzard Releases New Youtooz and Funko Pop! Figures", ["WoW"]) == "wowhead.news"
+    assert _classify(
+        "PvP World Quest Appears Again - Patch 12.0.5 Hotfixes for June 9th", ["Live"]
+    ) == "wowhead.patch-notes"
+    # PTR items frequently don't say "PTR" in the title; the category catches them.
+    assert _classify(
+        "New Models for Darkspear Dash Microholiday on Patch 12.0.7", ["PTR"]
+    ) == "wowhead.ptr"
+    assert _classify(
+        "Brian Holinka Joins Riot Games' MMORPG Team", ["Blizzard"]
+    ) == "wowhead.blizzard"
+    # A recognised retail section outranks stray keywords in the title.
+    assert _classify(
+        "WoW Weekly: Midnight, Mists of Pandaria Classic, Turbulent Timeways, and More!",
+        ["WoW"],
+    ) == "wowhead.news"
+    # The classic-games sections are their own bucket (kept off the news board).
+    assert _classify("Blizzard Has a Plan to Take Care of Casino Bots", ["Classic"]) == "wowhead.classic"
+    assert _classify("Numen Finishes Siege of Orgrimmar in 2:17", ["Mists"]) == "wowhead.classic"
+    assert _classify("Blizzard Adds Visible Arena MMR to UI", ["TBC"]) == "wowhead.classic"
+
+
+def test_classify_follows_the_priority_mapping():
+    from ftabot.feeds.wowhead import _classify
+
+    # High priority: blue tracker, live patch notes/hotfixes, general WoW news.
+    assert _classify("Blue Post: Class Tuning Incoming", []) == "wowhead.blue-post"
+    assert _classify("Tuning Incoming", ["Blue Tracker"]) == "wowhead.blue-post"
+    assert _classify("Patch 12.0.7 Hotfixes for June 10th", []) == "wowhead.patch-notes"
+    assert _classify("Midnight Raid Finder Schedule", []) == "wowhead.news"
+
+    # Low priority: test-realm coverage and other-Blizzard-game news.
+    assert _classify("Patch 12.0.7 PTR Development Notes", []) == "wowhead.ptr"
+    assert _classify("New Beta Build Deployed", []) == "wowhead.ptr"
+    assert _classify("Diablo 4 Season Announced", []) == "wowhead.blizzard"
+    assert _classify("Big Reveal", ["Hearthstone"]) == "wowhead.blizzard"
+
+    # A blue post about the PTR is still a blue post (order matters), and
+    # "ptr" only matches as a word, never inside another one.
+    assert _classify("Blue Post: PTR Plans", []) == "wowhead.blue-post"
+    assert _classify("The Sceptre of Storms Returns", []) == "wowhead.news"
+    # Ordinary WoW news mentioning Blizzard the company stays high priority.
+    assert _classify("Blizzard Confirms Raid Release Date", []) == "wowhead.news"
 
 
 # --- DB: record_news / recent_news ------------------------------------------
@@ -84,16 +142,52 @@ async def test_board_renders_both_zones(db):
               published_at="2026-06-05T00:00:00+00:00"),
         _item("b1", "Blue Post: Hotfixes", tier="high", event_type="wowhead.blue-post",
               published_at="2026-06-04T00:00:00+00:00"),
-        _item("n1", "A small news item", published_at="2026-06-03T00:00:00+00:00"),
+        _item("x1", "PTR build notes", tier="low", event_type="wowhead.ptr",
+              published_at="2026-06-03T00:00:00+00:00"),
     ])
     payload = await NewsHighlightsBoard().render(db, Config(), {})
     assert payload is not None
     desc = payload.embed.description
-    assert "Highlights" in desc and "Latest" in desc
+    assert "Top stories" in desc and "PTR & Blizzard" in desc
+    # the high-priority zone sits above the low-priority one
+    assert desc.index("Top stories") < desc.index("PTR & Blizzard")
     # masked links present
     assert "[Patch 11.2 Notes](https://wowhead.com/p1)" in desc
     # a relative time stamp is rendered
     assert "<t:" in desc
+
+
+async def test_board_zone_sizes_favour_high_priority(db):
+    # 12 high + 6 low archived; the defaults show 8 up top and only 4 below.
+    items = [
+        _item(f"h{i}", f"Big story {i:02d}", tier="high", event_type="wowhead.news",
+              published_at=f"2026-06-{10 + i:02d}T00:00:00+00:00")
+        for i in range(12)
+    ] + [
+        _item(f"l{i}", f"PTR scrap {i:02d}", tier="low", event_type="wowhead.ptr",
+              published_at=f"2026-05-{10 + i:02d}T00:00:00+00:00")
+        for i in range(6)
+    ]
+    await db.record_news(items, keep=60)
+    payload = await NewsHighlightsBoard().render(db, Config(), {})
+    desc = payload.embed.description
+    assert sum(1 for i in range(12) if f"Big story {i:02d}" in desc) == 8
+    assert sum(1 for i in range(6) if f"PTR scrap {i:02d}" in desc) == 4
+    # ...and a board config can resize either zone.
+    payload = await NewsHighlightsBoard().render(
+        db, Config(), {"highlights": 2, "latest": 1}
+    )
+    desc = payload.embed.description
+    assert sum(1 for i in range(12) if f"Big story {i:02d}" in desc) == 2
+    assert sum(1 for i in range(6) if f"PTR scrap {i:02d}" in desc) == 1
+
+
+async def test_board_renders_with_only_one_zone_populated(db):
+    await db.record_news([_item("solo", "PTR only", tier="low",
+                                event_type="wowhead.ptr")])
+    payload = await NewsHighlightsBoard().render(db, Config(), {})
+    desc = payload.embed.description
+    assert "PTR & Blizzard" in desc and "Top stories" not in desc
 
 
 async def test_board_preserves_relayed_headline_verbatim(db):
@@ -168,6 +262,13 @@ _RSS = """<?xml version="1.0"?>
     <guid>misc-1</guid>
     <pubDate>Tue, 02 Jun 2026 09:00:00 +0000</pubDate>
   </item>
+  <item>
+    <title>Siege of Orgrimmar Guide Compendium</title>
+    <link>https://www.wowhead.com/news/mists-1</link>
+    <guid>mists-1</guid>
+    <pubDate>Mon, 01 Jun 2026 09:00:00 +0000</pubDate>
+    <category>Mists</category>
+  </item>
 </channel></rss>
 """
 
@@ -176,13 +277,16 @@ async def test_wowhead_source_archives_on_fetch(db):
     cfg = dataclasses.replace(Config(), database_path=db.path)
     source = WowheadSource(cfg)
     events = await source.fetch(_FakeSession(_RSS))
-    assert len(events) == 2  # still returns the events for the feed pipeline
+    assert len(events) == 3  # still returns every event for the feed pipeline
 
+    # The classic-section item is never archived, so it can't crowd the board.
     archived = await db.recent_news(limit=10)
     assert {i["external_id"] for i in archived} == {"ptr-1", "misc-1"}
-    # the PTR item is high-tier (it reaches the highlight zone)
+    # general WoW news leads the page; the PTR item sits in the lower zone
     high = await db.recent_news(limit=10, tier="high")
-    assert [i["external_id"] for i in high] == ["ptr-1"]
+    assert [i["external_id"] for i in high] == ["misc-1"]
+    low = await db.recent_news(limit=10, tier="low")
+    assert [i["external_id"] for i in low] == ["ptr-1"]
 
 
 def test_wowhead_source_without_config_is_pure_url():

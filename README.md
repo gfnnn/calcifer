@@ -148,6 +148,7 @@ switch to the richer WoW Audit data set.
 | `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
 | `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards**: create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
+| `/page post\|list\|refresh\|remove` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy is edited in the dashboard's **Content** section. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
 
 ---
@@ -183,10 +184,16 @@ interval and edit themselves in place (never re-post). The shipped boards:
 
 - **Calcifer's Hot 20** — the guild's top-20 Mythic+ leaderboard with weekly
   rank movement.
-- **News Highlights** — a calm two-zone news page (highlighted patch
-  notes/blue posts up top, a clean latest-list below) that replaces the trio of
-  news bots; it renders from news the Wowhead feed archives, so turn that feed on
-  (`FEED_POLL_MINUTES` + `WOWHEAD_ENABLED`) to feed it.
+- **News Highlights** — a calm two-zone news page that replaces the trio of
+  news bots: **Top stories** (retail blue-tracker posts, live patch
+  notes/hotfixes, general WoW news) is the larger list up top, with a short
+  **PTR & Blizzard** corner below for test-realm coverage and other Blizzard
+  games. Items are sorted by their RSS section category (`Live`/`WoW` high,
+  `PTR`/`Blizzard` low); the classic-games sections (`Classic`/`Mists`/`TBC`)
+  stay off the page. It renders from news the Wowhead feed archives, so turn
+  that feed on (`FEED_POLL_MINUTES` + `WOWHEAD_ENABLED`) to feed it; the feed
+  loop nudges the board right after every news poll, so a new post reaches the
+  page without waiting for the board tick.
 - **Weekly Events** — the week's Raid-Helper events at a glance (localised time
   stamp, sign-up count, a "Sign up ➜" jump-link), fed by the Raid-Helper webhook
   (`RAIDHELPER_WEBHOOK_SECRET`). Sign-ups stay in Raid-Helper; the board is
@@ -205,6 +212,18 @@ interval and edit themselves in place (never re-post). The shipped boards:
 Create one with `/board create`, refresh on a schedule with
 `BOARD_REFRESH_MINUTES`, and keep M+ scores current with `SCORE_REFRESH_MINUTES`
 (or a member's own `/refreshme`).
+
+**Sticky pages** are the boards' hand-written sibling: multi-message Discord
+markdown pages (headers, `-#` subtext, emoji) the bot owns — the **Rules & Info**
+welcome page and the **Guides & Resources** link page ship first. Place one with
+`/page post page:<name> channel:#somewhere`: the first run posts it, pointing it
+at a different channel deletes the old copy and re-posts there, and the same
+channel does nothing (or quietly applies a copy edit in place). The copy itself
+lives in [`ftabot/content/page_*.json`](ftabot/content/) and is edited from the
+web dashboard's **Content** section (`/content`, unlocked by `SYNC_TOKEN`); the
+board loop keeps placed pages in sync, and pages support the same live
+`{tokens}` as Rules & Info. Pages always post with mentions disabled, so pasted
+`@role`/`<@id>` text never pings.
 
 Every outbound message — boards **and** feed alerts — passes through one
 **deny-by-default posting guardrail** before it can reach Discord, set by
@@ -232,6 +251,7 @@ ever sees it, and a deploy can never surprise the server. Full workflow in
 | `GET /gm` | **GM dashboard** — health score, officer corps, composition, buffs. |
 | `GET /raid` | **Raid Leader** — readiness board (`?team=` to filter). |
 | `GET /loot` | **Loot** — fairness table + recent awards. |
+| `GET /content` | **Content** — edit the sticky pages' Discord markdown (one box per message); unlock with `SYNC_TOKEN`. |
 | `GET /admin` | **Sync** — a "Sync now" button; unlock with `SYNC_TOKEN` (stored in an http-only cookie). |
 | `POST /api/sync` | Trigger a sync (`X-Sync-Token` header, unlock cookie, or `?token=`). |
 | `GET /api/sync/status` | Whether a sync is running + the last result. |
@@ -243,6 +263,7 @@ ever sees it, and a deploy can never surprise the server. Full workflow in
 | `GET /api/raid` | Readiness board JSON (`?team=`). |
 | `GET /api/loot` | Loot fairness + recent awards JSON. |
 | `GET /api/loot/priority?item=<name>` | Advisory loot priority ranking JSON. |
+| `GET/PUT/DELETE /api/content/{page}` | **Sticky-page copy** — read, save, or revert a page's messages (auth like `/api/sync`). |
 | `POST /webhooks/raidhelper` | **Raid-Helper webhook** — verifies a shared secret (`?token=`/`X-Signature`), posts the event to Discord. |
 | `POST /api/upload/savedvars` | **Data-spine intake** — RCLootCouncil loot + GRM identity `.lua` (auth `SAVEDVARS_UPLOAD_SECRET`); the GM's `scripts/upload_savedvars.py` posts here. |
 | `GET /healthz` | Health check + member count. |

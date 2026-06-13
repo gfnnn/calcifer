@@ -46,3 +46,16 @@ class BotBoardMessenger:
             allowed_mentions=self._NO_PINGS,
         )
         return True
+
+    async def delete(self, channel_id: str, message_id: str) -> bool:
+        """Delete an owned message (used when a sticky page moves channel).
+
+        Returns False if it was already gone, mirroring ``edit``.
+        """
+        channel = await self._channel(channel_id)
+        try:
+            message = await channel.fetch_message(int(message_id))
+        except discord.NotFound:
+            return False
+        await message.delete()
+        return True

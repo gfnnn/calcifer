@@ -1185,6 +1185,120 @@ class Database:
         )
         await self.conn.commit()
 
+    # -- sticky pages ----------------------------------------------------------
+
+    @staticmethod
+    def _sticky_page_row(r: aiosqlite.Row) -> dict:
+        try:
+            message_ids = json.loads(r["message_ids_json"] or "[]")
+        except json.JSONDecodeError:
+            message_ids = []
+        return {
+            "page_name": r["page_name"],
+            "channel_id": r["channel_id"],
+            "posted_channel_id": r["posted_channel_id"],
+            "message_ids": [str(m) for m in message_ids],
+            "content_hash": r["content_hash"],
+        }
+
+    async def upsert_sticky_page(self, page_name: str, channel_id: str) -> None:
+        """Register a page's requested channel (or move it to a new one).
+
+        Only the *destination* changes here: the posted message ids and the
+        channel they live in are kept, so the next refresh can delete the old
+        copy before re-posting in the new channel.
+        """
+        await self.conn.execute(
+            "INSERT INTO sticky_pages (page_name, channel_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (page_name) DO UPDATE SET channel_id = excluded.channel_id, "
+            "updated_at = excluded.updated_at",
+            (page_name, str(channel_id), now_iso(), now_iso()),
+        )
+        await self.conn.commit()
+
+    async def get_sticky_page(self, page_name: str) -> dict | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM sticky_pages WHERE page_name = ?", (page_name,)
+        )
+        row = await cur.fetchone()
+        return self._sticky_page_row(row) if row else None
+
+    async def sticky_pages(self) -> list[dict]:
+        """All placed pages, oldest first."""
+        cur = await self.conn.execute("SELECT * FROM sticky_pages ORDER BY rowid")
+        return [self._sticky_page_row(r) for r in await cur.fetchall()]
+
+    async def set_sticky_page_messages(
+        self,
+        page_name: str,
+        message_ids: list[str],
+        content_hash: str | None,
+        posted_channel_id: str | None,
+    ) -> None:
+        """Record where a page's live messages actually sit after a (re)post."""
+        await self.conn.execute(
+            "UPDATE sticky_pages SET message_ids_json = ?, content_hash = ?, "
+            "posted_channel_id = ?, updated_at = ? WHERE page_name = ?",
+            (
+                json.dumps([str(m) for m in message_ids]),
+                content_hash,
+                str(posted_channel_id) if posted_channel_id is not None else None,
+                now_iso(),
+                page_name,
+            ),
+        )
+        await self.conn.commit()
+
+    async def delete_sticky_page(self, page_name: str) -> bool:
+        cur = await self.conn.execute(
+            "DELETE FROM sticky_pages WHERE page_name = ?", (page_name,)
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    # -- dashboard-edited content documents -------------------------------------
+
+    async def get_content_doc(self, name: str) -> dict | None:
+        """A dashboard-saved content document, or None to use the bundled file."""
+        cur = await self.conn.execute(
+            "SELECT body_json FROM content_docs WHERE name = ?", (name,)
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        try:
+            doc = json.loads(row["body_json"])
+        except json.JSONDecodeError:
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    async def set_content_doc(self, name: str, doc: dict) -> None:
+        """Save (or replace) a content document edited from the dashboard."""
+        await self.conn.execute(
+            "INSERT INTO content_docs (name, body_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (name) DO UPDATE SET body_json = excluded.body_json, "
+            "updated_at = excluded.updated_at",
+            (name, json.dumps(doc, ensure_ascii=False), now_iso()),
+        )
+        await self.conn.commit()
+
+    async def content_doc_updated_at(self, name: str) -> str | None:
+        """When a dashboard override was last saved (None = no override)."""
+        cur = await self.conn.execute(
+            "SELECT updated_at FROM content_docs WHERE name = ?", (name,)
+        )
+        row = await cur.fetchone()
+        return row["updated_at"] if row else None
+
+    async def delete_content_doc(self, name: str) -> bool:
+        """Drop a dashboard override, reverting to the bundled copy."""
+        cur = await self.conn.execute(
+            "DELETE FROM content_docs WHERE name = ?", (name,)
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
     # -- M+ affixes -------------------------------------------------------------
 
     async def upsert_affix_week(

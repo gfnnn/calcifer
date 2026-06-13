@@ -38,7 +38,7 @@ COLOR_CHOICES = [
 # A representative event per source, used by /feed test.
 _SAMPLES: dict[str, tuple[str, str, str, list[str], str]] = {
     # source: (event_type, title, summary, categories, severity)
-    "wowhead": ("wowhead.patch-notes", "Sample: Patch 11.2 PTR Notes",
+    "wowhead": ("wowhead.patch-notes", "Sample: Patch 11.2 Hotfixes Posted",
                 "Class changes, new raid, and more.", ["News"], "info"),
     "raiderio_mplus": ("raiderio.mplus-run", "🔑 Sample: Emberlyn timed a +20 City ⭐⭐",
                        "A shiny test key.", ["Mythic+"], "info"),

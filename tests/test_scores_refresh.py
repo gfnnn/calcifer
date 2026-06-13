@@ -88,6 +88,24 @@ async def test_refresh_boards_renders_known_skips_unknown(db, monkeypatch):
     assert rendered_rows == ["hot20"]
 
 
+async def test_refresh_boards_only_type_narrows_the_nudge(db, monkeypatch):
+    # The feed loop nudges just the News board after a poll; everything else
+    # waits for its own tick.
+    await db.add_board("hot20", "100")
+    await db.add_board("news_highlights", "200")
+
+    rendered_rows = []
+
+    async def _fake_refresh(database, config, board, row, messenger, gate):
+        rendered_rows.append(row["board_type"])
+        return "unchanged"
+
+    monkeypatch.setattr("ftabot.boards.refresh_board", _fake_refresh)
+    n = await scores.refresh_boards(db, CFG, bot=object(), only_type="news_highlights")
+    assert n == 1
+    assert rendered_rows == ["news_highlights"]
+
+
 async def test_refresh_boards_swallows_a_per_board_error(db, monkeypatch, caplog):
     import logging
 

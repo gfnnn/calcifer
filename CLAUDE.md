@@ -124,11 +124,13 @@ Key flow and layering:
   (markdown, `<t:…>` timestamps, mentions, embeds, Components V2, limits) is
   catalogued in [`docs/communication.md`](docs/communication.md).
 - **`content/`** — GM-editable JSON (`guides.json`, `rules.json`) for the managed
-  Guides and Rules boards. `content.load(name, default)` reads the bundled file and
-  falls back to a default on a missing/malformed file, so a board never crashes on a
-  hand-edit typo.
+  Guides and Rules boards, plus `page_*.json` (the sticky pages' bundled default
+  copy; the dashboard saves overrides to `content_docs` instead of the file).
+  `content.load(name, default)` reads the bundled file and falls back to a
+  default on a missing/malformed file, so a board never crashes on a hand-edit
+  typo.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
-  `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `scores`
+  `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `scores`
   (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
   permission gate (Manage-Server perm or the admin role) so every cog gates through
   one helper. Registered in `bot.py:setup_hook`; setting `DISCORD_GUILD_ID` makes
@@ -137,6 +139,8 @@ Key flow and layering:
 - **`web.py`** — `create_app(config)` returns the FastAPI app (HTML pages + JSON
   API + Swagger at `/docs`). Officer/sync endpoints are gated by `SYNC_TOKEN`
   (compared in constant time); the Raid-Helper webhook verifies a shared secret.
+  The `/content` dashboard section (+ `GET/PUT/DELETE /api/content/{page}`) edits
+  the sticky pages' copy into `content_docs`, sharing the sync-token unlock.
 - **`serve.py`** — all-in-one host entry point: runs uvicorn, the bot, the periodic
   sync, and the feed/board/score loops as asyncio tasks on one loop. A long-running
   task dying brings the process down so the host restarts cleanly; one-shot setup
@@ -181,12 +185,26 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   `recruitment` (We're Looking; officer-configured via `/recruit`, state in
   `recruitment_config`). The `/board` cog and the `_board_loop`/`_score_loop`
   in `serve.py` drive them.
+- **`pages.py`** — **sticky pages**: multi-message, GM-authored Discord-markdown
+  pages the bot owns (currently `rules_info` + `guides_resources`). Copy lives in
+  `content/page_<name>.json` with a dashboard override in the `content_docs`
+  table; `render_page` substitutes the same live `{tokens}` as the Rules board
+  but posts the GM's words verbatim (no voice sanitise). `refresh_page` is the
+  reconcile engine (pure of Discord, drives the boards messenger + `delete`):
+  first run posts, a channel change deletes the old copy and re-posts, same
+  channel + same copy is a no-op, and a copy edit edits each message in place.
+  Placement is the `/page` cog (`cogs/pages.py`); the destination resolves
+  through the `PostGate` with `promoted=True` (the channel is an officer's
+  explicit choice). The board loop in `serve.py` also reconciles placed pages, so
+  dashboard edits go live within one refresh interval. Adding a page = a bundled
+  `content/page_<name>.json` + one `PageDef` in `PAGES`; the `/page` choices and
+  the dashboard Content section derive from the registry.
 - **`posting.py`** — the **deny-by-default posting guardrail**. *Every* outbound
-  message (boards and feed alerts) resolves its destination through a `PostGate`
-  first: `POSTING_MODE=off` posts nothing, `test` redirects to `TEST_CHANNEL_ID`,
-  `live` lets only `/board promote`d surfaces reach their real channel. The
-  off → test → promote flow lives in the `/board` cog. New posting surfaces must
-  route through the gate.
+  message (boards, sticky pages and feed alerts) resolves its destination through
+  a `PostGate` first: `POSTING_MODE=off` posts nothing, `test` redirects to
+  `TEST_CHANNEL_ID`, `live` lets only `/board promote`d surfaces reach their real
+  channel. The off → test → promote flow lives in the `/board` cog. New posting
+  surfaces must route through the gate.
 
 ### SQLite tables (in `db_schema.py:SCHEMA`)
 
@@ -196,6 +214,8 @@ points); feed hub: `seen_items`, `feed_rules`, `feed_outbox`, `feed_mutes`,
 `feed_digest_queue`, `feed_subscriptions`, `news_items`, `mythic_affixes`,
 `realm_progress`, `calendar_events`, `mplus_bests`; boards: `boards`,
 `board_baselines`, `recruitment_config` (officer-set recruitment board state);
+sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
+(dashboard copy overrides for the bundled `content/*.json`);
 and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
