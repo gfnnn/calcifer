@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from . import content
 from .boards.base import BoardPayload
-from .boards.rules import SafeDict, live_tokens, safe_format
+from .prose import SafeDict, live_tokens, safe_format
 
 if TYPE_CHECKING:
     from .config import Config

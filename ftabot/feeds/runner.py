@@ -200,6 +200,18 @@ def build_sources(config: Config) -> list[FeedSource]:
     sources: list[FeedSource] = []
     if config.wowhead_enabled:
         sources.append(WowheadSource(config))
+    if config.blizzard_news_enabled:
+        from .rss_news import RssNewsSource
+
+        sources.append(
+            RssNewsSource(
+                config,
+                name="blizzard",
+                url=config.blizzard_news_rss_url,
+                event_type="blizzard.news",
+                tier="high",
+            )
+        )
     if config.mplus_feed_enabled:
         from .raiderio_mplus import RaiderIOMythicSource
 

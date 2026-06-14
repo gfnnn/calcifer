@@ -188,18 +188,16 @@ interval and edit themselves in place (never re-post). The shipped boards:
   **PTR & Blizzard** corner below for test-realm coverage and other Blizzard
   games. Items are sorted by their RSS section category (`Live`/`WoW` high,
   `PTR`/`Blizzard` low); the classic-games sections (`Classic`/`Mists`/`TBC`)
-  stay off the page. It renders from news the Wowhead feed archives, so turn
-  that feed on (`FEED_POLL_MINUTES` + `WOWHEAD_ENABLED`) to feed it; the feed
+  stay off the page. It renders from news the feeds archive — **Wowhead**
+  (`WOWHEAD_ENABLED`) and **Blizzard's official news** (`BLIZZARD_NEWS_ENABLED`,
+  archived into the top zone) — so turn the feed loop on (`FEED_POLL_MINUTES`)
+  to fill it. Adding another news feed is one `RssNewsSource` line; the feed
   loop nudges the board right after every news poll, so a new post reaches the
   page without waiting for the board tick.
 - **Weekly Events** — the week's Raid-Helper events at a glance (localised time
   stamp, sign-up count, a "Sign up ➜" jump-link), fed by the Raid-Helper webhook
   (`RAIDHELPER_WEBHOOK_SECRET`). Sign-ups stay in Raid-Helper; the board is
   read-only.
-- **Guides & Resources** and **Rules & Info** — managed posts Calcifer owns and
-  keeps current. Their content is GM-editable JSON in
-  [`ftabot/content/`](ftabot/content/); Rules & Info carries live `{tokens}`
-  (progression, member count, recruiting) so its facts never drift stale.
 - **Roster Pulse** — the guild's heartbeat: member count, activity, readiness
   and composition at a glance.
 - **Recruitment ("We're Looking")** — the guild's open front door: open slots
@@ -211,17 +209,18 @@ Create one with `/board create`, refresh on a schedule with
 `BOARD_REFRESH_MINUTES`, and keep M+ scores current with `SCORE_REFRESH_MINUTES`
 (or a member's own `/refreshme`).
 
-**Sticky pages** are the boards' hand-written sibling: multi-message Discord
-markdown pages (headers, `-#` subtext, emoji) the bot owns — the **Rules & Info**
-welcome page and the **Guides & Resources** link page ship first. Place one with
+**Sticky pages** are the boards' hand-written sibling and the single home for
+the guild's managed prose: multi-message Discord markdown pages (headers, `-#`
+subtext, emoji) the bot owns — the **Rules & Info** welcome page and the
+**Guides & Resources** link page. Place one with
 `/page post page:<name> channel:#somewhere`: the first run posts it, pointing it
 at a different channel deletes the old copy and re-posts there, and the same
 channel does nothing (or quietly applies a copy edit in place). The copy itself
 lives in [`ftabot/content/page_*.json`](ftabot/content/) and is edited from the
 web dashboard's **Content** section (`/content`, unlocked by `SYNC_TOKEN`); the
-board loop keeps placed pages in sync, and pages support the same live
-`{tokens}` as Rules & Info. Pages always post with mentions disabled, so pasted
-`@role`/`<@id>` text never pings.
+board loop keeps placed pages in sync, and pages carry the same live `{tokens}`
+(progression, member count, recruiting) so their facts never drift stale. Pages
+always post with mentions disabled, so pasted `@role`/`<@id>` text never pings.
 
 Every outbound message — boards **and** feed alerts — passes through one
 **deny-by-default posting guardrail** before it can reach Discord, set by

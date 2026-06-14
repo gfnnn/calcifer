@@ -29,8 +29,8 @@ from .. import brand
 from .base import Board, BoardPayload, register
 
 NEWS_TYPE = "news_highlights"
-_DEFAULT_HIGHLIGHTS = 8  # the high-priority zone is the page's larger list
-_DEFAULT_LATEST = 4  # the PTR/Blizzard corner stays short
+_DEFAULT_HIGHLIGHTS = 12  # the high-priority zone is the page's larger list
+_DEFAULT_LATEST = 6  # the PTR/Blizzard corner stays short
 
 # Per-event-type glyphs (unicode fallbacks; the cog/board layer can override by
 # custom emoji name later, like the rest of brand.ICONS).
@@ -40,6 +40,7 @@ _TYPE_GLYPH = {
     "wowhead.news": "📰",
     "wowhead.ptr": "🧪",
     "wowhead.blizzard": "❄️",
+    "blizzard.news": "📣",
 }
 
 

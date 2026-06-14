@@ -123,12 +123,17 @@ Key flow and layering:
   voice module). The full Discord formatting palette these render *through*
   (markdown, `<t:…>` timestamps, mentions, embeds, Components V2, limits) is
   catalogued in [`docs/communication.md`](docs/communication.md).
-- **`content/`** — GM-editable JSON (`guides.json`, `rules.json`) for the managed
-  Guides and Rules boards, plus `page_*.json` (the sticky pages' bundled default
-  copy; the dashboard saves overrides to `content_docs` instead of the file).
-  `content.load(name, default)` reads the bundled file and falls back to a
-  default on a missing/malformed file, so a board never crashes on a hand-edit
-  typo.
+- **`content/`** — GM-editable JSON: `page_*.json` (the **sticky pages'** bundled
+  default copy for Rules & Info and Guides & Resources; the dashboard saves
+  overrides to `content_docs` instead of the file) and `recruitment.json` (the
+  Recruitment board's cultural prose). `content.load(name, default)` reads the
+  bundled file and falls back to a default on a missing/malformed file, so a
+  surface never crashes on a hand-edit typo.
+- **`prose.py`** — the managed-prose token layer shared by the sticky pages and
+  the Recruitment board: `SafeDict` (keeps an unknown `{token}` visible),
+  `safe_format` (never crashes a render) and `live_tokens` (current
+  member-count/progression/recruiting values). One home so both surfaces import
+  the same substitution without a cycle.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
   `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `scores`
   (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
@@ -153,12 +158,15 @@ Raider.IO weekly affixes, Raider.IO realm progression, WoW Audit raids, WCL prog
 Raid-Helper webhooks) and posts branded Discord alerts.
 
 - **`feeds/`** — `base.py` (`FeedSource`/`FeedEvent`), one module per source
-  (`wowhead`, `raiderio_mplus`, `raiderio_affixes`, `raiderio_realm_progress`,
-  `wcl_prog`, `wowaudit_raids`), and `runner.py` whose `poll_once` is the pure-ish
+  (`wowhead`, `rss_news` (a generic config-driven RSS news source, e.g. Blizzard
+  official news), `raiderio_mplus`, `raiderio_affixes`, `raiderio_realm_progress`,
+  `wcl_prog`, `wowaudit_raids`), the shared pure RSS reader `_rss.py` (used by
+  `wowhead` + `rss_news`), and `runner.py` whose `poll_once` is the pure-ish
   pipeline: fetch → dedup (`seen_items`) → route → render → publish. It takes
   injected sources, an aiohttp session, and a `send` coroutine so it is fully
   testable offline. Some sources also persist state other features read (affixes →
-  `mythic_affixes`, realm progress → `realm_progress`, news → `news_items`).
+  `mythic_affixes`, realm progress → `realm_progress`, news → `news_items`; both
+  `wowhead` and `rss_news` archive into `news_items` for the News board).
 - **`router.py`** — pure `match → route → style` logic over the `feed_rules` table,
   with a default-channel fallback so nothing is lost. Keep matching pure/testable.
   A rule whose style is `{"mode": "digest"}` buffers events into `feed_digest_queue`
@@ -180,15 +188,15 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   and one renderer per board. Renderers are pure `(db, config, board_config) →
   payload`, offline-tested like `metrics.py`, and self-register into `REGISTRY` on
   import. Current boards: `hot20` (Calcifer's Hot 20 M+ leaderboard), `news`
-  (News Highlights), `events` (Weekly Events from Raid-Helper), `guides`
-  (Guides & Resources), `rules` (Rules & Info), `pulse` (Roster Pulse),
-  `recruitment` (We're Looking; officer-configured via `/recruit`, state in
-  `recruitment_config`). The `/board` cog and the `_board_loop`/`_score_loop`
-  in `serve.py` drive them.
+  (News Highlights), `events` (Weekly Events from Raid-Helper), `pulse` (Roster
+  Pulse), `recruitment` (We're Looking; officer-configured via `/recruit`, state
+  in `recruitment_config`). The `/board` cog and the `_board_loop`/`_score_loop`
+  in `serve.py` drive them. (Rules & Info and Guides & Resources are **not**
+  boards — they are sticky pages; see `pages.py`.)
 - **`pages.py`** — **sticky pages**: multi-message, GM-authored Discord-markdown
   pages the bot owns (currently `rules_info` + `guides_resources`). Copy lives in
   `content/page_<name>.json` with a dashboard override in the `content_docs`
-  table; `render_page` substitutes the same live `{tokens}` as the Rules board
+  table; `render_page` substitutes the live `{tokens}` from `prose.py`
   but posts the GM's words verbatim (no voice sanitise). `refresh_page` is the
   reconcile engine (pure of Discord, drives the boards messenger + `delete`):
   first run posts, a channel change deletes the old copy and re-posts, same
