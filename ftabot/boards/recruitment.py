@@ -17,8 +17,8 @@ import json
 import discord
 
 from .. import brand, content
+from ..prose import SafeDict, live_tokens, safe_format
 from .base import Board, BoardPayload, register
-from .rules import SafeDict, live_tokens, safe_format
 
 RECRUITMENT_TYPE = "recruitment"
 

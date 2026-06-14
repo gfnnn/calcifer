@@ -20,13 +20,12 @@ from ._guards import require_gm_or_discord_admin
 if TYPE_CHECKING:
     from ..bot import FtaBot
 
-# Friendly names for the registered board types.
+# Friendly names for the registered board types. (Rules & Info and Guides &
+# Resources are not boards — they are sticky pages, managed via /page.)
 _BOARD_NAMES = {
     "hot20": "Calcifer's Hot 20",
     "news_highlights": "News Highlights",
     "weekly_events": "Weekly Events",
-    "guides": "Guides & Resources",
-    "rules_info": "Rules & Info",
     "roster_pulse": "Roster Pulse",
     "recruitment": "Recruitment",
 }

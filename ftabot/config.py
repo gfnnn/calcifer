@@ -118,6 +118,14 @@ class Config:
     wowhead_rss_url: str = "https://www.wowhead.com/news/rss/all"
     wowhead_enabled: bool = True
 
+    # Blizzard official news RSS — a second source for the News board, archived
+    # alongside Wowhead so the board shows more. The default points at the WoW
+    # news feed; override the URL for a different (e.g. all-Blizzard) feed.
+    blizzard_news_enabled: bool = True
+    blizzard_news_rss_url: str = (
+        "https://news.blizzard.com/en-us/world-of-warcraft/rss"
+    )
+
     # Raider.IO Mythic+ feed (off by default — it polls many characters).
     mplus_feed_enabled: bool = False
     mplus_alert_min_level: int = 18  # only announce timed keys at/above this
@@ -348,6 +356,11 @@ class Config:
                 or "https://www.wowhead.com/news/rss/all"
             ),
             wowhead_enabled=_bool("WOWHEAD_ENABLED", True),
+            blizzard_news_enabled=_bool("BLIZZARD_NEWS_ENABLED", True),
+            blizzard_news_rss_url=(
+                _clean(os.environ.get("BLIZZARD_NEWS_RSS_URL"))
+                or "https://news.blizzard.com/en-us/world-of-warcraft/rss"
+            ),
             mplus_feed_enabled=_bool("MPLUS_FEED_ENABLED", False),
             mplus_alert_min_level=_int("MPLUS_ALERT_MIN_LEVEL") or 18,
             mplus_feed_member_cap=_int("MPLUS_FEED_MEMBER_CAP") or 40,

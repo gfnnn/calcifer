@@ -8,17 +8,13 @@ This replaces the role PatchBot played.
 from __future__ import annotations
 
 import re
-from email.utils import parsedate_to_datetime
-from xml.etree import ElementTree
 
 import aiohttp
 
+from ._rss import iter_rss_items, parse_pubdate, strip_html
 from .base import FeedEvent, FeedSource
 
 DEFAULT_RSS_URL = "https://www.wowhead.com/news/rss/all"
-
-_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"\s+")
 
 
 # Wowhead's RSS marks each item with a <category> naming its section (verified
@@ -98,51 +94,21 @@ def news_tier(event_type: str | None) -> str | None:
     return "low" if event_type in _LOW_TIER_TYPES else "high"
 
 
-def _clean_summary(html: str | None, *, limit: int = 280) -> str | None:
-    if not html:
-        return None
-    text = _WS_RE.sub(" ", _TAG_RE.sub("", html)).strip()
-    if not text:
-        return None
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-
-
-def _to_iso(pub_date: str | None) -> str | None:
-    if not pub_date:
-        return None
-    try:
-        return parsedate_to_datetime(pub_date).isoformat()
-    except (TypeError, ValueError):
-        return None
-
-
 def parse_rss(xml: str) -> list[FeedEvent]:
     """Parse a Wowhead RSS document into FeedEvents (pure, offline-testable)."""
-    try:
-        root = ElementTree.fromstring(xml)
-    except ElementTree.ParseError:
-        return []
-
     events: list[FeedEvent] = []
-    for item in root.iter("item"):
-        title = (item.findtext("title") or "").strip()
-        if not title:
-            continue
-        link = (item.findtext("link") or "").strip() or None
-        guid = (item.findtext("guid") or "").strip() or link or title
-        categories = [
-            (c.text or "").strip() for c in item.findall("category") if (c.text or "").strip()
-        ]
+    for item in iter_rss_items(xml):
+        categories = item["categories"]
         events.append(
             FeedEvent(
                 source="wowhead",
-                event_type=_classify(title, categories),
-                external_id=guid,
-                title=title,
-                url=link,
-                summary=_clean_summary(item.findtext("description")),
+                event_type=_classify(item["title"], categories),
+                external_id=item["guid"],
+                title=item["title"],
+                url=item["link"],
+                summary=strip_html(item["description"]),
                 categories=categories,
-                published_at=_to_iso(item.findtext("pubDate")),
+                published_at=parse_pubdate(item["pubdate"]),
                 # Wowhead headlines/descriptions are relayed verbatim, so the
                 # publisher must not rewrite their punctuation.
                 authored=False,

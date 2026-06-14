@@ -158,28 +158,29 @@ async def test_board_renders_both_zones(db):
 
 
 async def test_board_zone_sizes_favour_high_priority(db):
-    # 12 high + 6 low archived; the defaults show 8 up top and only 4 below.
+    # 16 high + 9 low archived; the defaults cap the board at 12 up top and 6
+    # below, so the zones fill but stay bounded.
     items = [
-        _item(f"h{i}", f"Big story {i:02d}", tier="high", event_type="wowhead.news",
-              published_at=f"2026-06-{10 + i:02d}T00:00:00+00:00")
-        for i in range(12)
+        _item(f"h{i:02d}", f"Big story {i:02d}", tier="high", event_type="wowhead.news",
+              published_at=f"2026-06-{1 + i:02d}T00:00:00+00:00")
+        for i in range(16)
     ] + [
-        _item(f"l{i}", f"PTR scrap {i:02d}", tier="low", event_type="wowhead.ptr",
-              published_at=f"2026-05-{10 + i:02d}T00:00:00+00:00")
-        for i in range(6)
+        _item(f"l{i:02d}", f"PTR scrap {i:02d}", tier="low", event_type="wowhead.ptr",
+              published_at=f"2026-05-{1 + i:02d}T00:00:00+00:00")
+        for i in range(9)
     ]
     await db.record_news(items, keep=60)
     payload = await NewsHighlightsBoard().render(db, Config(), {})
     desc = payload.embed.description
-    assert sum(1 for i in range(12) if f"Big story {i:02d}" in desc) == 8
-    assert sum(1 for i in range(6) if f"PTR scrap {i:02d}" in desc) == 4
+    assert sum(1 for i in range(16) if f"Big story {i:02d}" in desc) == 12
+    assert sum(1 for i in range(9) if f"PTR scrap {i:02d}" in desc) == 6
     # ...and a board config can resize either zone.
     payload = await NewsHighlightsBoard().render(
         db, Config(), {"highlights": 2, "latest": 1}
     )
     desc = payload.embed.description
-    assert sum(1 for i in range(12) if f"Big story {i:02d}" in desc) == 2
-    assert sum(1 for i in range(6) if f"PTR scrap {i:02d}" in desc) == 1
+    assert sum(1 for i in range(16) if f"Big story {i:02d}" in desc) == 2
+    assert sum(1 for i in range(9) if f"PTR scrap {i:02d}" in desc) == 1
 
 
 async def test_board_renders_with_only_one_zone_populated(db):

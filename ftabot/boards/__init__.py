@@ -9,12 +9,10 @@ offline-testable. Concrete board renderers register themselves into ``REGISTRY``
 
 from . import (
     events,  # noqa: F401 - registers the Weekly Events board
-    guides,  # noqa: F401 - registers the Guides & Resources board
     hot20,  # noqa: F401 - imported for its side effect: registers Hot 20
     news,  # noqa: F401 - registers the News Highlights board
     pulse,  # noqa: F401 - registers the Roster Pulse board
     recruitment,  # noqa: F401 - registers the Recruitment board
-    rules,  # noqa: F401 - registers the Rules & Info board
 )
 from .base import REGISTRY, Board, BoardPayload, register
 from .engine import BoardMessenger, refresh_board

@@ -168,7 +168,9 @@ async def test_wcl_source_disabled_returns_empty():
 
 
 def test_build_sources_empty_when_all_disabled():
-    cfg = dataclasses.replace(Config(), wowhead_enabled=False)
+    cfg = dataclasses.replace(
+        Config(), wowhead_enabled=False, blizzard_news_enabled=False
+    )
     assert build_sources(cfg) == []
 
 
@@ -176,6 +178,7 @@ def test_build_sources_includes_every_enabled_source():
     cfg = dataclasses.replace(
         Config(),
         wowhead_enabled=True,
+        blizzard_news_enabled=True,
         mplus_feed_enabled=True,
         raid_reminder_enabled=True,
         wowaudit_api_key="key",  # makes wowaudit_enabled True
@@ -187,6 +190,7 @@ def test_build_sources_includes_every_enabled_source():
     names = {s.name for s in build_sources(cfg)}
     assert names == {
         "wowhead",
+        "blizzard",
         "raiderio_mplus",
         "wowaudit_raids",
         "wcl_prog",
@@ -197,7 +201,7 @@ def test_build_sources_includes_every_enabled_source():
 
 def test_build_sources_skips_realm_progress_without_raids():
     cfg = dataclasses.replace(
-        Config(), wowhead_enabled=False,
+        Config(), wowhead_enabled=False, blizzard_news_enabled=False,
         realm_progress_feed_enabled=True, realm_progress_raids=(),
     )
     assert build_sources(cfg) == []  # enabled but no raids configured -> skipped
