@@ -112,8 +112,12 @@ Key flow and layering:
   re-enrichment; raiders are always enriched.
 - **`metrics.py`** — pure scoring functions (activity, readiness, guild health,
   loot priority). No I/O — keep it pure and unit-test it directly.
-- **`recruit.py`** (pure scout scoring: weak-slot detection + trajectory) +
-  **`scout.py`** (orchestrates WCL/Raider.IO discovery) back the `/scout` command.
+- **`recruit.py`** (pure scout scoring: weak-slot detection + trajectory +
+  `LEAD_STATES`) + **`scout.py`** (orchestrates WCL/Raider.IO discovery; pure
+  `lead_dicts` flattens reports into leads) back the `/scout` command and the
+  `/recruit lead` recruitment funnel (`scout_leads` table). There is no LFG
+  *listing* API on Raider.IO/WoWProgress, so the funnel inverts the scout: the
+  candidates it surfaces (with their `lfg_active` flag) are the captured leads.
 - **`scores.py`** — targeted, bounded Mythic+ score refresh (raiders + top
   scorers) that re-pulls only who matters, then nudges the living boards.
 - **`models.py`** (`Member` dataclass + `details_json` blob, WoW reference data),
@@ -223,8 +227,10 @@ points); feed hub: `seen_items`, `feed_rules`, `feed_outbox`, `feed_mutes`,
 `realm_progress`, `calendar_events`, `mplus_bests`; boards: `boards`,
 `board_baselines`, `recruitment_config` (officer-set recruitment board state);
 sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
-(dashboard copy overrides for the bundled `content/*.json`);
-and `schema_migrations` (migration bookkeeping).
+(dashboard copy overrides for the bundled `content/*.json`); recruitment funnel:
+`scout_leads` (scouted candidates tracked through new→contacted→trialing→
+joined/passed; discovered fields refreshed by a re-scout, officer state/notes
+preserved); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
 

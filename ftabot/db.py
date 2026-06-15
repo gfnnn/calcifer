@@ -1341,6 +1341,109 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
+    # -- recruitment leads (scout funnel) -------------------------------------
+
+    @staticmethod
+    def _lead_row(r: aiosqlite.Row) -> dict:
+        return {
+            "id": r["id"],
+            "name": r["name"],
+            "realm": r["realm"],
+            "region": r["region"],
+            "class_name": r["class_name"],
+            "spec": r["spec"],
+            "role": r["role"],
+            "item_level": r["item_level"],
+            "score": r["score"],
+            "lfg": bool(r["lfg"]),
+            "guild_name": r["guild_name"],
+            "state": r["state"],
+            "notes": r["notes"],
+            "source": r["source"],
+            "first_seen": r["first_seen"],
+            "updated_at": r["updated_at"],
+        }
+
+    async def upsert_lead(self, lead: dict) -> int:
+        """Insert a scouted lead or refresh its discovered fields, returning its id.
+
+        Officer-owned ``state`` and ``notes`` are deliberately left out of the
+        UPDATE, so a re-scout never resets a lead an officer has already moved
+        along the funnel (the sync-vs-manual ownership rule, applied to leads).
+        """
+        now = now_iso()
+        await self.conn.execute(
+            "INSERT INTO scout_leads "
+            "(name, realm, region, class_name, spec, role, item_level, score, "
+            " lfg, guild_name, source, state, first_seen, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?) "
+            "ON CONFLICT (name, realm, region) DO UPDATE SET "
+            "  class_name = excluded.class_name, spec = excluded.spec, "
+            "  role = excluded.role, item_level = excluded.item_level, "
+            "  score = excluded.score, lfg = excluded.lfg, "
+            "  guild_name = excluded.guild_name, source = excluded.source, "
+            "  updated_at = excluded.updated_at",
+            (
+                lead["name"], lead["realm"], lead["region"],
+                lead.get("class_name"), lead.get("spec"), lead.get("role"),
+                lead.get("item_level"), lead.get("score"),
+                1 if lead.get("lfg") else 0, lead.get("guild_name"),
+                lead.get("source") or "scout", now, now,
+            ),
+        )
+        await self.conn.commit()
+        cur = await self.conn.execute(
+            "SELECT id FROM scout_leads WHERE name = ? AND realm = ? AND region = ?",
+            (lead["name"], lead["realm"], lead["region"]),
+        )
+        row = await cur.fetchone()
+        return row["id"]
+
+    async def leads(self, *, state: str | None = None, limit: int = 50) -> list[dict]:
+        """Leads for the officer funnel: un-contacted (``new``) first, then by score."""
+        sql = "SELECT * FROM scout_leads"
+        params: list = []
+        if state:
+            sql += " WHERE state = ?"
+            params.append(state)
+        sql += (
+            " ORDER BY (state = 'new') DESC, COALESCE(score, 0) DESC, "
+            "updated_at DESC LIMIT ?"
+        )
+        params.append(limit)
+        cur = await self.conn.execute(sql, params)
+        return [self._lead_row(r) for r in await cur.fetchall()]
+
+    async def get_lead(self, lead_id: int) -> dict | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM scout_leads WHERE id = ?", (lead_id,)
+        )
+        row = await cur.fetchone()
+        return self._lead_row(row) if row else None
+
+    async def set_lead_state(self, lead_id: int, state: str) -> bool:
+        cur = await self.conn.execute(
+            "UPDATE scout_leads SET state = ?, updated_at = ? WHERE id = ?",
+            (state, now_iso(), lead_id),
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def set_lead_note(self, lead_id: int, note: str | None) -> bool:
+        cur = await self.conn.execute(
+            "UPDATE scout_leads SET notes = ?, updated_at = ? WHERE id = ?",
+            (note, now_iso(), lead_id),
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def delete_lead(self, lead_id: int) -> bool:
+        cur = await self.conn.execute(
+            "DELETE FROM scout_leads WHERE id = ?", (lead_id,)
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
     # -- M+ affixes -------------------------------------------------------------
 
     async def upsert_affix_week(

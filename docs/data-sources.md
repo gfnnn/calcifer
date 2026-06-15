@@ -227,6 +227,47 @@ parser), [`services/rclootcouncil.py`](../ftabot/services/rclootcouncil.py) and
 
 ---
 
+## 6. Content feeds (RSS/Atom) + WoWProgress ranking
+
+Beyond the character APIs, the Calcifer feed hub consumes keyless content feeds,
+each wrapped as a [`FeedSource`](../ftabot/feeds/base.py) (fetch → pure parse →
+`FeedEvent`). All default-off and self-enable from config.
+
+| Source | Feed | Transport | Notes |
+| --- | --- | :---: | --- |
+| **Wowhead news** | `https://www.wowhead.com/news/rss/all` | RSS 2.0 | Patch notes / blue posts / news; archives to the News board. |
+| **Blizzard WoW news** | `https://news.blizzard.com/en-us/world-of-warcraft/rss` | RSS 2.0 | Official news via the generic `rss_news` source; archives beside Wowhead (deduped). |
+| **YouTube uploads** | `https://www.youtube.com/feeds/videos.xml?channel_id=<UC…>` | Atom | New videos from configured channel ids; keyless, one feed per channel. |
+
+**Reliability note:** several of these sites (Wowhead, Blizzard, WoWProgress,
+Reddit) sit behind Cloudflare and 403 a default fetcher, so a poller should send
+a real `User-Agent`; a feed returning nothing is usually a blocked request.
+
+### WoWProgress — guild ranking (JSON Data Export; no RSS)
+
+- **Docs:** <https://www.wowprogress.com/post/37_Data_Export>. WoWProgress has
+  **no RSS feed**; ranking is JSON: append `/json_rank` to a guild URL →
+  `{"score","world_rank","area_rank","realm_rank"}` (a `/rating.{rating}` variant
+  pins a tier). A gzip **batch** export (`/export/ranks/`) covers whole realms;
+  their terms require it when updating many guilds.
+- **Terms (enforced in our surfaces):** free, but every page showing the data
+  must link to and credit WoWProgress.com — our alert sets the embed link to the
+  guild's WoWProgress page and appends "Data from WoWProgress.com".
+- **How we use it:** [`feeds/wowprogress.py`](../ftabot/feeds/wowprogress.py)
+  polls our guild's `json_rank` and fires on rank movement (single-guild by
+  design). Connector: [`services/wowprogress.py`](../ftabot/services/wowprogress.py).
+
+### Recruitment/LFG — why there is no inbound feed
+
+Neither Raider.IO nor WoWProgress exposes a *listing/search* API for LFG players:
+Raider.IO gives recruitment only as a per-character field (`recruitmentProfiles`,
+read by the scout as `lfg_active`), and WoWProgress has no recruitment API. So
+the Phase 5 funnel does not ingest an inbound feed; instead the `scout_leads`
+table is fed by the existing WCL+Raider.IO scout (`/recruit lead capture`),
+turning vetted, surfaced candidates into trackable leads. See [`ROADMAP.md`](ROADMAP.md).
+
+---
+
 ## How this maps into our database
 
 The `members` table keeps frequently-queried values as first-class columns

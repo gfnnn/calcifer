@@ -232,4 +232,12 @@ def build_sources(config: Config) -> list[FeedSource]:
         from .raiderio_realm_progress import RaiderIORealmProgressSource
 
         sources.append(RaiderIORealmProgressSource(config))
+    if config.youtube_feed_enabled and config.youtube_channel_ids:
+        from .youtube import YouTubeSource
+
+        sources.append(YouTubeSource(config))
+    if config.wowprogress_feed_enabled:
+        from .wowprogress import WowProgressSource
+
+        sources.append(WowProgressSource(config))
     return sources

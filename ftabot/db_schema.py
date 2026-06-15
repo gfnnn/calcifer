@@ -388,6 +388,32 @@ CREATE TABLE IF NOT EXISTS content_docs (
     body_json  TEXT NOT NULL,
     updated_at TEXT
 );
+
+-- Recruitment funnel: scouted candidates persisted as trackable leads. The
+-- "discovered" fields (class/spec/role/ilvl/score/lfg/guild) are refreshed by a
+-- re-scout; state + notes are officer-owned and never overwritten by a re-scout
+-- (the same sync-vs-manual ownership split the members table uses). Keyed by the
+-- character identity so a re-scout updates the same lead in place. A new table
+-- (no migration needed: connect() runs the schema with IF NOT EXISTS on open).
+CREATE TABLE IF NOT EXISTS scout_leads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    realm       TEXT NOT NULL,
+    region      TEXT NOT NULL,
+    class_name  TEXT,
+    spec        TEXT,
+    role        TEXT,
+    item_level  REAL,
+    score       REAL,
+    lfg         INTEGER NOT NULL DEFAULT 0,
+    guild_name  TEXT,
+    state       TEXT NOT NULL DEFAULT 'new',
+    notes       TEXT,
+    source      TEXT,
+    first_seen  TEXT,
+    updated_at  TEXT,
+    UNIQUE (name, realm, region)
+);
 """
 
 class ColumnOwner(Enum):

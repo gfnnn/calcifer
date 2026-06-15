@@ -19,6 +19,13 @@ from statistics import mean, pstdev
 from .metrics import clamp01, percentile_rank
 from .models import Member
 
+# --- recruitment funnel: lead lifecycle -------------------------------------
+
+# The states a scouted lead moves through. "new" = freshly discovered and
+# un-contacted (ranked above the rest); the rest track an officer's outreach.
+LEAD_STATES = ("new", "contacted", "trialing", "joined", "passed")
+
+
 # --- multi-season trajectory ------------------------------------------------
 
 
