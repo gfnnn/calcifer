@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import dataclasses
 
+import aiohttp
+
 from ftabot.config import Config
 from ftabot.feeds.runner import build_sources
 from ftabot.feeds.youtube import YouTubeSource, channel_url, parse_atom
@@ -63,6 +65,49 @@ def test_youtube_channel_url():
 async def test_youtube_source_no_channels_returns_empty():
     src = YouTubeSource(Config())  # no channel ids configured
     assert await src.fetch(session=None) == []
+
+
+class _FakeResp:
+    """A one-shot aiohttp-style response context manager."""
+
+    def __init__(self, *, xml=None, error=None):
+        self._xml = xml
+        self._error = error
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        if self._error is not None:
+            raise self._error
+
+    async def text(self):
+        return self._xml
+
+
+class _FakeSession:
+    def __init__(self, by_channel):
+        self._by_channel = by_channel
+
+    def get(self, url):
+        return self._by_channel[url.split("channel_id=")[-1]]
+
+
+async def test_youtube_fetch_isolates_a_bad_channel():
+    # A 404 on one channel must not block a healthy channel's uploads. The bad
+    # id is listed first to prove the loop continues past the failure.
+    session = _FakeSession(
+        {
+            "UCbad": _FakeResp(error=aiohttp.ClientError("404 Not Found")),
+            "UCgood": _FakeResp(xml=_YT_ATOM),
+        }
+    )
+    src = YouTubeSource(channel_ids=("UCbad", "UCgood"))
+    events = await src.fetch(session)
+    assert [e.external_id for e in events] == ["yt:ABC123", "yt:DEF456"]
 
 
 def test_build_sources_includes_youtube_when_configured():

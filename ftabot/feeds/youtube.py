@@ -12,11 +12,15 @@ Finding a channel id: on the channel page, View Source and search for
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from xml.etree import ElementTree
 
 import aiohttp
 
 from .base import FeedEvent, FeedSource
+
+log = logging.getLogger("ftabot.feeds")
 
 FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
@@ -90,8 +94,16 @@ class YouTubeSource(FeedSource):
     async def fetch(self, session: aiohttp.ClientSession) -> list[FeedEvent]:
         events: list[FeedEvent] = []
         for channel_id in self.channel_ids:
-            async with session.get(channel_url(channel_id)) as resp:
-                resp.raise_for_status()
-                xml = await resp.text()
+            try:
+                async with session.get(channel_url(channel_id)) as resp:
+                    resp.raise_for_status()
+                    xml = await resp.text()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                # Isolate per channel: one bad id (404/5xx/timeout) must not sink
+                # the others. The runner only catches at the whole-source level,
+                # so without this a single typo'd channel silently blocks every
+                # configured channel's uploads on every poll.
+                log.warning("youtube channel %s fetch failed: %s", channel_id, exc)
+                continue
             events.extend(parse_atom(xml))
         return events
