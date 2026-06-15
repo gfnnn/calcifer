@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 SCOUT_COLOR = 0x2EA3FF
 
 _ROLE_CHOICES = [app_commands.Choice(name=role.title(), value=role) for role in ROLE_ORDER]
+_STATE_CHOICES = [
+    app_commands.Choice(name=state.title(), value=state) for state in recruit.LEAD_STATES
+]
 
 # Every /recruit edit lands in the DB immediately; the board itself re-renders
 # on the next board tick (or an officer's /board refresh).
@@ -37,6 +40,11 @@ class RecruitCog(commands.Cog):
     recruit_rule = app_commands.Group(
         name="rule",
         description="Manage the trial rules on the recruitment board (officers).",
+        parent=recruit_cfg,
+    )
+    recruit_lead = app_commands.Group(
+        name="lead",
+        description="Track scouted recruitment leads through the funnel (officers).",
         parent=recruit_cfg,
     )
 
@@ -287,6 +295,138 @@ class RecruitCog(commands.Cog):
             return
         # Discord caps a message at 10 embeds; we send at most a few slots.
         await interaction.followup.send(embeds=embeds[:10])
+
+    # -- lead funnel ---------------------------------------------------------
+
+    @recruit_lead.command(
+        name="capture",
+        description="Run the scout and save the candidates as trackable leads.",
+    )
+    @app_commands.describe(
+        wow_class="Optional: scout one class instead of auto-detected weak slots"
+    )
+    async def lead_capture(
+        self, interaction: discord.Interaction, wow_class: str | None = None
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            reports = await scout.run_scout(self.bot.db, self.cfg, only_class=wow_class)
+        except ScoutUnavailable as exc:
+            await interaction.followup.send(f"🔥 Can't scout right now: {exc}", ephemeral=True)
+            return
+        except Exception as exc:  # noqa: BLE001 - surface, don't crash the command
+            await interaction.followup.send(f"Scout failed: {exc}", ephemeral=True)
+            return
+
+        leads = scout.lead_dicts(reports)
+        for lead in leads:
+            await self.bot.db.upsert_lead(lead)
+        if not leads:
+            await interaction.followup.send(
+                "Scouted, but no upgrades worth tracking. The roster holds. 🔥",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            f"Captured **{len(leads)}** lead(s). See them with `/recruit lead list`.",
+            ephemeral=True,
+        )
+
+    @recruit_lead.command(name="list", description="List recruitment leads (new first).")
+    @app_commands.describe(state="Optional: only leads in this funnel state")
+    @app_commands.choices(state=_STATE_CHOICES)
+    async def lead_list(
+        self,
+        interaction: discord.Interaction,
+        state: app_commands.Choice[str] | None = None,
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        rows = await self.bot.db.leads(state=state.value if state else None)
+        if not rows:
+            scope = f" in **{state.value}**" if state else ""
+            await interaction.response.send_message(
+                f"No leads{scope} yet. Run `/recruit lead capture` to scout some.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            embed=_leads_embed(rows, state.value if state else None), ephemeral=True
+        )
+
+    @recruit_lead.command(name="set", description="Move a lead to a funnel state.")
+    @app_commands.describe(lead_id="The lead number from /recruit lead list", state="New state")
+    @app_commands.choices(state=_STATE_CHOICES)
+    async def lead_set(
+        self,
+        interaction: discord.Interaction,
+        lead_id: int,
+        state: app_commands.Choice[str],
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        lead = await self.bot.db.get_lead(lead_id)
+        if lead is None:
+            await interaction.response.send_message(
+                f"No lead `#{lead_id}`. See `/recruit lead list`.", ephemeral=True
+            )
+            return
+        await self.bot.db.set_lead_state(lead_id, state.value)
+        await interaction.response.send_message(
+            f"**{lead['name']}-{lead['realm'].title()}** is now **{state.value}**.",
+            ephemeral=True,
+        )
+
+    @recruit_lead.command(name="note", description="Set or clear an officer note on a lead.")
+    @app_commands.describe(lead_id="The lead number from /recruit lead list", text="Note (empty to clear)")
+    async def lead_note(
+        self, interaction: discord.Interaction, lead_id: int, text: str | None = None
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        if await self.bot.db.set_lead_note(lead_id, (text or "").strip() or None):
+            what = "Note set." if text and text.strip() else "Note cleared."
+            await interaction.response.send_message(what, ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"No lead `#{lead_id}`. See `/recruit lead list`.", ephemeral=True
+            )
+
+    @recruit_lead.command(name="remove", description="Delete a lead from the funnel.")
+    @app_commands.describe(lead_id="The lead number from /recruit lead list")
+    async def lead_remove(self, interaction: discord.Interaction, lead_id: int) -> None:
+        if not await self._guard(interaction):
+            return
+        if await self.bot.db.delete_lead(lead_id):
+            await interaction.response.send_message(
+                f"Removed lead `#{lead_id}`.", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"No lead `#{lead_id}` to remove.", ephemeral=True
+            )
+
+
+def _leads_embed(rows: list[dict], state: str | None) -> discord.Embed:
+    title = f"🔎 Recruitment leads · {state}" if state else "🔎 Recruitment leads"
+    lines: list[str] = []
+    for r in rows[:25]:
+        lfg = " 🔍LFG" if r["lfg"] else ""
+        ilvl = f" · ilvl {r['item_level']:.0f}" if r["item_level"] else ""
+        score = f" · score {r['score']:.0f}" if r["score"] is not None else ""
+        guild = f" · ⟨{r['guild_name']}⟩" if r["guild_name"] else ""
+        note = f"\n   ↳ {r['notes']}" if r["notes"] else ""
+        lines.append(
+            f"`#{r['id']}` **{r['name']}-{r['realm'].title()}** "
+            f"({r['class_name'] or '?'}) · *{r['state']}*{score}{ilvl}{lfg}{guild}{note}"
+        )
+    embed = discord.Embed(
+        title=title, description="\n".join(lines), color=SCOUT_COLOR
+    )
+    embed.set_footer(text="Cold leads, not applicants. Vet before reaching out.")
+    return embed
 
 
 def _slot_embed(report: scout.SlotReport) -> discord.Embed | None:

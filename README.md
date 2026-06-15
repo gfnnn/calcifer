@@ -104,6 +104,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `WARCRAFTLOGS_CLIENT_ID` / `_SECRET` | optional | Enables Warcraft Logs parse averages (the raid tier is auto-detected; `WARCRAFTLOGS_ZONE_ID` only pins a specific tier). |
 | `WARCRAFTLOGS_ZONE_IDS` / `RECRUIT_*` | optional | Tunes the `/scout` recruitment scout (tier zones, season window, ilvl floor, open roles). |
 | `FEED_POLL_MINUTES` / `FEED_DEFAULT_CHANNEL_ID` | optional | Turn on the **Calcifer feed hub** (Wowhead news → a Discord channel). See [docs/vision.md](docs/vision.md#4b-the-feed--integration-hub-shipped). |
+| `YOUTUBE_FEED_ENABLED`+`YOUTUBE_CHANNEL_IDS` / `WOWPROGRESS_FEED_ENABLED` | optional | Extra feed sources: **YouTube** channel uploads (keyless Atom) and **WoWProgress** guild world/realm rank movement (their JSON export; credits WoWProgress.com per their terms). Default off. |
 | `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | The **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
@@ -144,6 +145,7 @@ switch to the richer WoW Audit data set.
 | `/setofficer <name> [role]` | Set/clear a character's officer responsibility. |
 | `/scout [wow_class]` | **Recruitment scout**: find roster upgrades for weak slots (like-for-like by class) from Warcraft Logs + Raider.IO. |
 | `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
+| `/recruit lead capture\|list\|set\|note\|remove` | **Recruitment funnel**: capture the scout's candidates as trackable leads and move them through the funnel (new → contacted → trialing → joined/passed). |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
 | `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
 | `/page post\|list\|refresh\|remove` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy is edited in the dashboard's **Content** section. |
@@ -165,6 +167,8 @@ for the full design), then shape routing live in Discord:
 /feed route source:Raid-Helper events channel:#events
 /feed route source:WoW Audit raid reminders channel:#raid-chat ping:@Raider
 /feed route source:Warcraft Logs live prog channel:#raid-night
+/feed route source:YouTube channel:#guild-videos
+/feed route source:WoWProgress channel:#progression   # guild rank movement
 /feed test source:Wowhead news      # post a sample to verify the route
 /feed list                          # show rules + muted feeds
 /feed mute source:Raider.IO Mythic+ # silence a feed temporarily

@@ -161,6 +161,18 @@ class Config:
     realm_progress_raids: tuple[str, ...] = ("tier-mn-1",)
     realm_progress_difficulty: str = "mythic"
 
+    # YouTube channel uploads (keyless Atom feed per channel). Off until at least
+    # one channel id is configured.
+    youtube_feed_enabled: bool = False
+    youtube_channel_ids: tuple[str, ...] = ()
+
+    # WoWProgress guild-ranking feed (their JSON Data Export; no RSS exists).
+    # Announces our guild's world/realm rank movement. Off by default.
+    # wowprogress_rating optionally pins a tier/rating (e.g. "tier35"); unset =
+    # the overall rank.
+    wowprogress_feed_enabled: bool = False
+    wowprogress_rating: str | None = None
+
     # --- Living boards ------------------------------------------------------
     # Re-render bot-owned board messages every N minutes (0 = boards off).
     board_refresh_minutes: int = 0
@@ -392,6 +404,10 @@ class Config:
             realm_progress_difficulty=(
                 (_clean(os.environ.get("REALM_PROGRESS_DIFFICULTY")) or "mythic").lower()
             ),
+            youtube_feed_enabled=_bool("YOUTUBE_FEED_ENABLED", False),
+            youtube_channel_ids=_str_list("YOUTUBE_CHANNEL_IDS"),
+            wowprogress_feed_enabled=_bool("WOWPROGRESS_FEED_ENABLED", False),
+            wowprogress_rating=_clean(os.environ.get("WOWPROGRESS_RATING")),
             board_refresh_minutes=_int("BOARD_REFRESH_MINUTES") or 0,
             score_refresh_minutes=_int("SCORE_REFRESH_MINUTES") or 0,
             digest_flush_hours=(

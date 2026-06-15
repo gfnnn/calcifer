@@ -97,15 +97,26 @@ Every surface must clear this gate before deployment:
 
 | Feature | Inputs | Build | Done when |
 |---------|--------|-------|-----------|
-| **LFG intent feeds** | WoWProgress + Raider.IO recruitment endpoints | Two pull `FeedSource`s for recruitment intent (names vetted by scorer); `scout_leads` lifecycle table | Raised hands ingested, vetted, cached |
+| **LFG intent feeds** | ~~WoWProgress + Raider.IO recruitment endpoints~~ | `scout_leads` lifecycle table fed by the existing scout | ✅ Raised hands captured, vetted, tracked |
 | **Recruitment board** | `RECRUIT_ROLES_OPEN` + ilvl floor (config); mgmt-only channel | Board: open slots × fresh, un-contacted leads (ranked above cold); officer slash commands mark state | Listings dump becomes one curated board |
+| **`/recruit lead` commands** | (scorer + `scout_leads`) | `/recruit lead` over the lead lifecycle | ✅ Officers act on leads from Discord |
 
-> ✅ Shipped early (June 2026): the *public-facing* Recruitment board ("We're
-> Looking", `boards/recruitment.py` + `/recruit` commands, per
-> [`sticky-posts-spec.md`](sticky-posts-spec.md) Board 7) — officer-configured
-> open slots, trial rules and pitch. The leads-driven officer board above
-> (scout_leads lifecycle) is still planned.
-| **`/recruit` commands** | (scorer + `scout_leads`) | `/recruit` command over lead lifecycle | Officers act on leads from Discord |
+> **Investigation result (June 2026):** neither Raider.IO nor WoWProgress
+> exposes a *listing/search* API for LFG players — Raider.IO's public API gives
+> recruitment only as a per-character field, and WoWProgress has no recruitment
+> API at all. So the "LFG intent feeds" approach was inverted: rather than
+> scraping an inbound firehose, the **`scout_leads` lifecycle** is fed by the
+> existing WCL+Raider.IO scout (the candidates it surfaces, with their
+> `lfg_active` flag, are the raised hands). Shipped: the `scout_leads` table +
+> `/recruit lead capture|list|set|note|remove` officer commands (state machine
+> new → contacted → trialing → joined/passed; discovered fields refreshed by a
+> re-scout, officer state/notes preserved).
+>
+> ✅ Also shipped: the *public-facing* Recruitment board ("We're Looking",
+> `boards/recruitment.py` + `/recruit` commands, per
+> [`sticky-posts-spec.md`](sticky-posts-spec.md) Board 7). **Still planned:** the
+> officer-facing *leads board* (rendering the `scout_leads` funnel ambiently);
+> today leads live behind the `/recruit lead` commands.
 
 ---
 

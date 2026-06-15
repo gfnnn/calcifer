@@ -147,6 +147,35 @@ async def run_scout(
     return reports
 
 
+def lead_dicts(reports: list[SlotReport]) -> list[dict]:
+    """Flatten scout reports into lead rows for ``db.upsert_lead`` (pure).
+
+    One row per matched candidate, carrying the discovered fields the funnel
+    tracks. Dedupe is left to the DB's identity key, so the same player surfaced
+    under two slots updates one lead.
+    """
+    leads: list[dict] = []
+    for report in reports:
+        for match in report.matches:
+            c = match.candidate
+            leads.append(
+                {
+                    "name": c.name,
+                    "realm": c.realm,
+                    "region": c.region,
+                    "class_name": c.class_name,
+                    "spec": c.spec,
+                    "role": c.role,
+                    "item_level": c.item_level,
+                    "score": match.score,
+                    "lfg": c.lfg_active,
+                    "guild_name": c.guild_name,
+                    "source": "scout",
+                }
+            )
+    return leads
+
+
 def _sample_encounters(encounters: list[dict]) -> list[int]:
     """Pick a spread of encounter ids (first, mid, last) for a wider candidate pool.
 
