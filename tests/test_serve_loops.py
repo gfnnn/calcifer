@@ -25,7 +25,7 @@ import pytest
 from ftabot import serve
 from ftabot.config import Config
 from ftabot.db import Database
-from ftabot.posting import PostBlocked, PostGate, PostingMode
+from ftabot.posting import PostBlocked
 from ftabot.sync import SyncResult
 
 # --- fakes ------------------------------------------------------------------
@@ -100,27 +100,37 @@ def _cfg(tmp_path, **over):
 # --- _make_sender -----------------------------------------------------------
 
 
-async def test_make_sender_posts_through_a_cached_channel():
+def _sender_cfg(tmp_path, **kw):
+    # The sender now resolves its gate per-send from the settings overlay
+    # (DB + Config); with nothing overridden the env-built Config wins.
+    return Config(database_path=str(tmp_path / "sender.db"), **kw)
+
+
+async def test_make_sender_posts_through_a_cached_channel(tmp_path):
     channel = _Channel()
     bot = _Bot(channel)
-    send = serve._make_sender(bot, PostGate(PostingMode.LIVE, test_channel_id="9"))
+    send = serve._make_sender(
+        bot, _sender_cfg(tmp_path, posting_mode="live", test_channel_id="9")
+    )
     await send("123", embed="EMBED", content="hi")
     assert channel.sent == [("hi", "EMBED")]
     assert bot.fetched == []  # cache hit -> no fetch
 
 
-async def test_make_sender_falls_back_to_fetch_channel():
+async def test_make_sender_falls_back_to_fetch_channel(tmp_path):
     channel = _Channel()
     bot = _Bot(channel, fetch_only=True)  # get_channel returns None
-    send = serve._make_sender(bot, PostGate(PostingMode.LIVE, test_channel_id="9"))
+    send = serve._make_sender(
+        bot, _sender_cfg(tmp_path, posting_mode="live", test_channel_id="9")
+    )
     await send("123", embed="EMBED")
     assert bot.fetched == [123]
     assert channel.sent == [(None, "EMBED")]
 
 
-async def test_make_sender_blocks_when_guardrail_off():
+async def test_make_sender_blocks_when_guardrail_off(tmp_path):
     bot = _Bot(_Channel())
-    send = serve._make_sender(bot, PostGate(PostingMode.OFF))
+    send = serve._make_sender(bot, _sender_cfg(tmp_path, posting_mode="off"))
     with pytest.raises(PostBlocked):
         await send("123", embed="EMBED")
 

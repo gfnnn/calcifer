@@ -419,3 +419,125 @@ async def loot_priority(
             for c, score in ranked
         ],
     }
+
+
+# --- Admin: 360 overview / command center -----------------------------------
+
+
+async def overview(db: Database, config: Config) -> dict:
+    """A command-center snapshot: feature status, the live posting guardrail,
+    headline counts and the latest guild-health point. The web endpoint merges
+    the live sync status (held in the app, not the DB) on top of this."""
+    from .runtime_settings import effective_post_gate
+
+    boards = await db.boards(enabled_only=False)
+    rules = await db.all_feed_rules()
+    snaps = await db.snapshots(limit=1)
+    leads = await db.leads(limit=500)
+    gate = await effective_post_gate(db, config)
+    return {
+        "guild": config.guild_name,
+        "posting": {"mode": gate.mode.value, "test_channel_id": gate.test_channel_id},
+        "features": {
+            "wowaudit": config.wowaudit_enabled,
+            "blizzard": config.blizzard_enabled,
+            "warcraftlogs": config.warcraftlogs_enabled,
+            "scout": config.scout_credentials,
+            "feeds": config.feeds_enabled,
+            "boards": config.boards_enabled,
+            "scores": config.scores_enabled,
+            "bot_commands": config.bot_commands_enabled,
+        },
+        "counts": {
+            "members": await db.count(),
+            "boards": len(boards),
+            "boards_promoted": sum(1 for b in boards if b["promoted"]),
+            "feed_rules": len(rules),
+            "feed_rules_enabled": sum(1 for r in rules if r["enabled"]),
+            "leads": len(leads),
+        },
+        "health": snaps[0]["health_score"] if snaps else None,
+        "health_at": snaps[0]["taken_at"] if snaps else None,
+    }
+
+
+# --- Admin: board status (the management table) ------------------------------
+
+
+async def boards_status(db: Database, config: Config) -> dict:
+    """Every board decorated with its friendly name and the channel it would
+    actually post to under the live guardrail, plus the creatable types."""
+    from .boards import REGISTRY, board_name
+    from .runtime_settings import effective_post_gate
+
+    gate = await effective_post_gate(db, config)
+    boards = []
+    for b in await db.boards(enabled_only=False):
+        destination = gate.resolve(b["channel_id"], promoted=b["promoted"])
+        state = (
+            "disabled"
+            if not b["enabled"]
+            else ("live" if b["promoted"] else "sandboxed")
+        )
+        boards.append(
+            {
+                "id": b["id"],
+                "type": b["board_type"],
+                "name": board_name(b["board_type"]),
+                "channel_id": b["channel_id"],
+                "enabled": b["enabled"],
+                "promoted": b["promoted"],
+                "posted": bool(b["message_id"]),
+                "posted_channel_id": b["posted_channel_id"],
+                "effective_destination": destination,
+                "state": state,
+                "config": b["config"],
+            }
+        )
+    return {
+        "boards": boards,
+        "available_types": [
+            {"type": t, "name": board_name(t)} for t in REGISTRY
+        ],
+        "posting_mode": gate.mode.value,
+    }
+
+
+# --- Admin: sticky-page placement -------------------------------------------
+
+
+async def pages_status(db: Database, config: Config) -> dict:
+    """Each sticky page's placement (where it lives / will live) for the dashboard."""
+    from .pages import PAGES
+
+    pages = []
+    for page in PAGES.values():
+        row = await db.get_sticky_page(page.name)
+        pages.append(
+            {
+                "name": page.name,
+                "title": page.title,
+                "channel_id": row["channel_id"] if row else None,
+                "posted_channel_id": row["posted_channel_id"] if row else None,
+                "message_count": len(row["message_ids"]) if row else 0,
+                "placed": row is not None,
+            }
+        )
+    return {"pages": pages}
+
+
+# --- Admin: feed hub status --------------------------------------------------
+
+
+async def feed_health(db: Database, config: Config) -> dict:
+    """Feed routing rules + operational health (muted sources, queue depths)."""
+    from .runtime_settings import effective_feed_channel
+
+    rules = await db.all_feed_rules()
+    return {
+        "rules": rules,
+        "muted_sources": sorted(await db.muted_sources()),
+        "default_channel_id": await effective_feed_channel(db, config),
+        "pending_outbox": len(await db.pending_outbox()),
+        "pending_digests": len(await db.pending_digests()),
+    }

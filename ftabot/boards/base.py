@@ -46,6 +46,22 @@ class Board(abc.ABC):
 # ``board_type``. Empty in Phase 0; populated as boards land.
 REGISTRY: dict[str, Board] = {}
 
+# Friendly display names for the registered board types, shared by the /board
+# cog and the web dashboard so both label boards identically. (Rules & Info and
+# Guides & Resources are not boards — they are sticky pages, managed via /page.)
+BOARD_NAMES: dict[str, str] = {
+    "hot20": "Calcifer's Hot 20",
+    "news_highlights": "News Highlights",
+    "weekly_events": "Weekly Events",
+    "roster_pulse": "Roster Pulse",
+    "recruitment": "Recruitment",
+}
+
+
+def board_name(board_type: str) -> str:
+    """The friendly name for a board type, falling back to the raw type."""
+    return BOARD_NAMES.get(board_type, board_type)
+
 
 def register(board: Board) -> Board:
     """Register a board instance under its ``board_type`` (idempotent)."""

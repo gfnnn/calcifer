@@ -73,13 +73,21 @@ class _FakeBot:
         return self.channel
 
 
-async def test_feed_sender_drops_when_guardrail_is_off():
+def _sender_cfg(tmp_path, **kw):
+    # The sender resolves its gate per-send from the live settings overlay
+    # (DB + Config); with no overrides saved the env-built Config wins.
+    from ftabot.config import Config
+
+    return Config(database_path=str(tmp_path / "sender.db"), **kw)
+
+
+async def test_feed_sender_drops_when_guardrail_is_off(tmp_path):
     from ftabot.posting import PostBlocked
     from ftabot.serve import _make_sender
 
     channel = _FakeChannel()
     bot = _FakeBot(channel)
-    send = _make_sender(bot, PostGate(PostingMode.OFF))
+    send = _make_sender(bot, _sender_cfg(tmp_path, posting_mode="off"))
 
     # A blocked send raises PostBlocked so the caller leaves the event queued /
     # unseen (it must not be consumed) rather than silently dropping it.
@@ -90,12 +98,14 @@ async def test_feed_sender_drops_when_guardrail_is_off():
     assert bot.asked == []  # never even resolved a channel
 
 
-async def test_feed_sender_redirects_in_test_mode():
+async def test_feed_sender_redirects_in_test_mode(tmp_path):
     from ftabot.serve import _make_sender
 
     channel = _FakeChannel()
     bot = _FakeBot(channel)
-    send = _make_sender(bot, PostGate(PostingMode.TEST, "999"))
+    send = _make_sender(
+        bot, _sender_cfg(tmp_path, posting_mode="test", test_channel_id="999")
+    )
 
     await send("12345", embed=None, content="an alert")
 
@@ -103,14 +113,37 @@ async def test_feed_sender_redirects_in_test_mode():
     assert bot.asked == [999]  # redirected to the test channel, not 12345
 
 
-async def test_feed_sender_uses_the_real_channel_when_live():
+async def test_feed_sender_uses_the_real_channel_when_live(tmp_path):
     from ftabot.serve import _make_sender
 
     channel = _FakeChannel()
     bot = _FakeBot(channel)
-    send = _make_sender(bot, PostGate(PostingMode.LIVE, "999"))
+    send = _make_sender(
+        bot, _sender_cfg(tmp_path, posting_mode="live", test_channel_id="999")
+    )
 
     await send("12345", embed=None, content="an alert")
 
     assert len(channel.sends) == 1
     assert bot.asked == [12345]  # feeds route to their own channel when live
+
+
+async def test_feed_sender_honours_a_live_settings_override(tmp_path):
+    # A dashboard change to the posting mode takes effect on the next send, with
+    # no loop restart: saving an override flips the sender from live → off.
+    from ftabot.db import Database
+    from ftabot.posting import PostBlocked
+    from ftabot.serve import _make_sender
+
+    channel = _FakeChannel()
+    bot = _FakeBot(channel)
+    cfg = _sender_cfg(tmp_path, posting_mode="live", test_channel_id="999")
+    send = _make_sender(bot, cfg)
+
+    await send("12345", embed=None, content="first")
+    assert bot.asked == [12345]
+
+    async with Database(cfg.database_path) as db:
+        await db.set_setting("posting_mode", "off")
+    with pytest.raises(PostBlocked):
+        await send("12345", embed=None, content="second")

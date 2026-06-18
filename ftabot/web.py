@@ -15,11 +15,19 @@ import json
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
-from fastapi import Cookie, FastAPI, Header, HTTPException, Query, Request
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+)
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import content as content_lib
-from . import views
+from . import runtime_settings, views
 from .config import Config
 from .db import Database
 from .models import Member, now_iso
@@ -452,6 +460,247 @@ def create_app(config: Config | None = None) -> FastAPI:
         removed = await db.delete_content_doc(page.content_doc)
         return JSONResponse({"status": "reverted" if removed else "already_bundled"})
 
+    # -- admin control surfaces (all token-gated) ----------------------------
+    # Every endpoint below mutates DB state that the serve.py board/feed loops
+    # re-read each tick, so a change goes live within one refresh interval. An
+    # on-demand refresh (when the bot shares this process) renders immediately.
+
+    def _require_token(
+        token: str | None = None,
+        x_sync_token: str | None = Header(default=None),
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> None:
+        _check_sync_token(token or x_sync_token or fta_sync_token)
+
+    gated = [Depends(_require_token)]
+
+    async def _body(request: Request) -> dict:
+        try:
+            data = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            raise HTTPException(status_code=400, detail="Body must be JSON.")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Body must be a JSON object.")
+        return data
+
+    # -- overview (360 command center) ---------------------------------------
+
+    @app.get("/api/overview", dependencies=gated)
+    async def api_overview() -> JSONResponse:
+        data = await views.overview(db, config)
+        data["sync"] = sync_manager.status()
+        return JSONResponse(data)
+
+    # -- boards --------------------------------------------------------------
+
+    async def _refresh_board_now(board_id: int) -> str:
+        """Render one board now via the in-process bot; 'queued' when standalone."""
+        from .boards import REGISTRY, BotBoardMessenger, refresh_board
+
+        row = await db.get_board(board_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Unknown board.")
+        bot = app.state.bot
+        board = REGISTRY.get(row["board_type"])
+        if bot is None or board is None:
+            return "queued"
+        gate = await runtime_settings.effective_post_gate(db, config)
+        return await refresh_board(
+            db, config, board, row, BotBoardMessenger(bot), gate
+        )
+
+    @app.get("/api/boards", dependencies=gated)
+    async def api_boards() -> JSONResponse:
+        return JSONResponse(await views.boards_status(db, config))
+
+    @app.post("/api/boards", dependencies=gated)
+    async def api_boards_create(request: Request) -> JSONResponse:
+        from .boards import REGISTRY
+
+        data = await _body(request)
+        board_type = str(data.get("board_type") or "").strip()
+        channel_id = str(data.get("channel_id") or "").strip()
+        if board_type not in REGISTRY:
+            raise HTTPException(status_code=400, detail="Unknown board type.")
+        if not channel_id.isdigit():
+            raise HTTPException(status_code=400, detail="channel_id must be numeric.")
+        try:
+            board_id = await db.add_board(board_type, channel_id)
+        except Exception:  # noqa: BLE001 - almost certainly the UNIQUE constraint
+            raise HTTPException(
+                status_code=409,
+                detail="That board type is already registered for this channel.",
+            )
+        return JSONResponse({"status": "created", "id": board_id}, status_code=201)
+
+    @app.post("/api/boards/{board_id}/{action}", dependencies=gated)
+    async def api_boards_action(board_id: int, action: str) -> JSONResponse:
+        if action in {"promote", "demote"}:
+            ok = await db.set_board_promoted(board_id, action == "promote")
+        elif action in {"enable", "disable"}:
+            ok = await db.set_board_enabled(board_id, action == "enable")
+        elif action == "refresh":
+            result = await _refresh_board_now(board_id)
+            return JSONResponse({"status": result})
+        else:
+            raise HTTPException(status_code=404, detail="Unknown board action.")
+        if not ok:
+            raise HTTPException(status_code=404, detail="Unknown board.")
+        return JSONResponse({"status": action + "d"})
+
+    @app.put("/api/boards/{board_id}/config", dependencies=gated)
+    async def api_boards_config(board_id: int, request: Request) -> JSONResponse:
+        data = await _body(request)
+        cfg = data.get("config", data)
+        if not isinstance(cfg, dict):
+            raise HTTPException(status_code=400, detail="config must be an object.")
+        if not await db.set_board_config(board_id, cfg):
+            raise HTTPException(status_code=404, detail="Unknown board.")
+        return JSONResponse({"status": "saved"})
+
+    @app.delete("/api/boards/{board_id}", dependencies=gated)
+    async def api_boards_delete(board_id: int) -> JSONResponse:
+        if not await db.delete_board(board_id):
+            raise HTTPException(status_code=404, detail="Unknown board.")
+        return JSONResponse({"status": "removed"})
+
+    # -- sticky-page placement -----------------------------------------------
+
+    async def _refresh_page_now(page: PageDef, row: dict) -> str:
+        from .boards import BotBoardMessenger
+        from .pages import refresh_page
+
+        bot = app.state.bot
+        if bot is None:
+            return "queued"
+        gate = await runtime_settings.effective_post_gate(db, config)
+        return await refresh_page(
+            db, config, page, row, BotBoardMessenger(bot), gate
+        )
+
+    @app.get("/api/pages", dependencies=gated)
+    async def api_pages() -> JSONResponse:
+        return JSONResponse(await views.pages_status(db, config))
+
+    @app.post("/api/pages/{page_name}/place", dependencies=gated)
+    async def api_pages_place(page_name: str, request: Request) -> JSONResponse:
+        page = _page_or_404(page_name)
+        data = await _body(request)
+        channel_id = str(data.get("channel_id") or "").strip()
+        if not channel_id.isdigit():
+            raise HTTPException(status_code=400, detail="channel_id must be numeric.")
+        await db.upsert_sticky_page(page.name, channel_id)
+        row = await db.get_sticky_page(page.name)
+        action = await _refresh_page_now(page, row)
+        return JSONResponse({"status": "placed", "refresh": action})
+
+    @app.post("/api/pages/{page_name}/refresh", dependencies=gated)
+    async def api_pages_refresh(page_name: str) -> JSONResponse:
+        page = _page_or_404(page_name)
+        row = await db.get_sticky_page(page.name)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Page is not placed yet.")
+        return JSONResponse({"status": await _refresh_page_now(page, row)})
+
+    @app.delete("/api/pages/{page_name}", dependencies=gated)
+    async def api_pages_remove(page_name: str) -> JSONResponse:
+        page = _page_or_404(page_name)
+        row = await db.get_sticky_page(page.name)
+        if row is None:
+            return JSONResponse({"status": "not_placed"})
+        bot = app.state.bot
+        if bot is not None:
+            from .boards import BotBoardMessenger
+            from .pages import remove_page
+
+            await remove_page(db, row, BotBoardMessenger(bot))
+        else:
+            await db.delete_sticky_page(page.name)
+        return JSONResponse({"status": "removed"})
+
+    # -- feed hub ------------------------------------------------------------
+
+    @app.get("/api/feeds", dependencies=gated)
+    async def api_feeds() -> JSONResponse:
+        return JSONResponse(await views.feed_health(db, config))
+
+    @app.post("/api/feeds/rules", dependencies=gated)
+    async def api_feeds_rule_create(request: Request) -> JSONResponse:
+        data = await _body(request)
+        source = str(data.get("source") or "").strip()
+        channel_id = str(data.get("channel_id") or "").strip()
+        if not source:
+            raise HTTPException(status_code=400, detail="source is required.")
+        if not channel_id.isdigit():
+            raise HTTPException(status_code=400, detail="channel_id must be numeric.")
+        event_type = (str(data.get("event_type")).strip() or None
+                      if data.get("event_type") else None)
+        contains = [c.strip() for c in str(data.get("contains") or "").split(",")
+                    if c.strip()]
+        match = {"contains": contains} if contains else None
+        style: dict = {}
+        if data.get("color"):
+            style["color"] = str(data["color"]).strip()
+        if data.get("ping"):
+            style["ping"] = str(data["ping"]).strip()
+        rule_id = await db.add_feed_rule(
+            source, channel_id, event_type=event_type, match=match,
+            style=style or None, updated_by="dashboard",
+        )
+        return JSONResponse({"status": "created", "id": rule_id}, status_code=201)
+
+    @app.post("/api/feeds/rules/{rule_id}/{action}", dependencies=gated)
+    async def api_feeds_rule_toggle(rule_id: int, action: str) -> JSONResponse:
+        if action not in {"enable", "disable"}:
+            raise HTTPException(status_code=404, detail="Unknown rule action.")
+        if not await db.set_feed_rule_enabled(rule_id, action == "enable"):
+            raise HTTPException(status_code=404, detail="Unknown rule.")
+        return JSONResponse({"status": action + "d"})
+
+    @app.delete("/api/feeds/rules/{rule_id}", dependencies=gated)
+    async def api_feeds_rule_delete(rule_id: int) -> JSONResponse:
+        if not await db.delete_feed_rule(rule_id):
+            raise HTTPException(status_code=404, detail="Unknown rule.")
+        return JSONResponse({"status": "removed"})
+
+    @app.post("/api/feeds/mute", dependencies=gated)
+    async def api_feeds_mute(request: Request) -> JSONResponse:
+        data = await _body(request)
+        source = str(data.get("source") or "").strip()
+        if not source:
+            raise HTTPException(status_code=400, detail="source is required.")
+        await db.mute_source(source)
+        return JSONResponse({"status": "muted"})
+
+    @app.delete("/api/feeds/mute/{source}", dependencies=gated)
+    async def api_feeds_unmute(source: str) -> JSONResponse:
+        await db.unmute_source(source)
+        return JSONResponse({"status": "unmuted"})
+
+    # -- runtime settings (the live config overlay) --------------------------
+
+    @app.get("/api/settings", dependencies=gated)
+    async def api_settings() -> JSONResponse:
+        return JSONResponse(await runtime_settings.settings_overview(db, config))
+
+    @app.put("/api/settings", dependencies=gated)
+    async def api_settings_put(request: Request) -> JSONResponse:
+        data = await _body(request)
+        updates = data.get("settings", data)
+        if not isinstance(updates, dict) or not updates:
+            raise HTTPException(status_code=400, detail="Provide settings to save.")
+        try:
+            for key, raw in updates.items():
+                await db.set_setting(key, runtime_settings.normalise(key, raw))
+        except runtime_settings.SettingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse({"status": "saved"})
+
+    @app.delete("/api/settings/{key}", dependencies=gated)
+    async def api_settings_delete(key: str) -> JSONResponse:
+        reverted = await db.delete_setting(key)
+        return JSONResponse({"status": "reverted" if reverted else "already_default"})
+
     # -- HTML pages ----------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
@@ -535,6 +784,65 @@ def create_app(config: Config | None = None) -> FastAPI:
                 samesite="strict", max_age=60 * 60 * 24 * 30, path="/",
             )
         return resp
+
+    # -- gated admin HTML pages (client-rendered from the JSON APIs) ----------
+
+    def _authed(token: str | None, cookie: str | None) -> bool:
+        supplied = token if token is not None else cookie
+        return bool(config.sync_token) and _secret_matches(supplied, config.sync_token)
+
+    def _gated_html(token, cookie, active, title, render) -> HTMLResponse:
+        if not _authed(token, cookie):
+            return HTMLResponse(
+                _admin_locked(config, active=active, title=title, error=bool(token))
+            )
+        resp = HTMLResponse(render())
+        resp.set_cookie(
+            _SYNC_COOKIE, config.sync_token or "", httponly=True,
+            secure=config.cookie_secure,
+            samesite="strict", max_age=60 * 60 * 24 * 30, path="/",
+        )
+        return resp
+
+    @app.get("/overview", response_class=HTMLResponse)
+    async def overview_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "overview", "Overview",
+            lambda: _render_overview(config),
+        )
+
+    @app.get("/boards", response_class=HTMLResponse)
+    async def boards_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "boards", "Boards",
+            lambda: _render_boards(config),
+        )
+
+    @app.get("/feeds", response_class=HTMLResponse)
+    async def feeds_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "feeds", "Feeds",
+            lambda: _render_feeds(config),
+        )
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "settings", "Settings",
+            lambda: _render_settings(config),
+        )
 
     return app
 
@@ -642,6 +950,26 @@ _CSS = """
   .count.over { color:#ef5350; font-weight:700; }
   button.ghost { background:#3a2820; }
   .status { margin-left:.6rem; font-size:.85rem; }
+  .navsep { color:#5a4034; }
+  button.sm { padding:.2rem .5rem; font-size:.8rem; margin:0 .1rem; }
+  button.danger { background:#7a2018; }
+  .tag { display:inline-block; border-radius:6px; padding:.05rem .45rem; font-size:.75rem;
+    text-transform:uppercase; letter-spacing:.03em; }
+  .tag.live { background:#1e4620; color:#9ccc65; }
+  .tag.sandboxed { background:#4a3a12; color:#ffca28; }
+  .tag.disabled { background:#3a2820; color:#999; }
+  .tag.on { background:#1e4620; color:#9ccc65; }
+  .tag.off { background:#4a1818; color:#ef9a9a; }
+  .panel { background:#221712; border:1px solid #3a2820; border-radius:10px;
+    padding:1rem 1.2rem; margin-bottom:1.4rem; }
+  .panel h2 { margin-top:0; }
+  .field { display:flex; flex-direction:column; gap:.2rem; margin:.5rem .8rem .5rem 0; }
+  .field label { font-size:.75rem; color:#bbb; text-transform:uppercase; letter-spacing:.03em; }
+  .field input, .field select { padding:.4rem .6rem; border-radius:6px; border:1px solid #543;
+    background:#1c1310; color:#eee; min-width:160px; }
+  .row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:.3rem; }
+  .muted { color:#bbb; font-size:.85rem; }
+  code.chan::before { content:'#'; color:#888; }
 """
 
 
@@ -675,7 +1003,12 @@ def _layout(guild_name: str, subtitle: str, body: str, active: str) -> str:
         + link("/gm", "GM", "gm")
         + link("/raid", "Raid Leader", "raid")
         + link("/loot", "Loot", "loot")
+        + "<span class='navsep'>·</span>"
+        + link("/overview", "Overview", "overview")
+        + link("/boards", "Boards", "boards")
+        + link("/feeds", "Feeds", "feeds")
         + link("/content", "Content", "content")
+        + link("/settings", "Settings", "settings")
         + link("/admin", "Sync", "admin")
     )
     return f"""<!doctype html>
@@ -1296,6 +1629,295 @@ def _render_admin(
         + script
     )
     return _layout(config.guild_name, "Admin — manual sync", body, "admin")
+
+
+def _admin_locked(
+    config: Config, *, active: str, title: str, error: bool = False
+) -> str:
+    """The shared unlock form for a gated admin page (cookie absent/invalid)."""
+    if not config.sync_token:
+        body = (
+            f"<h2>{html.escape(title)}</h2>"
+            "<p class='bad'>Admin controls are disabled.</p>"
+            "<p>Set the <code>SYNC_TOKEN</code> environment variable to enable "
+            "the dashboard's controls.</p>"
+        )
+        return _layout(config.guild_name, title, body, active)
+    wrong = "<p class='bad'>Invalid token.</p>" if error else ""
+    body = f"""
+  <h2>{html.escape(title)} — enter token</h2>
+  <p>Provide the sync token to unlock the admin dashboard.</p>
+  <form id="unlock" onsubmit="return unlock(event)">
+    <input id="tok" type="password" placeholder="SYNC_TOKEN" autofocus>
+    <button type="submit">Unlock</button>
+  </form>{wrong}
+  <p id="err" class="bad"></p>
+  <script>
+  async function unlock(e){{e.preventDefault();
+    const r=await fetch('/api/sync/unlock',{{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{token:document.getElementById('tok').value}})}});
+    if(r.ok){{location.reload();}}
+    else{{document.getElementById('err').textContent='Invalid token.';}}
+    return false;}}
+  </script>"""
+    return _layout(config.guild_name, title, body, active)
+
+
+# Shared fetch helpers for the client-rendered admin pages. A 401 (expired
+# cookie) reloads into the unlock form; other errors surface an alert. Plain
+# (non-f) string so the JS braces need no escaping.
+_ADMIN_JS = """
+<script>
+async function _api(p){const r=await fetch(p,{headers:{'Accept':'application/json'}});
+  if(r.status===401){location.reload();return null;}
+  if(!r.ok)throw new Error(await r.text());return r.json();}
+async function _send(m,p,b){const o={method:m};
+  if(b!==undefined){o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(b);}
+  const r=await fetch(p,o);
+  if(r.status===401){location.reload();return null;}
+  if(!r.ok){let d=r.statusText;try{d=(await r.json()).detail||d;}catch(e){}alert('Error: '+d);return null;}
+  try{return await r.json();}catch(e){return {};}}
+function _esc(s){const d=document.createElement('div');d.textContent=(s==null?'':String(s));return d.innerHTML;}
+function _code(s){return s?('<code>'+_esc(s)+'</code>'):'<span class=muted>—</span>';}
+</script>
+"""
+
+
+def _render_overview(config: Config) -> str:
+    body = "<h2>System overview</h2><div id=app class=muted>Loading…</div>" + _ADMIN_JS + """
+<script>
+(async function(){
+ const app=document.getElementById('app');
+ try{
+  const d=await _api('/api/overview'); if(!d)return;
+  const c=d.counts;
+  const cards=[['Members',c.members],
+    ['Boards',c.boards+' ('+c.boards_promoted+' live)'],
+    ['Feed rules',c.feed_rules+' ('+c.feed_rules_enabled+' on)'],
+    ['Leads',c.leads],['Health',d.health==null?'—':Math.round(d.health)],
+    ['Posting',d.posting.mode]]
+    .map(x=>'<div class=card><div class=big>'+_esc(x[1])+'</div><div class=lbl>'+_esc(x[0])+'</div></div>').join('');
+  const feat=Object.keys(d.features).map(k=>
+    '<span class="tag '+(d.features[k]?'on':'off')+'">'+_esc(k)+'</span>').join(' ');
+  const s=d.sync||{};
+  const sl=s.running?'Sync running…':_esc(s.last_summary||s.last_error||'idle');
+  app.classList.remove('muted');
+  app.innerHTML='<div class=cards>'+cards+'</div>'+
+    '<div class=panel><h2>Integrations &amp; loops</h2><p>'+feat+'</p>'+
+    '<p class=muted>Green = enabled. Loop toggles come from the environment and need a restart to change.</p></div>'+
+    '<div class=panel><h2>Sync</h2><p>'+sl+(s.last_finished?(' · last finished '+_esc(s.last_finished)):'')+
+    '</p><p><a href="/admin">Manual sync →</a></p></div>'+
+    '<div class=panel><h2>Posting guardrail</h2><p>Mode <b>'+_esc(d.posting.mode)+'</b> · test channel '+
+    _code(d.posting.test_channel_id)+' · <a href="/settings">change →</a></p></div>';
+ }catch(e){app.textContent='Failed to load: '+e;}
+})();
+</script>"""
+    return _layout(config.guild_name, "Overview", body, "overview")
+
+
+def _render_boards(config: Config) -> str:
+    body = """
+<h2>Boards</h2>
+<div class=panel>
+  <h2>Create a board</h2>
+  <div class=row>
+    <div class=field><label>Type</label><select id=btype></select></div>
+    <div class=field><label>Production channel ID</label><input id=bchan placeholder="123456789012345678"></div>
+    <button id=bcreate>Create</button>
+  </div>
+  <p class=muted>New boards start sandboxed; promote one to send it to its real channel (needs posting mode <b>live</b>).</p>
+</div>
+<div id=blist class=muted>Loading…</div>
+<div class=panel><h2>Sticky pages</h2>
+  <p class=muted>Placement only — edit the copy under <a href="/content">Content</a>.</p>
+  <div id=plist class=muted>Loading…</div>
+</div>
+""" + _ADMIN_JS + """
+<script>
+const CFG={};
+async function loadBoards(){
+ const d=await _api('/api/boards'); if(!d)return;
+ document.getElementById('btype').innerHTML=d.available_types
+   .map(t=>'<option value="'+_esc(t.type)+'">'+_esc(t.name)+'</option>').join('');
+ const wrap=document.getElementById('blist'); wrap.classList.remove('muted');
+ if(!d.boards.length){wrap.innerHTML='<p class=muted>No boards yet.</p>';return;}
+ let rows='';
+ d.boards.forEach(b=>{CFG[b.id]=b.config;
+   const dest=b.effective_destination?_code(b.effective_destination):'<span class=muted>nowhere</span>';
+   rows+='<tr><td>#'+b.id+'</td><td>'+_esc(b.name)+'</td><td>'+_code(b.channel_id)+'</td>'+
+     '<td><span class="tag '+b.state+'">'+b.state+'</span></td>'+
+     '<td>'+(b.posted?'posted':'—')+'</td><td>'+dest+'</td><td>'+
+     (b.promoted?'<button class="sm" data-id="'+b.id+'" data-act="demote">Demote</button>'
+                :'<button class="sm" data-id="'+b.id+'" data-act="promote">Promote</button>')+
+     (b.enabled?'<button class="sm ghost" data-id="'+b.id+'" data-act="disable">Disable</button>'
+               :'<button class="sm" data-id="'+b.id+'" data-act="enable">Enable</button>')+
+     '<button class="sm" data-id="'+b.id+'" data-act="refresh">Refresh</button>'+
+     '<button class="sm" data-id="'+b.id+'" data-act="config">Config</button>'+
+     '<button class="sm danger" data-id="'+b.id+'" data-act="remove">Remove</button></td></tr>';
+ });
+ wrap.innerHTML='<table><thead><tr><th>#</th><th>Board</th><th>Channel</th><th>State</th>'+
+   '<th>Posted</th><th>Goes to</th><th>Actions</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+async function loadPages(){
+ const d=await _api('/api/pages'); if(!d)return;
+ const wrap=document.getElementById('plist'); wrap.classList.remove('muted');
+ wrap.innerHTML='<table><thead><tr><th>Page</th><th>Lives in</th><th>Posted</th><th>Actions</th></tr></thead><tbody>'+
+   d.pages.map(p=>'<tr><td>'+_esc(p.title)+'</td><td>'+_code(p.channel_id)+'</td>'+
+     '<td>'+(p.placed?(p.message_count+' msg'):'—')+'</td><td>'+
+     '<button class="sm" data-page="'+_esc(p.name)+'" data-pact="place">Place</button>'+
+     '<button class="sm" data-page="'+_esc(p.name)+'" data-pact="refresh">Refresh</button>'+
+     '<button class="sm danger" data-page="'+_esc(p.name)+'" data-pact="remove">Remove</button>'+
+     '</td></tr>').join('')+'</tbody></table>';
+}
+document.getElementById('bcreate').addEventListener('click',async()=>{
+  const board_type=document.getElementById('btype').value;
+  const channel_id=document.getElementById('bchan').value.trim();
+  if(!channel_id){alert('Enter a channel ID');return;}
+  if(await _send('POST','/api/boards',{board_type,channel_id})){document.getElementById('bchan').value='';loadBoards();}
+});
+document.getElementById('blist').addEventListener('click',async(e)=>{
+  const b=e.target.closest('button[data-act]'); if(!b)return;
+  const id=b.dataset.id, act=b.dataset.act;
+  if(act==='remove'){if(!confirm('Remove board #'+id+'?'))return;
+    if(await _send('DELETE','/api/boards/'+id))loadBoards();return;}
+  if(act==='config'){const v=prompt('Board config (JSON):',JSON.stringify(CFG[id]||{}));
+    if(v===null)return;let cfg;try{cfg=JSON.parse(v);}catch(x){alert('Invalid JSON');return;}
+    if(await _send('PUT','/api/boards/'+id+'/config',{config:cfg}))loadBoards();return;}
+  const r=await _send('POST','/api/boards/'+id+'/'+act);
+  if(r){if(act==='refresh'&&r.status)b.title=r.status;loadBoards();}
+});
+document.getElementById('plist').addEventListener('click',async(e)=>{
+  const b=e.target.closest('button[data-pact]'); if(!b)return;
+  const name=b.dataset.page, act=b.dataset.pact;
+  if(act==='place'){const ch=prompt('Channel ID to post '+name+' in:'); if(!ch)return;
+    if(await _send('POST','/api/pages/'+name+'/place',{channel_id:ch.trim()}))loadPages();return;}
+  if(act==='remove'){if(!confirm('Remove '+name+'?'))return;
+    if(await _send('DELETE','/api/pages/'+name))loadPages();return;}
+  if(await _send('POST','/api/pages/'+name+'/refresh'))loadPages();
+});
+loadBoards();loadPages();
+</script>"""
+    return _layout(config.guild_name, "Boards", body, "boards")
+
+
+def _render_feeds(config: Config) -> str:
+    body = """
+<h2>Feed hub</h2>
+<div class=panel>
+  <h2>Add a routing rule</h2>
+  <div class=row>
+    <div class=field><label>Source</label><input id=fsource placeholder="wowhead"></div>
+    <div class=field><label>Event type (optional)</label><input id=ftype placeholder="wowhead.patch-notes"></div>
+    <div class=field><label>Contains (comma-sep, optional)</label><input id=fcontains placeholder="hotfix, ptr"></div>
+    <div class=field><label>Channel ID</label><input id=fchan placeholder="123456789012345678"></div>
+    <div class=field><label>Colour (optional)</label><input id=fcolor placeholder="blue"></div>
+    <div class=field><label>Ping (optional)</label><input id=fping placeholder="&lt;@&amp;roleid&gt;"></div>
+    <button id=fcreate>Add rule</button>
+  </div>
+</div>
+<div id=health class=muted>Loading…</div>
+<div id=frules class=muted>Loading…</div>
+<div class=panel>
+  <h2>Muted sources</h2>
+  <div class=row>
+    <div class=field><label>Mute a source</label><input id=fmute placeholder="raiderio_mplus"></div>
+    <button id=fmutebtn>Mute</button>
+  </div>
+  <div id=mutes class=muted>Loading…</div>
+</div>
+""" + _ADMIN_JS + """
+<script>
+async function load(){
+ const d=await _api('/api/feeds'); if(!d)return;
+ document.getElementById('health').classList.remove('muted');
+ document.getElementById('health').innerHTML='<div class=cards>'+
+   '<div class=card><div class=big>'+d.pending_outbox+'</div><div class=lbl>Outbox pending</div></div>'+
+   '<div class=card><div class=big>'+d.pending_digests+'</div><div class=lbl>Digest pending</div></div>'+
+   '<div class=card><div class=big>'+_esc(d.default_channel_id||'—')+'</div><div class=lbl>Default channel</div></div>'+
+   '</div>';
+ const fr=document.getElementById('frules'); fr.classList.remove('muted');
+ if(!d.rules.length){fr.innerHTML='<p class=muted>No routing rules — feeds fall back to the default channel.</p>';}
+ else{fr.innerHTML='<table><thead><tr><th>#</th><th>Source</th><th>Event type</th><th>Match</th>'+
+   '<th>Channel</th><th>State</th><th>Actions</th></tr></thead><tbody>'+
+   d.rules.map(r=>{const m=(r.match&&r.match.contains)?r.match.contains.join(', '):'';
+     return '<tr><td>#'+r.id+'</td><td>'+_esc(r.source)+'</td><td>'+_esc(r.event_type||'—')+'</td>'+
+     '<td>'+_esc(m||'—')+'</td><td>'+_code(r.channel_id)+'</td>'+
+     '<td><span class="tag '+(r.enabled?'on':'off')+'">'+(r.enabled?'on':'off')+'</span></td><td>'+
+     (r.enabled?'<button class="sm ghost" data-id="'+r.id+'" data-act="disable">Disable</button>'
+               :'<button class="sm" data-id="'+r.id+'" data-act="enable">Enable</button>')+
+     '<button class="sm danger" data-id="'+r.id+'" data-act="remove">Remove</button></td></tr>';
+   }).join('')+'</tbody></table>';}
+ const mu=document.getElementById('mutes'); mu.classList.remove('muted');
+ mu.innerHTML=d.muted_sources.length?d.muted_sources.map(s=>
+   '<span class=pill>'+_esc(s)+' <button class="sm" data-src="'+_esc(s)+'">unmute</button></span>').join(' ')
+   :'<p class=muted>No sources muted.</p>';
+}
+document.getElementById('fcreate').addEventListener('click',async()=>{
+  const body={source:document.getElementById('fsource').value.trim(),
+    channel_id:document.getElementById('fchan').value.trim(),
+    event_type:document.getElementById('ftype').value.trim(),
+    contains:document.getElementById('fcontains').value.trim(),
+    color:document.getElementById('fcolor').value.trim(),
+    ping:document.getElementById('fping').value.trim()};
+  if(!body.source||!body.channel_id){alert('Source and channel ID are required');return;}
+  if(await _send('POST','/api/feeds/rules',body)){
+    ['fsource','ftype','fcontains','fchan','fcolor','fping'].forEach(i=>document.getElementById(i).value='');load();}
+});
+document.getElementById('frules').addEventListener('click',async(e)=>{
+  const b=e.target.closest('button[data-act]'); if(!b)return;
+  const id=b.dataset.id, act=b.dataset.act;
+  if(act==='remove'){if(!confirm('Remove rule #'+id+'?'))return;
+    if(await _send('DELETE','/api/feeds/rules/'+id))load();return;}
+  if(await _send('POST','/api/feeds/rules/'+id+'/'+act))load();
+});
+document.getElementById('fmutebtn').addEventListener('click',async()=>{
+  const s=document.getElementById('fmute').value.trim(); if(!s)return;
+  if(await _send('POST','/api/feeds/mute',{source:s})){document.getElementById('fmute').value='';load();}
+});
+document.getElementById('mutes').addEventListener('click',async(e)=>{
+  const b=e.target.closest('button[data-src]'); if(!b)return;
+  if(await _send('DELETE','/api/feeds/mute/'+encodeURIComponent(b.dataset.src)))load();
+});
+load();
+</script>"""
+    return _layout(config.guild_name, "Feeds", body, "feeds")
+
+
+def _render_settings(config: Config) -> str:
+    body = ("<h2>Runtime settings</h2>"
+            "<p class=muted>These override the environment defaults live (no redeploy). "
+            "Clearing a value reverts it to the environment.</p>"
+            "<div id=app class=muted>Loading…</div>") + _ADMIN_JS + """
+<script>
+async function load(){
+ const items=await _api('/api/settings'); if(!items)return;
+ const app=document.getElementById('app'); app.classList.remove('muted');
+ app.innerHTML=items.map(s=>{
+  let input;
+  if(s.kind==='choice'){input='<select id="in_'+s.key+'">'+
+    s.choices.map(c=>'<option value="'+_esc(c)+'"'+(String(s.effective)===c?' selected':'')+'>'+_esc(c)+'</option>').join('')+'</select>';}
+  else{input='<input id="in_'+s.key+'" value="'+_esc(s.override==null?'':s.override)+'" placeholder="'+_esc(s.env==null?'(unset)':s.env)+'">';}
+  const ov=s.override!=null?'<span class="tag on">override</span>':'<span class=muted>env default</span>';
+  return '<div class=panel><h2>'+_esc(s.label)+' '+ov+'</h2>'+
+    '<p class=muted>'+_esc(s.help)+'</p>'+
+    '<div class=row><div class=field><label>Value</label>'+input+'</div>'+
+    '<button data-key="'+s.key+'" data-act="save">Save</button>'+
+    '<button class="ghost" data-key="'+s.key+'" data-act="revert">Revert to env</button></div>'+
+    '<p class=muted>Environment default: '+_code(s.env)+' · effective now: '+_code(s.effective)+'</p></div>';
+ }).join('');
+}
+document.getElementById('app').addEventListener('click',async(e)=>{
+  const b=e.target.closest('button[data-act]'); if(!b)return;
+  const key=b.dataset.key;
+  if(b.dataset.act==='revert'){if(await _send('DELETE','/api/settings/'+key))load();return;}
+  const val=document.getElementById('in_'+key).value;
+  const o={}; o[key]=val;
+  if(await _send('PUT','/api/settings',{settings:o}))load();
+});
+load();
+</script>"""
+    return _layout(config.guild_name, "Settings", body, "settings")
 
 
 def main() -> None:  # pragma: no cover - server entrypoint

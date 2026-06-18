@@ -24,6 +24,7 @@ from discord.ext import commands
 from ..boards import BotBoardMessenger
 from ..pages import PAGES, refresh_page, remove_page
 from ..posting import PostGate, PostingMode
+from ..runtime_settings import effective_post_gate
 from ._guards import require_admin
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ class PagesCog(commands.Cog):
             await self.bot.db.upsert_sticky_page(page.name, str(channel.id))
             row = await self.bot.db.get_sticky_page(page.name)
 
-        gate = PostGate.from_config(self.bot.config)
+        gate = await effective_post_gate(self.bot.db, self.bot.config)
         action = await refresh_page(
             self.bot.db, self.bot.config, page, row, BotBoardMessenger(self.bot), gate
         )
@@ -162,7 +163,7 @@ class PagesCog(commands.Cog):
             )
             return
         await interaction.response.defer(ephemeral=True)
-        gate = PostGate.from_config(self.bot.config)
+        gate = await effective_post_gate(self.bot.db, self.bot.config)
         action = await refresh_page(
             self.bot.db, self.bot.config, page, row, BotBoardMessenger(self.bot), gate
         )

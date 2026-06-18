@@ -21,7 +21,7 @@ import aiohttp
 from .config import Config
 from .db import Database
 from .models import Member
-from .posting import PostGate
+from .runtime_settings import effective_post_gate
 from .services.raiderio import RaiderIOClient
 
 log = logging.getLogger("ftabot.scores")
@@ -95,7 +95,7 @@ async def refresh_boards(
     the nudge to one board type (the feed loop uses it for the News board)."""
     from .boards import REGISTRY, BotBoardMessenger, refresh_board
 
-    gate = PostGate.from_config(config)
+    gate = await effective_post_gate(db, config)
     messenger = BotBoardMessenger(bot)
     rendered = 0
     for row in await db.boards(enabled_only=True):

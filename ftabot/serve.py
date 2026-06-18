@@ -21,7 +21,8 @@ import uvicorn
 
 from .config import Config
 from .db import Database
-from .posting import PostBlocked, PostGate
+from .posting import PostBlocked
+from .runtime_settings import effective_post_gate
 from .sync import sync_guild
 from .web import create_app
 
@@ -44,15 +45,19 @@ def _retry_delay(interval: float, failures: int) -> float:
     return interval * min(2 ** max(failures, 0), _MAX_BACKOFF_FACTOR)
 
 
-def _make_sender(bot, gate: PostGate):
+def _make_sender(bot, config: Config):
     """A coroutine (channel_id, embed) -> None that posts via the bot.
 
-    Every feed alert passes through the posting ``gate`` first: it is dropped
-    while the guardrail is off, redirected to the confirmed test channel in test
-    mode, and only reaches its real channel when posting is live.
+    Every feed alert passes through the posting gate first: it is dropped while
+    the guardrail is off, redirected to the confirmed test channel in test mode,
+    and only reaches its real channel when posting is live. The gate is resolved
+    *per send* from the live settings overlay, so a dashboard change to the
+    posting mode takes effect immediately (no loop restart).
     """
 
     async def _send(channel_id: str, embed, content: str | None = None) -> None:
+        async with Database(config.database_path) as db:
+            gate = await effective_post_gate(db, config)
         destination = gate.resolve(channel_id, promoted=True)
         if destination is None:
             log.debug("posting guardrail (%s): dropped alert for %s", gate.mode.value, channel_id)
@@ -75,7 +80,7 @@ async def _wire_webhook_sender(app, config: Config, bot) -> None:
     from .feeds.runner import drain_outbox
 
     await bot.wait_until_ready()
-    send = _make_sender(bot, PostGate.from_config(config))
+    send = _make_sender(bot, config)
     app.state.feed_sender = send
     try:
         async with Database(config.database_path) as db:
@@ -92,7 +97,7 @@ async def _feed_loop(config: Config, bot, sources) -> None:
 
     await bot.wait_until_ready()
     await asyncio.sleep(5)  # let slash-command sync settle first
-    send = _make_sender(bot, PostGate.from_config(config))
+    send = _make_sender(bot, config)
 
     # The Wowhead poll is the moment new items land in the news archive, so the
     # News board is nudged right here (diff-before-edit: an unchanged page costs
@@ -125,12 +130,13 @@ async def _board_loop(config: Config, bot) -> None:
     await bot.wait_until_ready()
     await asyncio.sleep(8)  # let slash-command sync + feeds settle first
     messenger = BotBoardMessenger(bot)
-    gate = PostGate.from_config(config)
     interval = config.board_refresh_minutes * 60
     failures = 0
     while True:
         try:
             async with Database(config.database_path) as db:
+                # Resolved each tick so a dashboard posting-mode change is honoured.
+                gate = await effective_post_gate(db, config)
                 for row in await db.boards(enabled_only=True):
                     board = REGISTRY.get(row["board_type"])
                     if board is None:
@@ -190,7 +196,7 @@ async def _digest_loop(config: Config, bot) -> None:
 
     await bot.wait_until_ready()
     await asyncio.sleep(10)
-    send = _make_sender(bot, PostGate.from_config(config))
+    send = _make_sender(bot, config)
     interval = config.digest_flush_hours * 3600
     failures = 0
     while True:

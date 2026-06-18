@@ -357,3 +357,170 @@ def test_trends_endpoint_and_gm_charts(tmp_path):
         # would need network; instead assert the endpoint shape is correct.
         data = client.get("/api/trends").json()
         assert "series" in data and "deltas" in data and "count" in data
+
+
+# --- admin control surfaces (boards / feeds / pages / settings / overview) ---
+
+
+def _admin_app(tmp_path, **extra):
+    path = str(tmp_path / "admin.db")
+    _seed(path)
+    cfg = Config(database_path=path, sync_token="s3cret", cookie_secure=False,
+                 guild_realm="hellfire", guild_region="eu", **extra)
+    return create_app(cfg)
+
+
+def test_admin_endpoints_require_the_token(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        for path in ("/api/overview", "/api/boards", "/api/feeds", "/api/pages",
+                     "/api/settings"):
+            assert client.get(path).status_code == 401, path
+        # And the gated HTML pages render the unlock form, not the data.
+        assert "enter token" in client.get("/boards").text.lower()
+        # With the token they open (200) and seed the cookie.
+        assert client.get("/api/boards", params={"token": "s3cret"}).status_code == 200
+
+
+def test_board_lifecycle_create_promote_config_delete(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        tok = {"token": "s3cret"}
+        # An unknown type / non-numeric channel are rejected.
+        assert client.post("/api/boards", params=tok,
+                           json={"board_type": "nope", "channel_id": "1"}).status_code == 400
+        assert client.post("/api/boards", params=tok,
+                           json={"board_type": "hot20", "channel_id": "x"}).status_code == 400
+        created = client.post("/api/boards", params=tok,
+                              json={"board_type": "hot20", "channel_id": "555"})
+        assert created.status_code == 201
+        bid = created.json()["id"]
+        # A duplicate (same type+channel) collides.
+        assert client.post("/api/boards", params=tok,
+                           json={"board_type": "hot20", "channel_id": "555"}).status_code == 409
+        listing = client.get("/api/boards", params=tok).json()
+        board = next(b for b in listing["boards"] if b["id"] == bid)
+        assert board["state"] == "sandboxed" and board["promoted"] is False
+        # Promote → state flips to live in the listing.
+        assert client.post(f"/api/boards/{bid}/promote", params=tok).status_code == 200
+        board = next(b for b in client.get("/api/boards", params=tok).json()["boards"]
+                     if b["id"] == bid)
+        assert board["state"] == "live"
+        # Per-board config edit round-trips.
+        assert client.put(f"/api/boards/{bid}/config", params=tok,
+                          json={"config": {"highlights": 12}}).status_code == 200
+        board = next(b for b in client.get("/api/boards", params=tok).json()["boards"]
+                     if b["id"] == bid)
+        assert board["config"] == {"highlights": 12}
+        # Refresh with no bot wired in reports 'queued' (no immediate render).
+        assert client.post(f"/api/boards/{bid}/refresh", params=tok).json()["status"] == "queued"
+        # Delete, and a second delete 404s.
+        assert client.delete(f"/api/boards/{bid}", params=tok).status_code == 200
+        assert client.delete(f"/api/boards/{bid}", params=tok).status_code == 404
+
+
+def test_feed_rule_and_mute_management(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        tok = {"token": "s3cret"}
+        created = client.post("/api/feeds/rules", params=tok,
+                              json={"source": "wowhead", "channel_id": "777",
+                                    "contains": "hotfix, ptr"})
+        assert created.status_code == 201
+        rid = created.json()["id"]
+        feeds = client.get("/api/feeds", params=tok).json()
+        rule = next(r for r in feeds["rules"] if r["id"] == rid)
+        assert rule["match"]["contains"] == ["hotfix", "ptr"]
+        assert rule["enabled"] is True
+        # Disable, then remove.
+        assert client.post(f"/api/feeds/rules/{rid}/disable", params=tok).status_code == 200
+        rule = next(r for r in client.get("/api/feeds", params=tok).json()["rules"]
+                    if r["id"] == rid)
+        assert rule["enabled"] is False
+        assert client.delete(f"/api/feeds/rules/{rid}", params=tok).status_code == 200
+        # Mute / unmute a source.
+        client.post("/api/feeds/mute", params=tok, json={"source": "raiderio_mplus"})
+        assert "raiderio_mplus" in client.get("/api/feeds", params=tok).json()["muted_sources"]
+        client.delete("/api/feeds/mute/raiderio_mplus", params=tok)
+        assert "raiderio_mplus" not in client.get("/api/feeds", params=tok).json()["muted_sources"]
+
+
+def test_settings_override_and_revert(tmp_path):
+    app = _admin_app(tmp_path, posting_mode="off")
+    with TestClient(app) as client:
+        tok = {"token": "s3cret"}
+        # Default reflects the env config.
+        rows = {r["key"]: r for r in client.get("/api/settings", params=tok).json()}
+        assert rows["posting_mode"]["effective"] == "off"
+        # Save a live override; it becomes effective and the overview reflects it.
+        assert client.put("/api/settings", params=tok,
+                          json={"settings": {"posting_mode": "live",
+                                             "test_channel_id": "321"}}).status_code == 200
+        ov = client.get("/api/overview", params=tok).json()
+        assert ov["posting"]["mode"] == "live"
+        assert ov["posting"]["test_channel_id"] == "321"
+        # Invalid values are rejected.
+        assert client.put("/api/settings", params=tok,
+                          json={"settings": {"posting_mode": "sideways"}}).status_code == 400
+        # Revert drops the override.
+        assert client.delete("/api/settings/posting_mode", params=tok).status_code == 200
+        rows = {r["key"]: r for r in client.get("/api/settings", params=tok).json()}
+        assert rows["posting_mode"]["effective"] == "off"
+
+
+def test_page_placement_endpoints_standalone(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        tok = {"token": "s3cret"}
+        pages = client.get("/api/pages", params=tok).json()["pages"]
+        name = pages[0]["name"]
+        # Place it (no bot in this process → the render is queued, not posted).
+        placed = client.post(f"/api/pages/{name}/place", params=tok,
+                             json={"channel_id": "888"})
+        assert placed.status_code == 200 and placed.json()["refresh"] == "queued"
+        page = next(p for p in client.get("/api/pages", params=tok).json()["pages"]
+                    if p["name"] == name)
+        assert page["channel_id"] == "888" and page["placed"] is True
+        # Remove forgets the placement.
+        assert client.delete(f"/api/pages/{name}", params=tok).json()["status"] == "removed"
+        page = next(p for p in client.get("/api/pages", params=tok).json()["pages"]
+                    if p["name"] == name)
+        assert page["placed"] is False
+
+
+def test_overview_reports_counts_and_features(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        data = client.get("/api/overview", params={"token": "s3cret"}).json()
+        assert data["counts"]["members"] == 2
+        assert set(data["features"]) >= {"feeds", "boards", "scores", "wowaudit"}
+        assert "mode" in data["posting"]
+        assert "sync" in data
+
+
+def test_gated_html_pages_render_when_unlocked(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        # Unlock once; the cookie then carries auth for the HTML pages.
+        client.post("/api/sync/unlock", json={"token": "s3cret"})
+        for path, marker in (
+            ("/overview", "System overview"),
+            ("/boards", "Create a board"),
+            ("/feeds", "Add a routing rule"),
+            ("/settings", "Runtime settings"),
+        ):
+            page = client.get(path)
+            assert page.status_code == 200
+            assert marker in page.text
+            # The shared admin fetch helpers are wired into each page.
+            assert "_api" in page.text
+
+
+def test_gated_html_pages_lock_without_token(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        for path in ("/overview", "/boards", "/feeds", "/settings"):
+            assert "enter token" in client.get(path).text.lower()
+
+
+def test_admin_controls_disabled_without_sync_token(tmp_path):
+    # No SYNC_TOKEN configured at all: the controls advertise how to enable them.
+    path = str(tmp_path / "nodash.db")
+    _seed(path)
+    cfg = Config(database_path=path, guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        assert client.get("/api/boards").status_code == 503
+        assert "disabled" in client.get("/settings").text.lower()
