@@ -80,9 +80,11 @@ async def poll_once(
     rng=None,
 ) -> int:
     """Run one polling pass over all sources. Returns how many alerts posted."""
+    from ..runtime_settings import effective_feed_channel
+
     rules = await db.feed_rules()
     muted = await db.muted_sources()
-    default_channel = config.feed_default_channel_id
+    default_channel = await effective_feed_channel(db, config)
     tone = config.persona_tone
     posted = 0
 

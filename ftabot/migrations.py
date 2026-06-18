@@ -77,12 +77,21 @@ async def _m4_outbox_visibility(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _m5_settings_table(conn: aiosqlite.Connection) -> None:
+    """The runtime settings overlay the dashboard edits (posting mode/channels)."""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings ("
+        "key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT)"
+    )
+
+
 # Ordered, append-only. Never renumber or reuse a version.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "members: forward-only API columns", _m1_member_columns),
     Migration(2, "boards: promoted flag", _m2_boards_promoted),
     Migration(3, "boards: posted_channel_id + backfill", _m3_boards_posted_channel),
     Migration(4, "feed_outbox: visibility-timeout columns", _m4_outbox_visibility),
+    Migration(5, "settings: runtime override table", _m5_settings_table),
 )
 
 

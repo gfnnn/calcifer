@@ -149,7 +149,23 @@ Key flow and layering:
   API + Swagger at `/docs`). Officer/sync endpoints are gated by `SYNC_TOKEN`
   (compared in constant time); the Raid-Helper webhook verifies a shared secret.
   The `/content` dashboard section (+ `GET/PUT/DELETE /api/content/{page}`) edits
-  the sticky pages' copy into `content_docs`, sharing the sync-token unlock.
+  the sticky pages' copy into `content_docs`, sharing the sync-token unlock. The
+  same unlock gates the **admin dashboard** sections — `/overview` (360 command
+  center), `/boards`, `/feeds`, and `/settings` — which are client-rendered from
+  token-gated JSON APIs (`/api/boards`, `/api/feeds`, `/api/pages`,
+  `/api/settings`, `/api/overview`) that mirror the `/board`, `/feed`, `/page`,
+  and `/recruit` Discord cogs. Every control writes DB state the `serve.py`
+  board/feed loops re-read each tick, so a change goes live within one refresh
+  interval (an on-demand refresh renders immediately when the bot shares the
+  process, else reports `queued`).
+- **`runtime_settings.py`** — the live config overlay. A frozen `Config` is built
+  once from env, so the dashboard can't mutate it; instead a small whitelist
+  (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`)
+  is saved into the `settings` table and resolved *through here* per use
+  (`effective_post_gate`, `effective_feed_channel`) — the override wins, else the
+  env `Config` default. The board/feed loops and the `/board`+`/page` cogs build
+  their `PostGate` from this so Discord and the dashboard share one live mode.
+  Loop-launch toggles stay env-only (the Settings page shows them read-only).
 - **`serve.py`** — all-in-one host entry point: runs uvicorn, the bot, the periodic
   sync, and the feed/board/score loops as asyncio tasks on one loop. A long-running
   task dying brings the process down so the host restarts cleanly; one-shot setup
@@ -230,7 +246,8 @@ sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
 (dashboard copy overrides for the bundled `content/*.json`); recruitment funnel:
 `scout_leads` (scouted candidates tracked through new→contacted→trialing→
 joined/passed; discovered fields refreshed by a re-scout, officer state/notes
-preserved); and `schema_migrations` (migration bookkeeping).
+preserved); `settings` (the dashboard's live config overlay — see
+`runtime_settings.py`); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
 

@@ -1144,6 +1144,17 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
+    async def set_board_config(self, board_id: int, config: dict) -> bool:
+        """Replace a board's per-instance config (e.g. News zone sizes). The next
+        refresh re-renders with it (diff-before-edit, so an unchanged render is a
+        no-op). Returns True if a matching board was updated."""
+        cur = await self.conn.execute(
+            "UPDATE boards SET config_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(config), now_iso(), board_id),
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
     async def delete_board(self, board_id: int) -> bool:
         cur = await self.conn.execute("DELETE FROM boards WHERE id = ?", (board_id,))
         await self.conn.commit()
@@ -1338,6 +1349,48 @@ class Database:
         cur = await self.conn.execute(
             "DELETE FROM content_docs WHERE name = ?", (name,)
         )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    # -- runtime settings overlay (dashboard-editable, beats env Config) -------
+
+    async def get_settings(self) -> dict:
+        """Every dashboard-saved override, as a ``{key: value}`` dict."""
+        cur = await self.conn.execute("SELECT key, value_json FROM settings")
+        out: dict = {}
+        for row in await cur.fetchall():
+            try:
+                out[row["key"]] = json.loads(row["value_json"])
+            except json.JSONDecodeError:
+                continue
+        return out
+
+    async def get_setting(self, key: str, default: object = None) -> object:
+        """One override value, or ``default`` when the dashboard hasn't set it."""
+        cur = await self.conn.execute(
+            "SELECT value_json FROM settings WHERE key = ?", (key,)
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row["value_json"])
+        except json.JSONDecodeError:
+            return default
+
+    async def set_setting(self, key: str, value: object) -> None:
+        """Save (or replace) a runtime override edited from the dashboard."""
+        await self.conn.execute(
+            "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, "
+            "updated_at = excluded.updated_at",
+            (key, json.dumps(value, ensure_ascii=False), now_iso()),
+        )
+        await self.conn.commit()
+
+    async def delete_setting(self, key: str) -> bool:
+        """Drop an override, reverting that value to the environment default."""
+        cur = await self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
         await self.conn.commit()
         return cur.rowcount > 0
 

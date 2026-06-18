@@ -414,6 +414,18 @@ CREATE TABLE IF NOT EXISTS scout_leads (
     updated_at  TEXT,
     UNIQUE (name, realm, region)
 );
+
+-- Runtime settings: a small key/value overlay that lets the dashboard change a
+-- handful of operational values (the posting guardrail and its channels) live,
+-- without a redeploy. A row here beats the env-built Config; deleting it reverts
+-- to the environment default. Only values the loops re-read each tick belong
+-- here (see ftabot/runtime_settings.py:OVERRIDABLE); loop-launch toggles still
+-- come from env. value_json is the JSON-encoded override value.
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT
+);
 """
 
 class ColumnOwner(Enum):

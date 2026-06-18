@@ -13,24 +13,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..boards import REGISTRY, BotBoardMessenger, refresh_board
-from ..posting import PostGate, PostingMode
+from ..boards import BOARD_NAMES, REGISTRY, BotBoardMessenger, refresh_board
+from ..posting import PostingMode
+from ..runtime_settings import effective_post_gate
 from ._guards import require_gm_or_discord_admin
 
 if TYPE_CHECKING:
     from ..bot import FtaBot
 
-# Friendly names for the registered board types. (Rules & Info and Guides &
-# Resources are not boards — they are sticky pages, managed via /page.)
-_BOARD_NAMES = {
-    "hot20": "Calcifer's Hot 20",
-    "news_highlights": "News Highlights",
-    "weekly_events": "Weekly Events",
-    "roster_pulse": "Roster Pulse",
-    "recruitment": "Recruitment",
-}
 _BOARD_CHOICES = [
-    app_commands.Choice(name=_BOARD_NAMES.get(key, key), value=key) for key in REGISTRY
+    app_commands.Choice(name=BOARD_NAMES.get(key, key), value=key) for key in REGISTRY
 ]
 
 
@@ -91,7 +83,7 @@ class BoardsCog(commands.Cog):
             return
         lines = []
         for b in boards:
-            name = _BOARD_NAMES.get(b["board_type"], b["board_type"])
+            name = BOARD_NAMES.get(b["board_type"], b["board_type"])
             state = "live ✅" if b["promoted"] else "sandboxed 🧪"
             if not b["enabled"]:
                 state = "disabled ⏸"
@@ -120,7 +112,7 @@ class BoardsCog(commands.Cog):
             )
             return
 
-        gate = PostGate.from_config(self.bot.config)
+        gate = await effective_post_gate(self.bot.db, self.bot.config)
         await interaction.response.defer(ephemeral=True)
         action = await refresh_board(
             self.bot.db, self.bot.config, board, row, BotBoardMessenger(self.bot), gate

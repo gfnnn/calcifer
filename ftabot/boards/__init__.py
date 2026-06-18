@@ -14,14 +14,23 @@ from . import (
     pulse,  # noqa: F401 - registers the Roster Pulse board
     recruitment,  # noqa: F401 - registers the Recruitment board
 )
-from .base import REGISTRY, Board, BoardPayload, register
+from .base import (
+    BOARD_NAMES,
+    REGISTRY,
+    Board,
+    BoardPayload,
+    board_name,
+    register,
+)
 from .engine import BoardMessenger, refresh_board
 from .messenger import BotBoardMessenger
 
 __all__ = [
     "REGISTRY",
+    "BOARD_NAMES",
     "Board",
     "BoardPayload",
+    "board_name",
     "register",
     "BoardMessenger",
     "BotBoardMessenger",
