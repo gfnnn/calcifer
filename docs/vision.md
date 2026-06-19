@@ -511,7 +511,7 @@ variation on the shipped engine), and **done** (its finish line, on top of the
 | First-kill milestones | WCL prog creds; a stored "already killed" set | detect a new boss kill in the prog feed; a celebratory render (`EMBER_RED`) | a first kill fires exactly once, idempotent across restarts |
 | Raid Progress board | WCL creds; the prog channel | a `progress` board (N/H/M down, best pull on the prog boss) | current progression renders ambiently |
 | Weekly MVP / Ashes Awards | the metric to rank on; a weekly schedule + a winners history | a weekly award renderer with anti-repeat memory | a weekly MVP posts without trivially repeating a winner |
-| Achievement shoutouts | an achievement source (Blizzard / WCL) | detect + render new achievements | a shoutout fires on a notable achievement |
+| Achievement shoutouts | an achievement source (Blizzard guild **activity/achievements** / WCL) | detect + render new achievements | a shoutout fires on a notable achievement |
 | Concierge helper cards | the per-channel CTA copy (content in repo) | a `concierge` board (one sticky per channel) | each channel has a "here's what you can do" card |
 | Charm pass | the `:calcifer_*:` / `:fta_*:` emoji uploaded; expanded line banks (Claude-drafted, GM-curated via GitHub) | grow `brand.py` line banks + the mood system with anti-repeat memory | 6–10 lines per mood, anti-repeat, em-dash rule still enforced by tests |
 
@@ -530,7 +530,7 @@ variation on the shipped engine), and **done** (its finish line, on top of the
 | Companion uploader | `SAVEDVARS_UPLOAD_SECRET` | stdlib `scripts/upload_savedvars.py` + secret-verified `POST /api/upload/savedvars` on `web.py` | ✅ shipped |
 | RCLootCouncil ingestion | (none — schema is stable) | `savedvars.py` parser + `services/rclootcouncil.py` → `loot_history` | ✅ shipped |
 | GRM ingestion | tighten aliases against a live `Guild_Roster_Manager.lua` | `services/grm.py` → `identity_members` (defensive, shape-agnostic) | ✅ shipped, validate on real data |
-| Identity graph | a reliable character↔Discord signal | `identity.py` account grouping + `db.apply_accounts` alt↔main overlay; Discord link still manual | 🟡 account half done; Discord link remains |
+| Identity graph | a reliable character↔Discord signal (lead candidate: Battle.net **user-OAuth** owned-characters profile — §9, data-sources §2a) | `identity.py` account grouping + `db.apply_accounts` alt↔main overlay; Discord link still manual | 🟡 account half done; Discord link remains |
 
 ---
 
@@ -582,7 +582,27 @@ timezone* (raid/event times now resolve through `Config.raid_timezone` —
 Europe/Paris as an IANA `zoneinfo` zone, DST-correct — instead of the static
 `RAID_TZ_OFFSET_HOURS`).
 
-Two minor items remain (tracked separately in `DECISIONS.md`):
+Three items remain, roughly highest-value first:
+
+- **The Blizzard connector skips on the first transient failure, and taps only
+  two of the surfaces it documents.** `BlizzardClient._get`
+  ([`services/blizzard.py`](../ftabot/services/blizzard.py)) retries once on a
+  401 (stale token) but lets a 429 or 5xx raise straight to `sync.py`, which
+  swallows it best-effort — so a momentary Blizzard blip silently blanks that
+  run's *authoritative* rank/level/race/ilvl, where the Raider.IO path backs off
+  on 429/5xx and chunks at `ENRICH_CONCURRENCY`. At ~300 members one sequential
+  pass sits far under Blizzard's published per-client quota (~36k req/hour, 100
+  req/second), so this is resilience, not throughput: give the Blizzard path the
+  same bounded backoff (the quota is now recorded in
+  [`data-sources.md`](data-sources.md) §2) so a transient failure degrades
+  instead of dropping a column. The same connector leaves three *free,
+  first-party* surfaces unwired, each lowering our reliance on third-party feeds:
+  the Account/Protected **user-OAuth** profile (the §5c identity signal — now the
+  leading candidate for the open character↔Discord link), guild
+  **activity/achievements** (the Blizzard half of Phase 4's shoutouts), and the
+  **WoW Token** index. All three are catalogued in `data-sources.md` §2a and
+  threaded into the §7b rows; none needs a new deploy, token, or runtime
+  dependency.
 - The scout's land-odds baseline (no signal for guilded candidates yet)
 - Raid-Helper webhook replay binding (static secret is acceptable for now)
 
