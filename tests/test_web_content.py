@@ -177,3 +177,21 @@ def test_content_page_shows_custom_copy_and_placement(tmp_path):
         assert "custom copy" in page.text
         assert "# Mine" in page.text
         assert "2 message(s)" in page.text
+
+
+def test_content_page_shows_registered_but_unposted_placement(tmp_path):
+    # A page registered to a channel but with no live messages yet renders the
+    # "Registered but not posted yet" hint (web.py:1156).
+    path = str(tmp_path / "content.db")
+
+    async def seed() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.upsert_sticky_page("rules_info", "111")  # registered, no messages
+        await db.close()
+
+    asyncio.run(seed())
+    cfg = Config(database_path=path, sync_token=_TOKEN, cookie_secure=False)
+    with TestClient(create_app(cfg)) as c:
+        page = c.get("/content", params={"token": _TOKEN})
+        assert "Registered but not posted yet" in page.text

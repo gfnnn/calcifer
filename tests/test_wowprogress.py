@@ -110,6 +110,14 @@ async def test_client_parses_a_rank():
     assert rank["world_rank"] == 3 and rank["realm_rank"] == 1
 
 
+def test_session_headers_send_a_real_user_agent():
+    # Cloudflare 403s default fetchers, so a client-owned session sends a real
+    # User-Agent (and accepts JSON).
+    headers = WowProgressClient()._session_headers()
+    assert headers["Accept"] == "application/json"
+    assert "ftabot" in headers["User-Agent"]
+
+
 # --- feed: event builder ----------------------------------------------------
 
 

@@ -9,10 +9,12 @@ real temp-file ``db`` fixture, seeding loot/wishlist/snapshots as needed.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import discord
 
 from ftabot.cogs.recruit import RecruitCog
-from ftabot.cogs.reports import ReportsCog
+from ftabot.cogs.reports import ReportsCog, _fmt
 from ftabot.models import LootEntry, WishlistItem
 
 from .test_cogs import _Bot, _cfg, _Interaction, _Perms, _seed, _team_caller
@@ -130,6 +132,74 @@ async def test_trends_with_history(db):
     assert isinstance(it.followup.embed, discord.Embed)
     assert "Members" in it.followup.embed.description
     assert "▲" in it.followup.embed.description  # an upward delta is annotated
+
+
+async def test_trends_skips_fields_with_no_data(db):
+    """A trend field that is all-None across snapshots is skipped (line 260)."""
+    # avg_mythic_plus omitted in both snapshots -> its series is all None.
+    await db.add_snapshot(
+        dict(member_count=10, active_count=8, health_score=70, avg_item_level=620)
+    )
+    await db.add_snapshot(
+        dict(member_count=12, active_count=11, health_score=78, avg_item_level=628)
+    )
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=42)))
+    it = _Interaction()  # default user id 42 == GM
+    await ReportsCog.trends.callback(cog, it)
+    assert isinstance(it.followup.embed, discord.Embed)
+    # The populated fields render; the empty Avg M+ field is omitted entirely.
+    assert "Members" in it.followup.embed.description
+    assert "Avg M+" not in it.followup.embed.description
+
+
+async def test_wishlist_require_team_member_denies(db):
+    """A caller with no team character is turned away from /wishlist (line 170)."""
+    await _seed(db)
+    cog = ReportsCog(_Bot(db, _cfg()))
+    it = _Interaction()  # not linked to any team character
+    await ReportsCog.wishlist.callback(cog, it, player="Ashbringer")
+    assert it.response.ephemeral is True
+    assert "team roster" in it.response.content
+
+
+async def test_lootpriority_require_team_member_denies(db):
+    """A non-team caller is turned away from /lootpriority (line 206)."""
+    await _seed(db)
+    cog = ReportsCog(_Bot(db, _cfg()))
+    it = _Interaction()  # not linked to any team character
+    await ReportsCog.lootpriority.callback(cog, it, item="Shiny")
+    assert it.response.ephemeral is True
+    assert "team roster" in it.response.content
+
+
+async def test_lootpriority_shows_recent_wins_tag(db):
+    """A candidate with a recent loot win gets the 'recent win(s)' tag (line 223)."""
+    await _seed(db)
+    await db.replace_wishlist(
+        "Ashbringer",
+        [WishlistItem("Ashbringer", item_id=99, item_name="Shiny Trinket",
+                      is_bis=True, upgrade_pct=6.0)],
+    )
+    recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    await db.add_loot(
+        [LootEntry("Ashbringer", item_id=5, item_name="Old item", awarded_at=recent)]
+    )
+    await _team_caller(db)
+    cog = ReportsCog(_Bot(db, _cfg()))
+    it = _Interaction()
+    await ReportsCog.lootpriority.callback(cog, it, item="Shiny")
+    assert isinstance(it.followup.embed, discord.Embed)
+    assert "recent win" in it.followup.embed.description
+
+
+def test_fmt_handles_non_float_values():
+    """The _fmt fallback renders ints/strings via str() (line 279)."""
+    assert _fmt(5) == "5"
+    assert _fmt("n/a") == "n/a"
+    # The float branch (line 278) for completeness alongside the fallback.
+    assert _fmt(3.0) == "3"
+    assert _fmt(3.5) == "3.5"
+    assert _fmt(None) == "–"
 
 
 # --- recruit cog: scout embed builder ---------------------------------------

@@ -18,7 +18,7 @@ from ftabot.config import Config
 from ftabot.services.wowaudit import WowAuditClient, WowAuditError
 
 
-async def _run() -> int:
+async def _run() -> int:  # pragma: no cover - live network smoke check
     config = Config.from_env()
     if not config.wowaudit_enabled:
         print("✗ WOWAUDIT_API_KEY is not set — the integration is disabled.")
@@ -61,9 +61,9 @@ async def _run() -> int:
     return 0
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover - live network entry point
     sys.exit(asyncio.run(_run()))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

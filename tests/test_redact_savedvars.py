@@ -132,3 +132,56 @@ def test_inspect_summarize_reports_addons_and_counts():
     assert "RCLootCouncil" in report
     assert "GRM identities parsed: 2" in report
     assert "RCLootCouncil loot rows parsed: 1" in report
+
+
+def _inspect_module():
+    import importlib
+
+    return importlib.import_module("scripts.inspect_savedvars")
+
+
+def test_inspect_shape_renders_empty_dict_list_and_scalar():
+    # _shape sketches each global by type only; cover the empty-dict, list and
+    # scalar branches (the DUMP globals are all non-empty dicts).
+    inspect = _inspect_module()
+    report = inspect.summarize({"Empty": {}, "AList": [1, 2, 3], "AScalar": 42})
+    assert "shape: {}" in report  # empty dict
+    assert "shape: [3 items]" in report  # list
+    assert "shape: int" in report  # scalar -> type name
+
+
+def test_inspect_reports_grm_alt_groups():
+    # The GRM_PlayerListOfAlts_Save branch: a main keyed to its alts array.
+    inspect = _inspect_module()
+    parsed = {
+        "GRM_PlayerListOfAlts_Save": {
+            "Calcifer-Hellfire": {1: "Emberling-Hellfire", 2: "Cinder-Hellfire"},
+        }
+    }
+    report = inspect.summarize(parsed)
+    assert "GRM alt groups parsed: 1" in report
+    assert "Calcifer-Hellfire = Emberling-Hellfire = Cinder-Hellfire" in report
+
+
+def test_collect_names_reads_positional_alt_first_slot():
+    # An alts container whose first slot is the name string (not a nested entry).
+    redact = _redact_module()
+    names = redact.collect_names({"x": {"alts": {1: "AltName-Realm", 2: "MAGE"}}})
+    assert "AltName-Realm" in names
+
+
+def test_collect_names_walks_lists():
+    # Lua tables parse to dicts, but collect_names also recurses real lists/tuples.
+    redact = _redact_module()
+    names = redact.collect_names([{"name": "Foo-Realm"}, ({"name": "Bar-Realm"},)])
+    assert names == {"Foo-Realm", "Bar-Realm"}
+
+
+def test_redact_handles_lists_and_bare_guids():
+    # _redact recurses lists and rewrites a GUID-looking bare string (not under a
+    # GUID key) via the regex branch.
+    redact = _redact_module()
+    out = redact._redact(["keep-me", "Player-5-DEADBEEF"], {})
+    assert out[0] == "keep-me"
+    assert out[1].startswith("Player-0-")  # hashed, original digits gone
+    assert "DEADBEEF" not in out[1]

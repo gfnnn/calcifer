@@ -56,6 +56,31 @@ def test_youtube_parse_handles_garbage():
     assert parse_atom("<nope>") == []
 
 
+_YT_ATOM_INCOMPLETE = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <yt:videoId>HASID</yt:videoId>
+    <title></title>
+  </entry>
+  <entry>
+    <title>Has a title but no id or link</title>
+  </entry>
+  <entry>
+    <yt:videoId>GOOD1</yt:videoId>
+    <title>A real upload</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=GOOD1"/>
+  </entry>
+</feed>"""
+
+
+def test_youtube_parse_skips_entries_missing_title_or_id():
+    # An entry with no title, and one with a title but neither videoId nor link,
+    # are both skipped; only the complete entry survives.
+    events = parse_atom(_YT_ATOM_INCOMPLETE)
+    assert [e.external_id for e in events] == ["yt:GOOD1"]
+
+
 def test_youtube_channel_url():
     assert channel_url("UC123") == (
         "https://www.youtube.com/feeds/videos.xml?channel_id=UC123"

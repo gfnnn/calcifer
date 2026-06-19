@@ -96,3 +96,46 @@ def test_member_embed_clamps_an_overlong_notes_field():
 def test_roster_embed_clamps_an_overlong_title():
     embed = roster_embed([_m("A")], title="T" * 1000, color=0)
     assert len(embed.title) <= TITLE_LIMIT
+
+
+# --- member_embed optional fields -------------------------------------------
+
+
+def test_member_embed_renders_thumbnail_parse_and_discord_fields():
+    # A fully-populated member exercises the optional thumbnail, best-parse and
+    # Discord-mention branches of the card.
+    m = _m(
+        "Calcifer", class_name="Mage", active_spec="Fire",
+        item_level=636.0, mythic_plus_score=3100,
+        thumbnail_url="https://img/calcifer.png",
+        best_parse_avg=88.0, discord_id="12345", is_main=True,
+    )
+    embed = member_embed(m)
+    assert embed.thumbnail.url == "https://img/calcifer.png"
+    by_name = {f.name: f.value for f in embed.fields}
+    assert "88" in by_name["Best Parse Avg"]
+    assert by_name["Discord"] == "<@12345>"
+
+
+def test_member_embed_falls_back_to_raid_progression_string():
+    # No structured raid_progression in details, but a summary string is set:
+    # the card shows the plain "Raid" field instead of per-raid lines.
+    m = _m("Slacker", raid_progression="Voidspire: 8/8 N, 2/8 M")
+    embed = member_embed(m)
+    raid = next(f for f in embed.fields if f.name == "Raid")
+    assert raid.value == "Voidspire: 8/8 N, 2/8 M"
+
+
+# --- roster_embed empty + truncation paths ----------------------------------
+
+
+def test_roster_embed_empty_says_no_members():
+    embed = roster_embed([], title="Roster", color=0)
+    assert embed.description == "No matching members."
+    assert embed.footer.text is None
+
+
+def test_roster_embed_truncates_and_reports_total():
+    members = [_m(f"Char{i}") for i in range(30)]
+    embed = roster_embed(members, title="Roster", color=0, per_page=25)
+    assert "Showing 25 of 30 members." in embed.footer.text

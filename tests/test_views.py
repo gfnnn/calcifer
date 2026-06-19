@@ -27,6 +27,16 @@ async def _seed(db):
     )
 
 
+def test_days_since_handles_none_naive_and_bad_input():
+    # None -> None (no timestamp at all).
+    assert views._days_since(None, NOW) is None
+    # An unparseable timestamp degrades to None rather than raising.
+    assert views._days_since("not-a-date", NOW) is None
+    # A naive timestamp (no tz) is read as UTC, so the day delta is computed.
+    days = views._days_since("2026-05-30T00:00:00", NOW)  # 2 days before NOW
+    assert days == 2.0
+
+
 async def test_gm_report(db):
     await _seed(db)
     r = await views.gm_report(db, CFG, now=NOW)

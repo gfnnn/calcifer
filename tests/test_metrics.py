@@ -145,3 +145,23 @@ def test_readiness_wishlist_credits_by_fill_not_mere_presence():
     assert rf.score > rh.score > re_.score
     # A present-but-empty wishlist isn't flagged as missing.
     assert "⚪ no wishlist" not in re_.flags
+
+
+def test_is_active_ignores_an_unparseable_timestamp():
+    # A malformed last_login is treated as "no signal" (parse returns None),
+    # so the member counts as inactive rather than crashing the rollup.
+    broken = Member("Broken", last_login="not-a-date")
+    assert metrics.is_active(broken, window_days=14, now=NOW) is False
+
+
+def test_is_active_accepts_a_naive_timestamp_as_utc():
+    # A timestamp with no timezone is read as UTC, so a recent naive login
+    # still counts as active (exercises the tz-fill branch in _parse_dt).
+    naive = Member("Naive", last_login="2026-05-31T00:00:00")  # 1 day before NOW
+    assert metrics.is_active(naive, window_days=14, now=NOW) is True
+
+
+def test_progression_fraction_is_zero_when_parsed_but_no_kills():
+    # The summary parses into difficulties but every kill count is 0, so the
+    # function falls through the hardest-first loop and returns 0.0 (not None).
+    assert metrics.progression_fraction("Raid: 0/8 N, 0/8 H, 0/8 M") == 0.0

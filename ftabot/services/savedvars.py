@@ -93,7 +93,7 @@ class _Parser:
     def _long_bracket_level(self) -> int | None:
         """If positioned on ``[`` of a long bracket, return its ``=`` level."""
         i = self.pos
-        if self.text[i:i + 1] != "[":
+        if self.text[i:i + 1] != "[":  # pragma: no cover - every caller pre-checks '['
             return None
         j = i + 1
         while j < self.n and self.text[j] == "=":

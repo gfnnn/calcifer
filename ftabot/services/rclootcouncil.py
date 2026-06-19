@@ -81,7 +81,7 @@ def _normalize_when(date: Any, time: Any) -> str | None:
             year = f"20{year}"
     try:
         iso = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-    except ValueError:
+    except ValueError:  # pragma: no cover - parts are pre-validated as all-digit above
         return None
     clock = str(time).strip() if isinstance(time, (str, int)) else ""
     if re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", clock):

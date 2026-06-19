@@ -362,6 +362,32 @@ async def test_realm_progress_no_raid_slug_yields_no_events(db):
     assert await source.fetch(_FakeRioSession(_REALM_PAYLOAD)) == []
 
 
+async def test_realm_progress_skips_entries_without_a_guild_name(db):
+    # A malformed ranking row (no guild name) is skipped rather than crashing;
+    # the well-formed row alongside it is still tracked.
+    payload = {
+        "raidRankings": [
+            {"guild": {}, "rank": 1, "encountersDefeated": _encounters(4, 8)},  # nameless
+            {"guild": {"name": "From the Ashes"}, "rank": 2,
+             "encountersDefeated": _encounters(3, 8)},
+        ]
+    }
+    cfg = dataclasses.replace(
+        Config(),
+        database_path=db.path,
+        guild_region="eu",
+        guild_realm="hellfire",
+        guild_name="From the Ashes",
+        realm_progress_raids=("liberation-of-undermine",),
+        realm_progress_difficulty="mythic",
+    )
+    source = RaiderIORealmProgressSource(cfg)
+    # First poll seeds without events; only the named guild is persisted.
+    assert await source.fetch(_FakeRioSession(payload)) == []
+    rows = await db.get_realm_progress("hellfire", "eu", "liberation-of-undermine")
+    assert [r["guild_name"] for r in rows] == ["From the Ashes"]
+
+
 async def test_realm_progress_multi_raid_tracks_each_independently(db):
     """Two raids configured → kill increase in either raid emits its own event."""
 

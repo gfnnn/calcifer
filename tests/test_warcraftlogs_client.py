@@ -214,3 +214,95 @@ async def test_query_raises_on_persistent_401():
         with pytest.raises(WarcraftLogsError):
             await wcl._query("query { x }", {})
     assert session.calls == 4  # retried exactly once
+
+
+async def test_current_zone_id_returns_none_on_query_failure():
+    # The zones auto-detect query fails (HTTP 500); the warning path returns None.
+    session = _FakePostSession([_TOKEN, _FakeResp(500)])
+    async with WarcraftLogsClient("id", "secret", session=session) as wcl:
+        assert await wcl.current_zone_id() is None
+
+
+async def test_enrich_character_swallows_query_error():
+    # zone resolves (pinned), but the rankings query errors -> member unchanged.
+    session = _FakePostSession([_TOKEN, _FakeResp(500)])
+    member = Member("Errorer", realm_slug="hellfire", region="eu")
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        result = await wcl.enrich_character(member)
+    assert result.best_parse_avg is None
+
+
+async def test_zone_encounters_returns_empty_on_error():
+    session = _FakePostSession([_TOKEN, _FakeResp(500)])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        assert await wcl.zone_encounters(42) == []
+
+
+async def test_character_rankings_breaks_on_query_error():
+    # The first page query errors -> the loop breaks and returns nothing.
+    session = _FakePostSession([_TOKEN, _FakeResp(500)])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        assert await wcl.character_rankings(3001, region="eu") == []
+
+
+async def test_character_rankings_breaks_when_rankings_not_a_dict():
+    # A schema-drifted payload where characterRankings isn't a dict -> break.
+    payload = {"data": {"worldData": {"encounter": {"characterRankings": None}}}}
+    session = _FakePostSession([_TOKEN, _FakeResp(200, payload)])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        assert await wcl.character_rankings(3001, region="eu") == []
+
+
+async def test_character_rankings_parses_and_skips_nameless():
+    payload = {
+        "data": {
+            "worldData": {
+                "encounter": {
+                    "characterRankings": {
+                        "rankings": [
+                            {"name": "Topdps", "class": "Mage", "spec": "Fire",
+                             "amount": 123.0, "rankPercent": 99,
+                             "server": {"name": "Hellfire", "region": "EU"},
+                             "guild": {"name": "From the Ashes"}},
+                            {"amount": 1},  # no name -> dropped by _parse_ranking
+                        ],
+                        "hasMorePages": False,
+                    }
+                }
+            }
+        }
+    }
+    session = _FakePostSession([_TOKEN, _FakeResp(200, payload)])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        out = await wcl.character_rankings(
+            3001, class_name="Death Knight", spec_name="Blood", region="eu"
+        )
+    assert len(out) == 1
+    assert out[0]["name"] == "Topdps"
+    assert out[0]["region"] == "eu"  # EU unmapped back to eu
+    assert out[0]["guild_name"] == "From the Ashes"
+
+
+async def test_guild_reports_returns_empty_on_error():
+    session = _FakePostSession([_TOKEN, _FakeResp(500)])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        assert await wcl.guild_reports("From the Ashes", "hellfire", "eu") == []
+
+
+async def test_parse_curve_yields_values_and_none_on_error():
+    # First zone errors (-> None slot), second zone returns a parse average.
+    rankings = {
+        "data": {
+            "characterData": {
+                "character": {"zoneRankings": {"bestPerformanceAverage": 80.46}}
+            }
+        }
+    }
+    session = _FakePostSession([
+        _TOKEN,
+        _FakeResp(500),            # zone 41 -> WarcraftLogsError -> None
+        _FakeResp(200, rankings),  # zone 42 -> 80.5
+    ])
+    async with WarcraftLogsClient("id", "secret", zone_id=42, session=session) as wcl:
+        curve = await wcl.parse_curve("Topdps", "hellfire", "eu", [41, 42])
+    assert curve == [None, 80.5]

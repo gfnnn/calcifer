@@ -18,6 +18,19 @@ def test_sanitize_removes_em_dashes():
     assert brand.sanitize(None) is None
 
 
+def test_sanitize_collapses_runs_of_spaces():
+    # The em-dash swap can leave double spaces; sanitize collapses any run of
+    # whitespace down to a single space (the while-loop branch).
+    assert brand.sanitize("too    many     spaces") == "too many spaces"
+
+
+def test_pick_returns_none_when_bank_and_default_are_empty():
+    # A key with no lines and no _default fallback yields None rather than
+    # raising on an empty choice pool.
+    voice = Voice(banks={"empty": []}, rng=random.Random(0))
+    assert voice.line("empty") is None
+
+
 def test_no_bank_line_has_an_em_dash():
     for key, lines in brand._BANKS.items():
         for line in lines:

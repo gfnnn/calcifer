@@ -30,6 +30,16 @@ def test_persona_full_always_speaks():
     assert isinstance(line, str) and line
 
 
+def test_persona_light_tone_sometimes_stays_silent():
+    # With the light dial (prob 0.5), a roll above the threshold returns None
+    # (the probabilistic skip branch). A stub rng makes that deterministic.
+    class _HighRoll:
+        def random(self):
+            return 0.99  # > 0.5, so flavour skips this time
+
+    assert persona.flavour("wowhead.news", tone="light", rng=_HighRoll()) is None
+
+
 def test_authored_feed_titles_obey_the_no_em_dash_house_rule():
     """Titles Calcifer composes (raid/prog reminders + /feed samples) carry no
     em dash, so every surface reads as one voice. Relayed external headlines
@@ -153,6 +163,23 @@ def test_router_category_filter():
     assert router.resolve(news, rules) is None
 
 
+def test_router_source_mismatch_skips_the_rule():
+    # A rule pinned to a different source must not match this event.
+    rules = [{"id": 1, "source": "raiderio_mplus", "event_type": None,
+              "match": {}, "channel_id": "5", "style": {}}]
+    wowhead_event = _event(source="wowhead")
+    assert router.resolve(wowhead_event, rules) is None
+
+
+def test_router_contains_filter_rejects_a_non_matching_event():
+    # The contains keywords appear in neither title, summary, nor categories,
+    # so the rule does not match and (with no default) the event is dropped.
+    rules = [{"id": 1, "source": "wowhead", "event_type": None,
+              "match": {"contains": ["hunter"]}, "channel_id": "5", "style": {}}]
+    other = _event(title="Mage rework", summary="All about mages", categories=["News"])
+    assert router.resolve(other, rules) is None
+
+
 # --- publisher --------------------------------------------------------------
 
 
@@ -186,6 +213,28 @@ def test_render_embed_preserves_relayed_external_copy():
     embed = publisher.render_embed(event, decision, tone="off")
     assert embed.title == headline
     assert "untouched" in embed.description
+
+
+def test_render_embed_sets_thumbnail_and_timestamp():
+    # An event carrying an image + a valid published_at populates the thumbnail
+    # and the embed timestamp (the happy paths of both optional branches).
+    event = _event(
+        title="Imaged", image_url="https://img/x.png",
+        published_at="2026-06-03T10:00:00+00:00",
+    )
+    decision = router.RouteDecision(channel_id="1", style={"persona": False})
+    embed = publisher.render_embed(event, decision, tone="off")
+    assert embed.thumbnail.url == "https://img/x.png"
+    assert embed.timestamp is not None and embed.timestamp.year == 2026
+
+
+def test_render_embed_tolerates_an_unparseable_timestamp():
+    # A garbage published_at is swallowed (ValueError path) and leaves no
+    # timestamp, rather than raising and dropping the whole alert.
+    event = _event(title="Bad date", published_at="not-a-real-date")
+    decision = router.RouteDecision(channel_id="1", style={"persona": False})
+    embed = publisher.render_embed(event, decision, tone="off")
+    assert embed.timestamp is None
 
 
 def test_wowhead_events_are_relayed_not_authored():
@@ -423,3 +472,77 @@ async def test_outbox_dead_letters_after_max_attempts(db):
     # Retries are bounded, not infinite, and the row dead-letters.
     assert always_fail.calls == _OUTBOX_MAX_ATTEMPTS
     assert await db.pending_outbox() == []
+
+
+async def test_drain_skips_a_row_claimed_mid_loop(db):
+    # Two rows are listed as pending; while sending the first, an interleaved
+    # drain claims the second. When the loop reaches it, claim_outbox returns
+    # False, so the row is skipped (not double-posted).
+    cfg = _cfg()
+    rid1 = await db.enqueue_outbox("chan", _outbox_event().to_json(), "{}")
+    rid2 = await db.enqueue_outbox("chan", _outbox_event().to_json(), "{}")
+
+    class _ClaimsTheNext:
+        def __init__(self):
+            self.sent = []
+
+        async def __call__(self, channel_id, embed, content=None):
+            # First send steals row 2's claim out from under the loop.
+            if not self.sent:
+                assert await db.claim_outbox(rid2) is True
+            self.sent.append(channel_id)
+
+    sender = _ClaimsTheNext()
+    posted = await drain_outbox(db, cfg, sender)
+    assert posted == 1  # only row 1 was sent by this drain
+    assert sender.sent == ["chan"]
+    assert rid1  # (referenced for clarity)
+
+
+class _GenericFailSender:
+    """Raises a non-PostBlocked error on send (e.g. a Discord 5xx)."""
+
+    def __init__(self):
+        self.attempts = 0
+
+    async def __call__(self, channel_id, embed, content=None):
+        self.attempts += 1
+        raise RuntimeError("discord 503")
+
+
+async def test_poll_once_leaves_event_unseen_on_publish_error(db, caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING)
+    cfg = _cfg()  # default channel "42" so the event routes somewhere
+    failer = _GenericFailSender()
+
+    # Prime so the next event is a real post attempt.
+    await poll_once(db, cfg, [_FakeSource([_event(external_id="seed")])], None, failer)
+    new = _event(external_id="boom", title="Will fail")
+    posted = await poll_once(db, cfg, [_FakeSource([new])], None, failer)
+
+    assert posted == 0
+    assert failer.attempts >= 1
+    assert "publish failed" in caplog.text  # logged, loop continued
+    # NOT marked seen, so a later successful pass still delivers it.
+    recorder = _Recorder()
+    posted = await poll_once(db, cfg, [_FakeSource([new])], None, recorder)
+    assert posted == 1
+    assert recorder.sent == [("42", "Will fail")]
+
+
+async def test_feed_source_fetch_is_abstract():
+    # The base contract raises when a subclass forgets to implement fetch — the
+    # abstractmethod body itself (the NotImplementedError) is the documented
+    # behaviour, so we reach it by delegating to super().
+    import pytest
+
+    class _Bare(FeedSource):
+        name = "bare"
+
+        async def fetch(self, session):
+            return await super().fetch(session)
+
+    with pytest.raises(NotImplementedError):
+        await _Bare().fetch(None)

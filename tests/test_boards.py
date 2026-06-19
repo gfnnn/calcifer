@@ -290,3 +290,112 @@ async def test_board_messenger_suppresses_all_pings():
     edited = channel.message.edits[0]["allowed_mentions"]
     assert (edited.everyone, edited.roles, edited.users) == (False, False, False)
 
+
+# --- Board base contract ----------------------------------------------------
+
+
+async def test_board_render_is_abstract():
+    # The base render is the documented contract; reaching it via super() raises.
+    import pytest
+
+    class _Bare(Board):
+        board_type = "bare"
+
+        async def render(self, db, config, board_config):
+            return await super().render(db, config, board_config)
+
+    with pytest.raises(NotImplementedError):
+        await _Bare().render(None, None, {})
+
+
+# --- messenger: channel-cache miss + vanished-message handling --------------
+
+
+def _not_found():
+    """A minimal discord.NotFound for a fake fetch (404)."""
+    import discord
+
+    class _Resp:
+        status = 404
+        reason = "Not Found"
+
+    return discord.NotFound(_Resp(), "unknown message")
+
+
+class _CacheMissBot:
+    """get_channel misses the cache; fetch_channel is the fallback path."""
+
+    def __init__(self, channel):
+        self._channel = channel
+        self.fetched = False
+
+    def get_channel(self, channel_id):
+        return None  # cache miss -> messenger must fall back to fetch_channel
+
+    async def fetch_channel(self, channel_id):
+        self.fetched = True
+        return self._channel
+
+
+async def test_messenger_falls_back_to_fetch_channel_on_cache_miss():
+    from ftabot.boards.messenger import BotBoardMessenger
+
+    channel = _FakeChannel()
+    bot = _CacheMissBot(channel)
+    messenger = BotBoardMessenger(bot)
+
+    await messenger.send("555", BoardPayload(fingerprint="v1", content="hi"))
+    assert bot.fetched is True  # the cache miss forced an API fetch
+    assert channel.sends  # and the message went out
+
+
+class _GoneChannel:
+    """A channel whose message has been deleted: fetch_message 404s."""
+
+    async def fetch_message(self, message_id):
+        raise _not_found()
+
+
+class _GoneBot:
+    def get_channel(self, channel_id):
+        return _GoneChannel()
+
+
+async def test_messenger_edit_reports_a_vanished_message():
+    from ftabot.boards.messenger import BotBoardMessenger
+
+    messenger = BotBoardMessenger(_GoneBot())
+    # The message is gone -> edit returns False so the engine can self-heal.
+    ok = await messenger.edit("555", "777", BoardPayload(fingerprint="v1", content="x"))
+    assert ok is False
+
+
+async def test_messenger_delete_reports_an_already_gone_message():
+    from ftabot.boards.messenger import BotBoardMessenger
+
+    messenger = BotBoardMessenger(_GoneBot())
+    # Deleting an already-deleted message returns False, mirroring edit.
+    assert await messenger.delete("555", "777") is False
+
+
+async def test_messenger_delete_removes_a_live_message():
+    from ftabot.boards.messenger import BotBoardMessenger
+
+    deleted: list[bool] = []
+
+    class _Msg:
+        async def delete(self):
+            deleted.append(True)
+
+    class _Chan:
+        async def fetch_message(self, message_id):
+            return _Msg()
+
+    class _Bot:
+        def get_channel(self, channel_id):
+            return _Chan()
+
+    messenger = BotBoardMessenger(_Bot())
+    assert await messenger.delete("555", "777") is True
+    assert deleted == [True]
+

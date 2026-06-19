@@ -253,6 +253,21 @@ def test_sync_trigger_disabled_without_token(tmp_path):
         assert client.post("/api/sync", params={"token": "x"}).status_code == 503
 
 
+def test_admin_page_disabled_without_sync_token(tmp_path):
+    # With no SYNC_TOKEN the /admin page renders the "disabled" explainer rather
+    # than a token prompt (web.py:1234-1241).
+    path = str(tmp_path / "web.db")
+    _seed(path)
+    cfg = Config(database_path=path, guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        page = client.get("/admin")
+        assert page.status_code == 200
+        text = page.text
+        assert "disabled" in text
+        assert "SYNC_TOKEN" in text
+        assert "enter token" not in text.lower()
+
+
 def test_admin_page_gates_on_token(tmp_path):
     path = str(tmp_path / "web.db")
     _seed(path)
@@ -359,6 +374,331 @@ def test_trends_endpoint_and_gm_charts(tmp_path):
         assert "series" in data and "deltas" in data and "count" in data
 
 
+# --- SyncManager concurrency + error reporting ------------------------------
+
+
+def test_sync_trigger_returns_already_running_409(tmp_path):
+    # A second /api/sync while one is in flight is rejected with 409, not a
+    # second run. We hold the SyncManager "running" so trigger() short-circuits
+    # (web.py:60 -> api_sync 409 branch at web.py:333).
+    path = str(tmp_path / "web.db")
+    _seed(path)
+    cfg = Config(database_path=path, sync_token="s3cret",
+                 guild_realm="hellfire", guild_region="eu")
+    app = create_app(cfg)
+    app.state.sync.running = True  # pretend a sync is already in flight
+    with TestClient(app) as client:
+        resp = client.post("/api/sync", params={"token": "s3cret"})
+        assert resp.status_code == 409
+        assert resp.json()["status"] == "already_running"
+
+
+def test_sync_manager_records_error_on_failure(tmp_path, monkeypatch):
+    # When sync_guild raises, SyncManager._run captures it as last_error (and
+    # clears last_summary) instead of crashing the server (web.py:72-74).
+    import time
+
+    import ftabot.web as web
+
+    async def boom(db, config):
+        raise RuntimeError("sync exploded")
+
+    monkeypatch.setattr(web, "sync_guild", boom)
+
+    path = str(tmp_path / "web.db")
+    _seed(path)
+    cfg = Config(database_path=path, sync_token="s3cret",
+                 guild_realm="hellfire", guild_region="eu")
+    with TestClient(web.create_app(cfg)) as client:
+        assert client.post("/api/sync", params={"token": "s3cret"}).status_code == 202
+        status = {}
+        for _ in range(60):
+            status = client.get("/api/sync/status").json()
+            if not status["running"] and status["last_error"]:
+                break
+            time.sleep(0.05)
+        assert status["last_error"] == "sync exploded"
+        assert status["last_summary"] is None
+
+
+# --- Raid-Helper webhook error / branch paths -------------------------------
+
+
+def _webhook_app(tmp_path, **overrides):
+    path = str(tmp_path / "wh.db")
+    _seed(path)
+    cfg = Config(
+        database_path=path,
+        guild_realm="hellfire",
+        guild_region="eu",
+        raidhelper_webhook_secret="hook-secret",
+        **overrides,
+    )
+    return create_app(cfg)
+
+
+def test_webhook_rejects_non_json_body(tmp_path):
+    # A body that isn't JSON is a 400 (web.py:170-171).
+    with TestClient(_webhook_app(tmp_path)) as client:
+        resp = client.post(
+            "/webhooks/raidhelper",
+            params={"token": "hook-secret"},
+            headers={"Content-Type": "application/json"},
+            content="{not json",
+        )
+        assert resp.status_code == 400
+
+
+def test_webhook_rejects_unrecognised_payload(tmp_path):
+    # parse_webhook returns None when no event id is present -> 400 (web.py:175).
+    with TestClient(_webhook_app(tmp_path)) as client:
+        resp = client.post(
+            "/webhooks/raidhelper", params={"token": "hook-secret"}, json={"foo": "bar"}
+        )
+        assert resp.status_code == 400
+        assert "Unrecognised" in resp.json()["detail"]
+
+
+def test_webhook_muted_source_returns_muted(tmp_path):
+    # When the raidhelper source is muted, the event is recorded but the alert is
+    # swallowed with a "muted" status (web.py:201-202).
+    path = str(tmp_path / "wh.db")
+    _seed(path)
+
+    async def mute() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.mute_source("raidhelper")
+        await db.close()
+
+    asyncio.run(mute())
+    cfg = Config(database_path=path, guild_realm="hellfire", guild_region="eu",
+                 raidhelper_webhook_secret="hook-secret")
+    with TestClient(create_app(cfg)) as client:
+        resp = client.post(
+            "/webhooks/raidhelper",
+            params={"token": "hook-secret"},
+            json={"id": "evt-muted", "title": "Mythic night", "action": "created"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "muted"}
+
+
+def test_webhook_no_route_when_no_rule_or_default_channel(tmp_path):
+    # With no matching rule and no default channel, resolve() drops the event:
+    # the handler returns "no_route" (web.py:209).
+    with TestClient(_webhook_app(tmp_path)) as client:
+        resp = client.post(
+            "/webhooks/raidhelper",
+            params={"token": "hook-secret"},
+            json={"id": "evt-noroute", "title": "Off-night", "action": "created"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "no_route"}
+
+
+def test_webhook_routes_to_queue_when_rule_matches(tmp_path):
+    # A matching feed rule routes the event into the outbox; with no feed_sender
+    # wired in it stays "queued".
+    path = str(tmp_path / "wh.db")
+    _seed(path)
+
+    async def rule() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.add_feed_rule("raidhelper", "12345")
+        await db.close()
+
+    asyncio.run(rule())
+    cfg = Config(database_path=path, guild_realm="hellfire", guild_region="eu",
+                 raidhelper_webhook_secret="hook-secret")
+    with TestClient(create_app(cfg)) as client:
+        resp = client.post(
+            "/webhooks/raidhelper",
+            params={"token": "hook-secret"},
+            json={"id": "evt-routed", "title": "Raid night", "action": "created"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "queued"}
+        # A duplicate of the same event is deduped before routing.
+        dup = client.post(
+            "/webhooks/raidhelper",
+            params={"token": "hook-secret"},
+            json={"id": "evt-routed", "title": "Raid night", "action": "created"},
+        )
+        assert dup.json() == {"status": "duplicate"}
+
+
+def test_sync_unlock_tolerates_non_json_body(tmp_path):
+    # A malformed unlock body falls back to an empty dict, so the token check
+    # cleanly rejects with 401 rather than 500 (web.py:347-348).
+    path = str(tmp_path / "web.db")
+    _seed(path)
+    cfg = Config(database_path=path, sync_token="s3cret",
+                 guild_realm="hellfire", guild_region="eu", cookie_secure=False)
+    with TestClient(create_app(cfg)) as client:
+        resp = client.post(
+            "/api/sync/unlock",
+            headers={"Content-Type": "application/json"},
+            content="{not json",
+        )
+        assert resp.status_code == 401
+        assert "fta_sync_token" not in client.cookies
+
+
+# --- sort + render helper branches ------------------------------------------
+
+
+def test_sort_members_puts_missing_values_last():
+    # _sort_members must rank members with a missing sort key last (web.py:577),
+    # not crash on the None comparison.
+    from ftabot.web import _sort_members
+
+    scored = Member("Scored", mythic_plus_score=2500)
+    unscored = Member("Unscored", mythic_plus_score=None)
+    ordered = _sort_members([unscored, scored], "mythic_plus_score")
+    assert [m.character_name for m in ordered] == ["Scored", "Unscored"]
+
+
+def test_member_link_includes_armory_arrow_for_safe_profile_url(tmp_path):
+    # A member with a real http profile URL gets the external "↗" armory link in
+    # the roster table (web.py:716).
+    path = str(tmp_path / "web.db")
+
+    async def seed() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.upsert_synced(
+            Member("Linked", class_name="Mage", role="DPS",
+                   profile_url="https://raider.io/characters/eu/hellfire/Linked")
+        )
+        await db.close()
+
+    asyncio.run(seed())
+    cfg = Config(database_path=path, guild_name="From the Ashes",
+                 guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        html = client.get("/").text
+        assert "raider.io/characters/eu/hellfire/Linked" in html
+        assert "Armory / Raider.IO" in html
+
+
+def test_gm_page_renders_delta_and_trends_with_snapshots(tmp_path):
+    # Two snapshots make the GM page render both the health delta vs the previous
+    # snapshot (web.py:811-814) and the Trends sparkline section (web.py:854-862).
+    path = str(tmp_path / "web.db")
+    _seed(path)
+
+    async def seed_snaps() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.add_snapshot(
+            {
+                "taken_at": "2026-06-01T00:00:00",
+                "member_count": 18,
+                "active_count": 12,
+                "avg_item_level": 620.0,
+                "avg_mythic_plus": 2800.0,
+                "health_score": 70.0,
+            }
+        )
+        await db.add_snapshot(
+            {
+                "taken_at": "2026-06-08T00:00:00",
+                "member_count": 20,
+                "active_count": 15,
+                "avg_item_level": 625.0,
+                "avg_mythic_plus": 3000.0,
+                "health_score": 80.0,
+            }
+        )
+        await db.close()
+
+    asyncio.run(seed_snaps())
+    cfg = Config(database_path=path, guild_name="From the Ashes",
+                 guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        html = client.get("/gm").text
+        # Health delta marker against the previous snapshot is rendered.
+        assert "▲" in html
+        # The trends section appears once two snapshots exist.
+        assert "Trends (last 2 snapshots)" in html
+
+
+def test_member_page_renders_prep_wishlist_and_alt_standing(tmp_path):
+    # Drives the per-member render branches: prep bits for missing
+    # enchants/gems/vault (web.py:997-1003), wishlist rows with upgrade/bis/
+    # obtained markers (web.py:1008-1011) and the "alt of <main>" identity
+    # standing (web.py:1046).
+    from ftabot.models import WishlistItem
+
+    path = str(tmp_path / "web.db")
+
+    async def seed() -> None:
+        db = Database(path)
+        await db.connect()
+        await db.upsert_synced(
+            Member(
+                "Cinder",
+                class_name="Mage",
+                role="DPS",
+                missing_enchants=2,
+                missing_gems=0,
+                vault_slots_filled=6,
+            )
+        )
+        await db.replace_wishlist(
+            "Cinder",
+            [
+                WishlistItem(
+                    character_name="Cinder",
+                    item_id=212396,
+                    item_name="Ember Greatsword",
+                    boss="Nexus-King",
+                    difficulty="Mythic",
+                    upgrade_pct=8.5,
+                    is_bis=True,
+                    obtained=False,
+                ),
+                WishlistItem(
+                    character_name="Cinder",
+                    item_id=212397,
+                    item_name="Ashen Ring",
+                    boss="Sprocketmonger",
+                    difficulty="Heroic",
+                    upgrade_pct=None,
+                    is_bis=False,
+                    obtained=True,
+                ),
+            ],
+        )
+        await db.upsert_identities(
+            [
+                IdentityRecord(
+                    character_name="Cinder",
+                    is_main=False,
+                    main_name="Ashbringer-Hellfire",
+                )
+            ]
+        )
+        await db.close()
+
+    asyncio.run(seed())
+    cfg = Config(database_path=path, guild_name="From the Ashes",
+                 guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        html = client.get("/member/Cinder").text
+        assert "enchants missing: 2" in html  # bad branch
+        assert "gems missing: 0" in html  # ok branch
+        assert "vault slots: 6/9" in html
+        # Wishlist rows: BiS star, upgrade %, obtained vs not.
+        assert "Ember Greatsword" in html
+        assert "+8.5%" in html
+        assert "⭐" in html  # is_bis marker
+        assert "✅" in html  # obtained marker
+        # Alt standing links back to the declared main.
+        assert "alt of" in html
+        assert "Ashbringer" in html
 # --- admin control surfaces (boards / feeds / pages / settings / overview) ---
 
 

@@ -1,6 +1,15 @@
 """Tests for the GRM identity SavedVariables parser."""
 
-from ftabot.services.grm import alt_groups_from_savedvars, parse_identities
+from ftabot.services.grm import (
+    _alt_name,
+    _find_epoch,
+    _iso_from_epoch,
+    _main_name,
+    _record,
+    alt_groups_from_savedvars,
+    identities_from_savedvars,
+    parse_identities,
+)
 from ftabot.services.savedvars import parse_savedvariables
 
 # A realistic GRM dump: GRM_GuildMemberHistory_Save[faction][guild][members],
@@ -202,3 +211,77 @@ def test_alt_groups_drop_singletons_and_dedup():
 
 def test_alt_groups_empty_when_table_absent():
     assert alt_groups_from_savedvars({"GRM_GuildMemberHistory_Save": {}}) == []
+
+
+# --- pure-helper edge cases -------------------------------------------------
+
+
+def test_iso_from_epoch_rejects_out_of_range():
+    # Pre-2000 / far-future seconds are junk and yield None.
+    assert _iso_from_epoch(0) is None
+    assert _iso_from_epoch(5_000_000_000) is None
+    assert _iso_from_epoch(1_579_046_400) == "2020-01-15"
+
+
+def test_find_epoch_ignores_bools_and_unstructured_and_depth():
+    # Bools are ints in Python but never an epoch.
+    assert _find_epoch(True) is None
+    # A scalar that's neither a container nor a valid epoch -> None.
+    assert _find_epoch("a string") is None
+    # An epoch buried below the depth-4 walk limit is not found.
+    deep = {"a": {"b": {"c": {"d": {"e": {"f": 1_579_046_400}}}}}}
+    assert _find_epoch(deep) is None
+    # An epoch within the limit is found (and the minimum is taken).
+    assert _find_epoch({"x": [1_700_000_000, 1_579_046_400]}) == 1_579_046_400.0
+
+
+def test_join_date_quoted_unix_that_isnt_numeric_falls_through():
+    # A non-numeric quoted joinDateUnix can't be parsed; fall back to nothing.
+    lua = """
+    GRM_GuildMemberHistory_Save = { [1] = { ["Guild"] = { {
+        ["name"] = "Junky-Hellfire", ["GUID"] = "Player-1-CCCC",
+        ["rankName"] = "Member", ["joinDateUnix"] = "not-a-number",
+    } } } }
+    """
+    recs = parse_identities(lua)
+    assert recs[0].join_date is None
+
+
+def test_main_name_from_main_at_time_of_leaving():
+    # An alt whose main link only survives in mainAtTimeOfLeaving[1].
+    member = {
+        "name": "Emberling-Hellfire",
+        "GUID": "g",
+        "isMain": False,
+        "mainAtTimeOfLeaving": {1: "Calcifer-Hellfire"},
+    }
+    recs = identities_from_savedvars({"member": member})
+    ember = recs[0]
+    assert ember.main_name == "Calcifer-Hellfire"
+    # And the helper directly: no link -> None.
+    assert _main_name({"isMain": False}) is None
+
+
+def test_alt_name_string_named_dict_and_unrecognised():
+    assert _alt_name("Cinder-Hellfire") == "Cinder-Hellfire"  # bare string
+    assert _alt_name("   ") is None  # whitespace-only -> None
+    assert _alt_name({"name": "Cinder-Hellfire"}) == "Cinder-Hellfire"
+    assert _alt_name({1: "Sparky-Hellfire"}) == "Sparky-Hellfire"
+    assert _alt_name(12345) is None  # neither str nor dict -> None
+
+
+def test_record_returns_none_for_unusable_names():
+    # raw_name not a string -> None.
+    assert _record({"name": 123, "GUID": "g"}, "eu", "hellfire") is None
+    # A name that splits to an empty character name -> None.
+    assert _record({"name": "-hellfire", "GUID": "g"}, "eu", "hellfire") is None
+
+
+def test_collect_members_depth_guard_and_alt_groups_guards():
+    # A member buried below the depth-8 walk limit isn't collected.
+    node: dict = {"name": "Deep-Hellfire", "GUID": "g"}
+    for _ in range(9):
+        node = {"wrap": node}
+    assert identities_from_savedvars({"GRM_GuildMemberHistory_Save": node}) == []
+    # _collect_alt_groups bails on a non-dict node (covered via a non-dict table).
+    assert alt_groups_from_savedvars({"GRM_PlayerListOfAlts_Save": "nope"}) == []

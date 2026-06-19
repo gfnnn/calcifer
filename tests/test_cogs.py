@@ -9,6 +9,8 @@ commands assemble a response without touching the network.
 
 from __future__ import annotations
 
+import dataclasses
+
 import discord
 from discord import app_commands
 
@@ -338,6 +340,20 @@ async def test_whois(db):
     assert whois_it.response.ephemeral is True  # nobody linked yet
 
 
+async def test_whois_lists_linked_characters(db):
+    await _seed(db)
+    cog = MembersCog(_Bot(db, _cfg()))
+    member = await db.get_member("Ashbringer", "hellfire", "eu")
+    await db.set_discord_link(member.id, "7")
+
+    found_it = _Interaction()
+    await MembersCog.whois.callback(cog, found_it, _User(id=7, display_name="Harry"))
+    embed = found_it.response.embed
+    assert isinstance(embed, discord.Embed)
+    assert "Harry" in embed.title
+    assert "Ashbringer" in embed.description
+
+
 async def test_me_card_empty_then_linked(db):
     await _seed(db)
     cog = MembersCog(_Bot(db, _cfg()))
@@ -567,3 +583,38 @@ async def test_feed_test_without_destination(db):
     await FeedsCog.test.callback(cog, it, _choice("wowhead"))
     assert it.response.ephemeral is True
     assert "nowhere to post" in it.response.content
+
+
+class _SendableChannel:
+    def __init__(self, id=42):
+        self.id = id
+        self.mention = f"<#{id}>"
+        self.sent = []
+
+    async def send(self, *, content=None, embed=None):
+        self.sent.append((content, embed))
+
+
+class _FeedTestBot(_Bot):
+    """A bot whose fetch_channel returns a sendable channel (no get_channel hit)."""
+
+    def __init__(self, db, config, channel):
+        super().__init__(db, config)
+        self._channel = channel
+
+    async def fetch_channel(self, _channel_id):
+        return self._channel
+
+
+async def test_feed_test_falls_back_to_fetch_channel(db):
+    # A default channel is set, but the interaction has no guild (so
+    # get_channel is skipped) -> the cog resolves it via bot.fetch_channel.
+    channel = _SendableChannel(id=42)
+    cfg = _cfg()
+    cfg = dataclasses.replace(cfg, feed_default_channel_id="42", persona_tone="off")
+    cog = FeedsCog(_FeedTestBot(db, cfg, channel))
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    it.guild = None  # forces the fetch_channel branch
+    await FeedsCog.test.callback(cog, it, _choice("wowhead"))
+    assert channel.sent  # the sample alert was posted via fetch_channel
+    assert "Posted" in it.response.content

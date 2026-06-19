@@ -124,3 +124,59 @@ async def test_baseline_rolls_after_a_weekly_reset(db):
     await board.render(db, Config(), {})  # this render should roll the baseline
     _ranks, captured = await db.board_baseline(HOT20_TYPE)
     assert captured != "2020-01-01T00:00:00+00:00"  # rolled forward to now
+
+
+async def test_new_entrant_is_marked_new(db):
+    # A member absent from the baseline (but with a baseline that exists) shows
+    # the NEW marker, not a movement arrow.
+    await _seed(db, [("Emberlyn", 3000.0), ("Ashbringer", 2000.0)])
+    board = Hot20Board()
+    await board.render(db, Config(), {})  # seeds the baseline (no NEW stamps)
+
+    # A fresh face arrives at the top; they were never in the baseline.
+    await db.upsert_synced(
+        Member("Newbie", class_name="Mage", role="DPS", mythic_plus_score=5000.0)
+    )
+    payload = await board.render(db, Config(), {})
+    rows = [line for line in payload.embed.description.splitlines() if line.startswith("`")]
+    newbie_line = next(line for line in rows if "Newbie" in line)
+    assert "NEW" in newbie_line
+
+
+async def test_big_climber_earns_the_callout(db):
+    # A member climbing >=2 ranks since the baseline triggers the "Flying up the
+    # ranks" header callout.
+    await _seed(db, [
+        ("Top", 5000.0), ("Second", 4000.0), ("Third", 3000.0), ("Climber", 1000.0),
+    ])
+    board = Hot20Board()
+    await board.render(db, Config(), {})  # baseline: Climber is #4
+
+    # Climber rockets to #1 (a 3-rank jump), past everyone.
+    await db.upsert_synced(
+        Member("Climber", class_name="Mage", role="DPS", mythic_plus_score=9000.0)
+    )
+    payload = await board.render(db, Config(), {})
+    desc = payload.embed.description
+    assert "Flying up the ranks" in desc
+    assert "Climber" in desc
+
+
+async def test_baseline_with_unparseable_timestamp_does_not_crash(db):
+    # A corrupt captured_at parses to None (the _parse_dt ValueError branch); the
+    # render still succeeds and treats it as "reset has passed".
+    await _seed(db, [("Emberlyn", 3000.0), ("Ashbringer", 2000.0)])
+    board = Hot20Board()
+    await board.render(db, Config(), {})  # seeds the baseline
+
+    await db.conn.execute(
+        "UPDATE board_baselines SET captured_at = ? WHERE board_type = ?",
+        ("not-a-real-timestamp", HOT20_TYPE),
+    )
+    await db.conn.commit()
+
+    payload = await board.render(db, Config(), {})  # must not raise
+    assert payload is not None
+    # captured_dt is None -> baseline rolls forward to a real timestamp.
+    _ranks, captured = await db.board_baseline(HOT20_TYPE)
+    assert captured != "not-a-real-timestamp"

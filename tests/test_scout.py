@@ -122,6 +122,93 @@ async def test_scout_requires_credentials(db):
         await scout.run_scout(db, Config())  # no WCL creds
 
 
+async def test_scout_empty_roster_returns_no_reports(db, scout_config, monkeypatch):
+    monkeypatch.setattr(scout, "WarcraftLogsClient", _FakeWCL)
+    monkeypatch.setattr(scout, "RaiderIOClient", _FakeRIO)
+    # No members seeded -> nothing to analyse, returns [] before any I/O (line 86).
+    assert await scout.run_scout(db, scout_config) == []
+
+
+async def test_scout_unknown_only_class_raises(db, scout_config, monkeypatch):
+    monkeypatch.setattr(scout, "WarcraftLogsClient", _FakeWCL)
+    monkeypatch.setattr(scout, "RaiderIOClient", _FakeRIO)
+    await _seed(db)
+    with pytest.raises(scout.ScoutUnavailable, match="Unknown class"):
+        await scout.run_scout(db, scout_config, only_class="Notaclass")
+
+
+async def test_scout_no_weak_slots_returns_empty(db, scout_config, monkeypatch):
+    monkeypatch.setattr(scout, "WarcraftLogsClient", _FakeWCL)
+    monkeypatch.setattr(scout, "RaiderIOClient", _FakeRIO)
+    # One strong solo raider: weak_slots finds nothing to shop for (line 97).
+    await db.upsert_synced(Member(
+        character_name="Solo", class_name="Paladin", active_spec="Holy",
+        role="HEALER", best_parse_avg=95.0, mythic_plus_score=3300.0, item_level=295.0,
+    ))
+    cfg = dataclasses.replace(scout_config, recruit_weak_threshold=0.0)
+    assert await scout.run_scout(db, cfg) == []
+
+
+async def test_scout_raises_when_no_encounters(db, scout_config, monkeypatch):
+    class _NoEncWCL(_FakeWCL):
+        async def zone_encounters(self, zone_id):
+            return []
+
+    monkeypatch.setattr(scout, "WarcraftLogsClient", _NoEncWCL)
+    monkeypatch.setattr(scout, "RaiderIOClient", _FakeRIO)
+    await _seed(db)
+    with pytest.raises(scout.ScoutUnavailable, match="No encounters"):
+        await scout.run_scout(db, scout_config)
+
+
+async def test_scout_vet_skips_uncardable_and_swallows_guild_errors(
+    db, scout_config, monkeypatch
+):
+    # Two discovered Paladins: one has no Raider.IO card (skipped during vetting,
+    # line 221), the other's guild lookup blows up (swallowed, lines 231-232).
+    class _VetWCL(_FakeWCL):
+        async def character_rankings(self, encounter_id, **kwargs):
+            return [
+                {"name": "Ghost", "realm_slug": "ravencrest", "region": "eu",
+                 "class_name": "Paladin", "spec": "Holy", "guild_name": "Rival"},
+                {"name": "Climber", "realm_slug": "ravencrest", "region": "eu",
+                 "class_name": "Paladin", "spec": "Holy", "guild_name": "Rival"},
+            ]
+
+        async def parse_curve(self, name, realm, region, zone_ids):
+            return [78.0, 84.0, 90.0]
+
+    class _VetRio(_FakeRIO):
+        async def character_card(self, name, realm, region, seasons):
+            if name == "Ghost":
+                return None  # no card -> candidate skipped
+            return {
+                "name": "Climber", "realm_slug": "ravencrest", "region": "eu",
+                "class_name": "Paladin", "active_spec": "Holy", "role": "HEALER",
+                "item_level": 289.0, "guild_name": "Casual Embers",
+                "mplus_seasons": [2500, 2750, 3000], "lfg_active": False,
+            }
+
+        async def guild_strength(self, name, realm, region):
+            # The candidate's own guild lookup explodes; the anchor lookup
+            # (our guild) must still succeed, so only raise for the candidate.
+            if name == "Casual Embers":
+                raise RuntimeError("rate limited")
+            return None
+
+    monkeypatch.setattr(scout, "WarcraftLogsClient", _VetWCL)
+    monkeypatch.setattr(scout, "RaiderIOClient", _VetRio)
+    await _seed(db)
+
+    reports = await scout.run_scout(db, scout_config)
+    pal = next(r for r in reports if r.slot.class_name == "Paladin")
+    names = [m.candidate.name for m in pal.matches]
+    assert "Climber" in names  # vetting survived the swallowed guild error
+    assert "Ghost" not in names  # the uncardable pick was dropped
+    climber = next(m for m in pal.matches if m.candidate.name == "Climber")
+    assert climber.candidate.guild_strength is None  # error left it unknown
+
+
 async def test_scout_only_class_for_unrostered(db, scout_config, monkeypatch):
     monkeypatch.setattr(scout, "WarcraftLogsClient", _FakeWCL)
     monkeypatch.setattr(scout, "RaiderIOClient", _FakeRIO)
@@ -143,6 +230,43 @@ def test_config_parses_scout_env(monkeypatch):
     assert cfg.recruit_roles_open == ("HEALER", "DPS")
     assert cfg.recruit_seasons == ("season-tww-2", "season-tww-3")
     assert cfg.scout_zone_ids == (10, 20, 30)
+
+
+def test_normalise_class_maps_or_returns_none():
+    from ftabot.scout import _normalise_class
+
+    assert _normalise_class("paladin") == "Paladin"
+    assert _normalise_class("  PALADIN ") == "Paladin"
+    assert _normalise_class("Notaclass") is None
+
+
+def test_slot_for_class_open_slot_when_nobody_rostered():
+    from ftabot.models import Member
+    from ftabot.scout import _slot_for_class
+
+    # A roster with no Warlocks -> an open slot at the neutral 0.5 bar.
+    roster = [Member(character_name="Apal", class_name="Paladin")]
+    slot = _slot_for_class(roster, "Warlock", Config())
+    assert slot.class_name == "Warlock"
+    assert slot.incumbent == "(none rostered)"
+    assert slot.incumbent_strength == 0.5
+    assert slot.spec is None and slot.role is None
+
+
+def test_dedup_pool_drops_nameless_own_guild_and_caps():
+    from ftabot.scout import _dedup_pool
+
+    rankings = [
+        {"realm_slug": "r"},  # no name -> skipped (line 200)
+        {"name": "Ourpal", "realm_slug": "hellfire", "guild_name": "From the Ashes"},  # own guild
+        {"name": "Mate", "realm_slug": "r", "guild_name": "Rival"},  # in roster -> skipped
+        {"name": "First", "realm_slug": "r", "guild_name": "Rival"},
+        {"name": "First", "realm_slug": "r", "guild_name": "Rival"},  # dup key -> skipped
+        {"name": "Second", "realm_slug": "r2", "guild_name": "Rival"},
+        {"name": "Third", "realm_slug": "r3", "guild_name": "Rival"},  # over the cap
+    ]
+    picks = _dedup_pool(rankings, {"mate"}, "from the ashes", limit=2)
+    assert [p["name"] for p in picks] == ["First", "Second"]  # capped at 2 (line 209)
 
 
 def test_sample_encounters_picks_spread():
