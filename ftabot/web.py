@@ -94,6 +94,64 @@ class SyncManager:
         }
 
 
+class ScoutManager:
+    """Runs the recruitment scout on demand, one at a time, with status tracking.
+
+    Mirrors :class:`SyncManager`: the scout is network-bound (Warcraft Logs +
+    Raider.IO) so it runs in a background task on its own DB connection, exactly
+    as the ``/recruit lead capture`` command does. Disabled unless WoW guild has
+    scout credentials (``config.scout_credentials``)."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self._lock = asyncio.Lock()
+        self.running = False
+        self.last_started: str | None = None
+        self.last_finished: str | None = None
+        self.last_summary: str | None = None
+        self.last_error: str | None = None
+
+    async def trigger(self, only_class: str | None = None) -> bool:
+        async with self._lock:
+            if self.running:
+                return False
+            self.running = True
+            self.last_started = now_iso()
+            self.last_error = None
+        asyncio.create_task(self._run(only_class))
+        return True
+
+    async def _run(self, only_class: str | None) -> None:
+        from . import scout
+
+        try:
+            async with Database(self.config.database_path) as db:
+                reports = await scout.run_scout(db, self.config, only_class=only_class)
+                leads = scout.lead_dicts(reports)
+                for lead in leads:
+                    await db.upsert_lead(lead)
+            self.last_summary = (
+                f"Captured {len(leads)} lead(s)."
+                if leads
+                else "Scouted — no upgrades worth tracking."
+            )
+        except Exception as exc:  # noqa: BLE001 - report, don't crash the server
+            self.last_error = str(exc)
+            self.last_summary = None
+        finally:
+            self.running = False
+            self.last_finished = now_iso()
+
+    def status(self) -> dict:
+        return {
+            "running": self.running,
+            "last_started": self.last_started,
+            "last_finished": self.last_finished,
+            "last_summary": self.last_summary,
+            "last_error": self.last_error,
+        }
+
+
 def create_app(config: Config | None = None) -> FastAPI:
     config = config or Config.from_env()
     db = Database(config.database_path)
@@ -118,6 +176,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.bot = None
     sync_manager = SyncManager(config)
     app.state.sync = sync_manager
+    scout_manager = ScoutManager(config)
+    app.state.scout = scout_manager
 
     def _check_sync_token(provided: str | None) -> None:
         if not config.sync_token:
@@ -701,6 +761,171 @@ def create_app(config: Config | None = None) -> FastAPI:
         reverted = await db.delete_setting(key)
         return JSONResponse({"status": "reverted" if reverted else "already_default"})
 
+    # -- recruiting: lead funnel + board config ------------------------------
+
+    async def _edit_recruit_state(mutate) -> dict:
+        """Read-modify-write the recruitment state (mirrors the /recruit cog)."""
+        state = await db.recruitment_state()
+        mutate(state)
+        await db.set_recruitment_state(state)
+        return state
+
+    @app.get("/api/recruiting", dependencies=gated)
+    async def api_recruiting() -> JSONResponse:
+        data = await views.recruiting(db, config)
+        data["capture"] = scout_manager.status()
+        return JSONResponse(data)
+
+    @app.post("/api/leads/capture", dependencies=gated)
+    async def api_leads_capture(request: Request) -> JSONResponse:
+        if not config.scout_credentials:
+            raise HTTPException(
+                status_code=503,
+                detail="Scout is disabled. Set Warcraft Logs credentials + zone ids.",
+            )
+        try:
+            body = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            body = {}
+        only_class = (body.get("wow_class") if isinstance(body, dict) else None) or None
+        if not await scout_manager.trigger(only_class):
+            return JSONResponse(
+                {"status": "already_running", **scout_manager.status()}, status_code=409
+            )
+        return JSONResponse(
+            {"status": "started", **scout_manager.status()}, status_code=202
+        )
+
+    @app.post("/api/leads/{lead_id}/state", dependencies=gated)
+    async def api_lead_state(lead_id: int, request: Request) -> JSONResponse:
+        from .recruit import LEAD_STATES
+
+        data = await _body(request)
+        state = str(data.get("state") or "").strip()
+        if state not in LEAD_STATES:
+            raise HTTPException(status_code=400, detail="Unknown lead state.")
+        if not await db.set_lead_state(lead_id, state):
+            raise HTTPException(status_code=404, detail="Unknown lead.")
+        return JSONResponse({"status": "updated"})
+
+    @app.put("/api/leads/{lead_id}/note", dependencies=gated)
+    async def api_lead_note(lead_id: int, request: Request) -> JSONResponse:
+        data = await _body(request)
+        note = str(data.get("note") or "").strip() or None
+        if not await db.set_lead_note(lead_id, note):
+            raise HTTPException(status_code=404, detail="Unknown lead.")
+        return JSONResponse({"status": "saved"})
+
+    @app.delete("/api/leads/{lead_id}", dependencies=gated)
+    async def api_lead_delete(lead_id: int) -> JSONResponse:
+        if not await db.delete_lead(lead_id):
+            raise HTTPException(status_code=404, detail="Unknown lead.")
+        return JSONResponse({"status": "removed"})
+
+    @app.put("/api/recruiting/slots/{role}", dependencies=gated)
+    async def api_recruit_slots(role: str, request: Request) -> JSONResponse:
+        from .boards.recruitment import ROLE_ORDER
+
+        if role not in ROLE_ORDER:
+            raise HTTPException(status_code=404, detail="Unknown role.")
+        data = await _body(request)
+        slot: dict = {}
+        try:
+            slot["open"] = max(0, int(data.get("open") or 0))
+            if data.get("ilvl") not in (None, ""):
+                slot["ilvl"] = int(data["ilvl"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="open / ilvl must be numbers.")
+        note = str(data.get("note") or "").strip()
+        if note:
+            slot["note"] = note
+        await _edit_recruit_state(lambda s: s.setdefault("slots", {}).update({role: slot}))
+        return JSONResponse({"status": "saved"})
+
+    @app.post("/api/recruiting/rules", dependencies=gated)
+    async def api_recruit_rule_add(request: Request) -> JSONResponse:
+        data = await _body(request)
+        text = str(data.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Rule text is required.")
+        await _edit_recruit_state(lambda s: s.setdefault("rules", []).append(text))
+        return JSONResponse({"status": "added"})
+
+    @app.delete("/api/recruiting/rules/{index}", dependencies=gated)
+    async def api_recruit_rule_del(index: int) -> JSONResponse:
+        state = await db.recruitment_state()
+        rules = state.get("rules") or []
+        if not 0 <= index < len(rules):
+            raise HTTPException(status_code=404, detail="No such rule.")
+        rules.pop(index)
+        state["rules"] = rules
+        await db.set_recruitment_state(state)
+        return JSONResponse({"status": "removed"})
+
+    @app.put("/api/recruiting/message", dependencies=gated)
+    async def api_recruit_message(request: Request) -> JSONResponse:
+        data = await _body(request)
+        msg = str(data.get("text") or "").strip() or None
+
+        def _mut(s: dict) -> None:
+            if msg:
+                s["message"] = msg
+            else:
+                s.pop("message", None)
+
+        await _edit_recruit_state(_mut)
+        return JSONResponse({"status": "saved"})
+
+    @app.post("/api/recruiting/reset", dependencies=gated)
+    async def api_recruit_reset() -> JSONResponse:
+        await db.set_recruitment_state({})
+        return JSONResponse({"status": "reset"})
+
+    # -- member admin (the six manual-owned columns) -------------------------
+
+    @app.get("/api/admin/members", dependencies=gated)
+    async def api_admin_members(q: str | None = None) -> JSONResponse:
+        return JSONResponse(await views.members_admin(db, config, q=q))
+
+    @app.put("/api/admin/members/{member_id}", dependencies=gated)
+    async def api_admin_member_edit(member_id: int, request: Request) -> JSONResponse:
+        member = await db.get_member_by_id(member_id)
+        if member is None:
+            raise HTTPException(status_code=404, detail="Unknown member.")
+        data = await _body(request)
+
+        def _clean(value: object) -> str | None:
+            return (str(value).strip() or None) if value is not None else None
+
+        if "discord_id" in data:
+            await db.set_discord_link(member_id, _clean(data["discord_id"]))
+        if "notes" in data:
+            await db.set_note(member_id, _clean(data["notes"]))
+        if "raid_team" in data:
+            await db.set_raid_team(member_id, _clean(data["raid_team"]))
+        if "officer_role" in data:
+            await db.set_officer_role(member_id, _clean(data["officer_role"]))
+        if "main_character" in data:
+            main_name = _clean(data["main_character"])
+            if main_name is None:  # clear the alt link → this character is a main
+                await db.set_main_alt(member_id, is_main=True, main_character_id=None)
+            else:
+                realm = _clean(data.get("realm")) or member.realm_slug
+                main = await db.get_member(main_name, realm, member.region)
+                if main is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"No member '{main_name}' on {realm}.",
+                    )
+                if main.id == member_id:
+                    raise HTTPException(
+                        status_code=400, detail="A character can't be its own main."
+                    )
+                await db.set_main_alt(
+                    member_id, is_main=False, main_character_id=main.id
+                )
+        return JSONResponse({"status": "saved"})
+
     # -- HTML pages ----------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
@@ -842,6 +1067,26 @@ def create_app(config: Config | None = None) -> FastAPI:
         return _gated_html(
             token, fta_sync_token, "settings", "Settings",
             lambda: _render_settings(config),
+        )
+
+    @app.get("/recruiting", response_class=HTMLResponse)
+    async def recruiting_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "recruiting", "Recruiting",
+            lambda: _render_recruiting(config),
+        )
+
+    @app.get("/members", response_class=HTMLResponse)
+    async def members_page(
+        token: str | None = None,
+        fta_sync_token: str | None = Cookie(default=None),
+    ) -> HTMLResponse:
+        return _gated_html(
+            token, fta_sync_token, "members", "Members",
+            lambda: _render_members(config),
         )
 
     return app
@@ -1007,6 +1252,8 @@ def _layout(guild_name: str, subtitle: str, body: str, active: str) -> str:
         + link("/overview", "Overview", "overview")
         + link("/boards", "Boards", "boards")
         + link("/feeds", "Feeds", "feeds")
+        + link("/recruiting", "Recruiting", "recruiting")
+        + link("/members", "Members", "members")
         + link("/content", "Content", "content")
         + link("/settings", "Settings", "settings")
         + link("/admin", "Sync", "admin")
@@ -1918,6 +2165,142 @@ document.getElementById('app').addEventListener('click',async(e)=>{
 load();
 </script>"""
     return _layout(config.guild_name, "Settings", body, "settings")
+
+
+def _render_recruiting(config: Config) -> str:
+    body = """
+<h2>Recruitment funnel</h2>
+<div class=panel id=capture></div>
+<div class=panel><h2>Leads</h2><div id=leads class=muted>Loading…</div></div>
+<div class=panel><h2>Board config</h2><div id=cfg class=muted>Loading…</div></div>
+""" + _ADMIN_JS + """
+<script>
+let DATA={};
+function leadRow(l){
+ const opts=DATA.lead_states.map(s=>'<option value="'+s+'"'+(s===l.state?' selected':'')+'>'+s+'</option>').join('');
+ const who=_esc(l.name)+' <span class=muted>'+_esc(l.class_name||'')+' '+_esc(l.role||'')+'</span>'+(l.lfg?' <span class="tag on">LFG</span>':'');
+ return '<tr><td>#'+l.id+'</td><td>'+who+'</td><td class=num>'+_esc(l.score==null?'—':Math.round(l.score))+'</td>'+
+   '<td><select data-id="'+l.id+'" data-act="state">'+opts+'</select></td>'+
+   '<td><input data-id="'+l.id+'" data-act="note" value="'+_esc(l.notes||'')+'" placeholder="note"></td>'+
+   '<td><button class="sm danger" data-id="'+l.id+'" data-act="remove">Remove</button></td></tr>';
+}
+function slotForm(role){
+ const s=(DATA.config.slots||{})[role]||{};
+ return '<div class=row data-role="'+role+'"><div class=field><label>'+role.toUpperCase()+' open</label>'+
+   '<input class=s_open value="'+_esc(s.open==null?'':s.open)+'" size=4></div>'+
+   '<div class=field><label>min ilvl</label><input class=s_ilvl value="'+_esc(s.ilvl==null?'':s.ilvl)+'" size=5></div>'+
+   '<div class=field><label>note</label><input class=s_note value="'+_esc(s.note||'')+'"></div>'+
+   '<button class=sm data-role="'+role+'" data-act="slot">Save</button></div>';
+}
+async function load(){
+ DATA=await _api('/api/recruiting'); if(!DATA)return;
+ // capture panel
+ const cap=DATA.capture||{};
+ let capHtml='<h2>Capture</h2>';
+ if(DATA.scout_available){
+   capHtml+='<div class=row><div class=field><label>Class (optional)</label><input id=capclass placeholder="Paladin"></div>'+
+     '<button id=capbtn'+(cap.running?' disabled':'')+'>Capture leads</button></div>'+
+     '<p class=muted id=capst>'+_esc(cap.running?'Scouting…':(cap.last_summary||cap.last_error||'idle'))+'</p>';
+ } else { capHtml+='<p class=muted>Live scouting needs Warcraft Logs credentials. Manage existing leads below.</p>'; }
+ document.getElementById('capture').innerHTML=capHtml;
+ if(DATA.scout_available){document.getElementById('capbtn').onclick=capture;}
+ // leads
+ const lw=document.getElementById('leads'); lw.classList.remove('muted');
+ lw.innerHTML=DATA.leads.length?('<table><thead><tr><th>#</th><th>Lead</th><th class=num>Score</th>'+
+   '<th>State</th><th>Note</th><th></th></tr></thead><tbody>'+DATA.leads.map(leadRow).join('')+'</tbody></table>')
+   :'<p class=muted>No leads yet. Capture some (or run <code>/recruit lead capture</code> in Discord).</p>';
+ // config
+ const rules=(DATA.config.rules||[]).map((r,i)=>'<li>'+_esc(r)+
+   ' <button class="sm danger" data-idx="'+i+'" data-act="delrule">×</button></li>').join('');
+ document.getElementById('cfg').classList.remove('muted');
+ document.getElementById('cfg').innerHTML=
+   DATA.roles.map(slotForm).join('')+
+   '<h2>Trial rules</h2><ul id=rules>'+(rules||'<li class=muted>None (board shows defaults)</li>')+'</ul>'+
+   '<div class=row><div class=field><label>Add rule</label><input id=newrule></div><button id=addrule>Add</button></div>'+
+   '<h2>Pitch message</h2><div class=row><div class=field><label>Override (blank = default)</label>'+
+   '<input id=msg value="'+_esc(DATA.config.message||'')+'" size=50></div><button id=savemsg>Save</button></div>'+
+   '<p><button class="ghost" id=reset>Reset all recruitment config</button></p>';
+ document.getElementById('addrule').onclick=async()=>{const t=document.getElementById('newrule').value.trim();
+   if(t&&await _send('POST','/api/recruiting/rules',{text:t}))load();};
+ document.getElementById('savemsg').onclick=async()=>{
+   if(await _send('PUT','/api/recruiting/message',{text:document.getElementById('msg').value}))load();};
+ document.getElementById('reset').onclick=async()=>{if(confirm('Clear all recruitment config?')&&
+   await _send('POST','/api/recruiting/reset'))load();};
+}
+async function capture(){
+ const wow_class=document.getElementById('capclass').value.trim();
+ const r=await _send('POST','/api/leads/capture',wow_class?{wow_class}:{});
+ if(r){document.getElementById('capbtn').disabled=true;poll();}
+}
+async function poll(){try{const d=await _api('/api/recruiting');const c=d.capture||{};
+ document.getElementById('capst').textContent=c.running?'Scouting…':(c.last_summary||c.last_error||'idle');
+ if(c.running){setTimeout(poll,2500);}else{load();}}catch(e){}}
+document.getElementById('leads').addEventListener('change',async(e)=>{
+ const el=e.target.closest('[data-act="state"]'); if(!el)return;
+ await _send('POST','/api/leads/'+el.dataset.id+'/state',{state:el.value});});
+document.getElementById('leads').addEventListener('click',async(e)=>{
+ const b=e.target.closest('button[data-act="remove"]'); if(!b)return;
+ if(confirm('Remove lead #'+b.dataset.id+'?')&&await _send('DELETE','/api/leads/'+b.dataset.id))load();});
+document.getElementById('leads').addEventListener('keydown',async(e)=>{
+ const el=e.target.closest('[data-act="note"]'); if(!el||e.key!=='Enter')return;
+ if(await _send('PUT','/api/leads/'+el.dataset.id+'/note',{note:el.value}))el.blur();});
+document.getElementById('cfg').addEventListener('click',async(e)=>{
+ const slot=e.target.closest('button[data-act="slot"]');
+ if(slot){const row=slot.closest('[data-role]');
+   const body={open:row.querySelector('.s_open').value,ilvl:row.querySelector('.s_ilvl').value,
+     note:row.querySelector('.s_note').value};
+   if(await _send('PUT','/api/recruiting/slots/'+slot.dataset.role,body))load();return;}
+ const del=e.target.closest('button[data-act="delrule"]');
+ if(del&&await _send('DELETE','/api/recruiting/rules/'+del.dataset.idx))load();});
+load();
+</script>"""
+    return _layout(config.guild_name, "Recruiting", body, "recruiting")
+
+
+def _render_members(config: Config) -> str:
+    body = """
+<h2>Member admin</h2>
+<p class=muted>Edit the officer-owned fields (discord link, notes, team, officer role,
+main/alt). Roster sync never touches these. Press Enter or Save on a row.</p>
+<div class=row>
+  <div class=field><label>Search by name</label><input id=q placeholder="all members"></div>
+  <button id=go>Search</button>
+</div>
+<div id=list class=muted>Loading…</div>
+""" + _ADMIN_JS + """
+<script>
+function row(m){
+ const main=m.is_main?'main':('alt of '+_esc(m.main_name||('#'+m.main_character_id)));
+ return '<tr data-id="'+m.id+'"><td>'+_esc(m.name)+' <span class=muted>'+_esc(m.class||'')+'</span><br>'+
+   '<span class=muted>'+main+'</span></td>'+
+   '<td><input class=f_discord value="'+_esc(m.discord_id||'')+'" placeholder="discord id" size=12></td>'+
+   '<td><input class=f_team value="'+_esc(m.raid_team||'')+'" placeholder="team" size=8></td>'+
+   '<td><input class=f_officer value="'+_esc(m.officer_role||'')+'" placeholder="officer role" size=10></td>'+
+   '<td><input class=f_main value="'+_esc(m.main_name||'')+'" placeholder="main char (blank=is main)" size=12></td>'+
+   '<td><input class=f_notes value="'+_esc(m.notes||'')+'" placeholder="notes" size=18></td>'+
+   '<td><button class=sm data-act=save>Save</button></td></tr>';
+}
+async function load(){
+ const q=document.getElementById('q').value.trim();
+ const d=await _api('/api/admin/members'+(q?('?q='+encodeURIComponent(q)):'')); if(!d)return;
+ const w=document.getElementById('list'); w.classList.remove('muted');
+ w.innerHTML=d.members.length?('<table><thead><tr><th>Character</th><th>Discord</th><th>Team</th>'+
+   '<th>Officer</th><th>Main</th><th>Notes</th><th></th></tr></thead><tbody>'+d.members.map(row).join('')+'</tbody></table>')
+   :'<p class=muted>No members match.</p>';
+}
+async function save(tr){
+ const body={discord_id:tr.querySelector('.f_discord').value,raid_team:tr.querySelector('.f_team').value,
+   officer_role:tr.querySelector('.f_officer').value,notes:tr.querySelector('.f_notes').value,
+   main_character:tr.querySelector('.f_main').value};
+ if(await _send('PUT','/api/admin/members/'+tr.dataset.id,body))load();
+}
+document.getElementById('go').onclick=load;
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')load();});
+document.getElementById('list').addEventListener('click',e=>{
+ const b=e.target.closest('button[data-act=save]'); if(b)save(b.closest('tr'));});
+load();
+</script>"""
+    return _layout(config.guild_name, "Members", body, "members")
 
 
 def main() -> None:  # pragma: no cover - server entrypoint

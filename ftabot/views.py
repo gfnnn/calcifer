@@ -541,3 +541,56 @@ async def feed_health(db: Database, config: Config) -> dict:
         "pending_outbox": len(await db.pending_outbox()),
         "pending_digests": len(await db.pending_digests()),
     }
+
+
+# --- Admin: recruitment funnel (leads + board config) -----------------------
+
+
+async def recruiting(db: Database, config: Config) -> dict:
+    """The recruitment funnel for the dashboard: the lead pipeline + the
+    officer-configured board state, plus the choice lists the UI renders from."""
+    from .boards.recruitment import ROLE_ORDER
+    from .recruit import LEAD_STATES
+
+    return {
+        "leads": await db.leads(limit=200),
+        "config": await db.recruitment_state(),
+        "lead_states": list(LEAD_STATES),
+        "roles": list(ROLE_ORDER),
+        "scout_available": config.scout_credentials,
+    }
+
+
+# --- Admin: member manual-field editing -------------------------------------
+
+
+async def members_admin(db: Database, config: Config, *, q: str | None = None) -> dict:
+    """Roster rows decorated with their editable manual fields (and the resolved
+    main character's name) for the member-admin page. ``q`` filters by name."""
+    members = (
+        await db.search_members(name=q) if q else await db.all_members(order_by="name")
+    )
+    rows = []
+    for m in members:
+        main_name = None
+        if m.main_character_id:
+            main = await db.get_member_by_id(m.main_character_id)
+            main_name = main.character_name if main else None
+        rows.append(
+            {
+                "id": m.id,
+                "name": m.character_name,
+                "realm": m.realm_slug,
+                "region": m.region,
+                "class": m.class_name,
+                "role": m.role,
+                "discord_id": m.discord_id,
+                "notes": m.notes,
+                "raid_team": m.raid_team,
+                "officer_role": m.officer_role,
+                "is_main": m.is_main,
+                "main_character_id": m.main_character_id,
+                "main_name": main_name,
+            }
+        )
+    return {"members": rows, "query": q or ""}

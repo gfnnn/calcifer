@@ -524,3 +524,140 @@ def test_admin_controls_disabled_without_sync_token(tmp_path):
     with TestClient(create_app(cfg)) as client:
         assert client.get("/api/boards").status_code == 503
         assert "disabled" in client.get("/settings").text.lower()
+
+
+# --- Phase 2: recruiting funnel + member admin ------------------------------
+
+
+def _seed_lead(path, **fields):
+    async def run() -> None:
+        db = Database(path)
+        await db.connect()
+        lead = {"name": "Newbie", "realm": "hellfire", "region": "eu",
+                "class_name": "Mage", "role": "DPS", "score": 80, "source": "scout"}
+        lead.update(fields)
+        await db.upsert_lead(lead)
+        await db.close()
+
+    asyncio.run(run())
+
+
+def test_recruiting_board_config_round_trips(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        tok = {"token": "s3cret"}
+        # Set a role's slots, add then remove a rule, set then clear the message.
+        assert client.put("/api/recruiting/slots/tank", params=tok,
+                          json={"open": 2, "ilvl": 480, "note": "prefer survival"}).status_code == 200
+        assert client.put("/api/recruiting/slots/nope", params=tok,
+                          json={"open": 1}).status_code == 404
+        assert client.post("/api/recruiting/rules", params=tok,
+                           json={"text": "Be on time"}).status_code == 200
+        assert client.post("/api/recruiting/rules", params=tok,
+                           json={"text": ""}).status_code == 400
+        client.put("/api/recruiting/message", params=tok, json={"text": "Join us"})
+        data = client.get("/api/recruiting", params=tok).json()
+        assert data["config"]["slots"]["tank"] == {"open": 2, "ilvl": 480, "note": "prefer survival"}
+        assert data["config"]["rules"] == ["Be on time"]
+        assert data["config"]["message"] == "Join us"
+        assert data["roles"] == ["tank", "healer", "dps"]
+        # Remove the rule by index, then reset wipes everything.
+        assert client.delete("/api/recruiting/rules/0", params=tok).status_code == 200
+        assert client.delete("/api/recruiting/rules/9", params=tok).status_code == 404
+        assert client.post("/api/recruiting/reset", params=tok).status_code == 200
+        assert client.get("/api/recruiting", params=tok).json()["config"] == {}
+
+
+def test_lead_pipeline_state_note_delete(tmp_path):
+    path = str(tmp_path / "admin.db")
+    _seed(path)
+    _seed_lead(path)
+    cfg = Config(database_path=path, sync_token="s3cret", cookie_secure=False,
+                 guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        tok = {"token": "s3cret"}
+        lead = client.get("/api/recruiting", params=tok).json()["leads"][0]
+        lid = lead["id"]
+        assert lead["state"] == "new"
+        # An unknown state is rejected; a valid one moves the lead.
+        assert client.post(f"/api/leads/{lid}/state", params=tok,
+                           json={"state": "sideways"}).status_code == 400
+        assert client.post(f"/api/leads/{lid}/state", params=tok,
+                           json={"state": "contacted"}).status_code == 200
+        client.put(f"/api/leads/{lid}/note", params=tok, json={"note": "DM sent"})
+        lead = client.get("/api/recruiting", params=tok).json()["leads"][0]
+        assert lead["state"] == "contacted" and lead["notes"] == "DM sent"
+        assert client.delete(f"/api/leads/{lid}", params=tok).status_code == 200
+        assert client.delete(f"/api/leads/{lid}", params=tok).status_code == 404
+
+
+def test_lead_capture_gated_on_credentials(tmp_path):
+    # Without WCL credentials the capture trigger reports it's disabled.
+    with TestClient(_admin_app(tmp_path)) as client:
+        assert client.post("/api/leads/capture", params={"token": "s3cret"}).status_code == 503
+
+
+def test_lead_capture_runs_the_scout_in_background(tmp_path, monkeypatch):
+    from ftabot import scout
+
+    async def fake_run_scout(db, config, *, only_class=None):
+        return ["one-report"]
+
+    def fake_lead_dicts(reports):
+        return [{"name": "Scouted", "realm": "hellfire", "region": "eu",
+                 "class_name": "Priest", "role": "HEALER", "score": 91, "source": "scout"}]
+
+    monkeypatch.setattr(scout, "run_scout", fake_run_scout)
+    monkeypatch.setattr(scout, "lead_dicts", fake_lead_dicts)
+
+    path = str(tmp_path / "admin.db")
+    _seed(path)
+    cfg = Config(database_path=path, sync_token="s3cret", cookie_secure=False,
+                 warcraftlogs_client_id="id", warcraftlogs_client_secret="sec",
+                 warcraftlogs_zone_id=42, guild_realm="hellfire", guild_region="eu")
+    with TestClient(create_app(cfg)) as client:
+        tok = {"token": "s3cret"}
+        started = client.post("/api/leads/capture", params=tok)
+        assert started.status_code == 202
+        # Wait for the background task to finish, then the lead is captured.
+        for _ in range(50):
+            cap = client.get("/api/recruiting", params=tok).json()["capture"]
+            if not cap["running"]:
+                break
+        leads = client.get("/api/recruiting", params=tok).json()["leads"]
+        assert any(le["name"] == "Scouted" for le in leads)
+
+
+def test_member_admin_edits_manual_fields_and_alt_link(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        tok = {"token": "s3cret"}
+        members = {m["name"]: m for m in
+                   client.get("/api/admin/members", params=tok).json()["members"]}
+        ember = members["Emberlyn"]
+        # Set the plain manual fields.
+        assert client.put(f"/api/admin/members/{ember['id']}", params=tok,
+                          json={"raid_team": "Cinder", "officer_role": "Recruiter",
+                                "notes": "trial", "discord_id": "42"}).status_code == 200
+        # Link Emberlyn as an alt of Ashbringer (resolved by name).
+        assert client.put(f"/api/admin/members/{ember['id']}", params=tok,
+                          json={"main_character": "Ashbringer"}).status_code == 200
+        # A non-existent main is rejected.
+        assert client.put(f"/api/admin/members/{ember['id']}", params=tok,
+                          json={"main_character": "Ghost"}).status_code == 400
+        after = {m["name"]: m for m in
+                 client.get("/api/admin/members", params=tok).json()["members"]}["Emberlyn"]
+        assert after["raid_team"] == "Cinder" and after["officer_role"] == "Recruiter"
+        assert after["discord_id"] == "42" and after["is_main"] is False
+        assert after["main_name"] == "Ashbringer"
+        # Search narrows the list.
+        only = client.get("/api/admin/members", params={**tok, "q": "Ash"}).json()["members"]
+        assert [m["name"] for m in only] == ["Ashbringer"]
+
+
+def test_phase2_gated_pages_render_and_lock(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        client.post("/api/sync/unlock", json={"token": "s3cret"})
+        assert "Recruitment funnel" in client.get("/recruiting").text
+        assert "Member admin" in client.get("/members").text
+    with TestClient(_admin_app(tmp_path)) as client2:
+        assert "enter token" in client2.get("/recruiting").text.lower()
+        assert "enter token" in client2.get("/members").text.lower()

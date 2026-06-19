@@ -151,13 +151,18 @@ Key flow and layering:
   The `/content` dashboard section (+ `GET/PUT/DELETE /api/content/{page}`) edits
   the sticky pages' copy into `content_docs`, sharing the sync-token unlock. The
   same unlock gates the **admin dashboard** sections — `/overview` (360 command
-  center), `/boards`, `/feeds`, and `/settings` — which are client-rendered from
-  token-gated JSON APIs (`/api/boards`, `/api/feeds`, `/api/pages`,
-  `/api/settings`, `/api/overview`) that mirror the `/board`, `/feed`, `/page`,
-  and `/recruit` Discord cogs. Every control writes DB state the `serve.py`
-  board/feed loops re-read each tick, so a change goes live within one refresh
+  center), `/boards`, `/feeds`, `/recruiting`, `/members`, and `/settings` —
+  which are client-rendered from token-gated JSON APIs (`/api/boards`,
+  `/api/feeds`, `/api/pages`, `/api/recruiting`, `/api/leads/*`,
+  `/api/admin/members`, `/api/settings`, `/api/overview`) that mirror the
+  `/board`, `/feed`, `/page`, `/recruit`, and member-admin (`/link`, `/setteam`,
+  …) Discord cogs. Every control writes DB state the `serve.py` board/feed loops
+  (and the cogs) re-read each tick, so a change goes live within one refresh
   interval (an on-demand refresh renders immediately when the bot shares the
-  process, else reports `queued`).
+  process, else reports `queued`). `ScoutManager` mirrors `SyncManager` to run
+  the network-bound recruitment scout (`/api/leads/capture`) as a background
+  task; `/recruiting` manages the `scout_leads` funnel + `recruitment_config`,
+  and `/members` edits the six manual-owned member columns.
 - **`runtime_settings.py`** — the live config overlay. A frozen `Config` is built
   once from env, so the dashboard can't mutate it; instead a small whitelist
   (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`)
