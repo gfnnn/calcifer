@@ -336,6 +336,7 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `docs/vision.md` | The project vision and pillars. |
 | `docs/ROADMAP.md` · `docs/DECISIONS.md` | Feature planning (phases 0–5, delivery contracts) · decisions locked + open questions. |
 | `docs/data-sources.md` | API capability reference (what each service exposes). |
+| `docs/wow-121-discord.md` | Getting the most out of WoW 12.1's native Discord integration with Calcifer (bridge layout + linking/Linked-Roles proposals). |
 | `tests/` | Pytest suite (DB, metrics, views, WoW Audit mapping, web API). |
 
 A roster sync only ever overwrites **API-sourced** columns. Manually entered

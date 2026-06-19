@@ -51,6 +51,10 @@ The daily pulse. Where the guild converges.
 - **`#guild-pulse`** — Health snapshot, roster stats, trends
   - 📌 Board: Roster Pulse (live, weekly health)
 - **`#general`** — Free chat, hang out (not board-specific)
+- **`#guild-hall`** *(if you use WoW 12.1's native Discord bridge)* — the
+  in-game ↔ Discord guild-chat bridge channel. **Calcifer stays out of it** (no
+  boards, no feed routes — it would echo into in-game `/guild` chat). See
+  [`wow-121-discord.md`](wow-121-discord.md) for where the bridge fits and why.
 
 > Together: ambient information + community. Members check what's happening,
 > join events, see the leaderboard. No shouting, just available.
