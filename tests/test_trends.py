@@ -1,6 +1,5 @@
 from ftabot import views
 from ftabot.config import Config
-from ftabot.web import _sparkline, _trend_card
 
 CFG = Config()
 
@@ -28,18 +27,3 @@ async def test_trends_embedded_in_gm_report(db):
     r = await views.gm_report(db, CFG)
     assert "trends" in r
     assert r["trends"]["count"] == 2
-
-
-def test_sparkline_handles_sparse_and_empty():
-    assert "not enough data" in _sparkline([None, None])
-    assert "not enough data" in _sparkline([5])
-    svg = _sparkline([1, 2, 3, None, 5])
-    assert svg.startswith("<svg")
-    assert "polyline" in svg
-
-
-def test_trend_card_shows_delta_direction():
-    up = _trend_card("Health", [70, 78], 8)
-    assert "▲" in up and "ok" in up
-    down = _trend_card("Members", [12, 10], -2)
-    assert "▼" in down and "bad" in down

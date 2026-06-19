@@ -145,24 +145,34 @@ Key flow and layering:
   one helper. Registered in `bot.py:setup_hook`; setting `DISCORD_GUILD_ID` makes
   commands appear instantly instead of ~1h global propagation. `BOT_COMMANDS_ENABLED=0`
   skips the cogs and clears any registered commands (the bot still runs feeds/boards).
-- **`web.py`** — `create_app(config)` returns the FastAPI app (HTML pages + JSON
-  API + Swagger at `/docs`). Officer/sync endpoints are gated by `SYNC_TOKEN`
-  (compared in constant time); the Raid-Helper webhook verifies a shared secret.
-  The `/content` dashboard section (+ `GET/PUT/DELETE /api/content/{page}`) edits
-  the sticky pages' copy into `content_docs`, sharing the sync-token unlock. The
-  same unlock gates the **admin dashboard** sections — `/overview` (360 command
-  center), `/boards`, `/feeds`, `/recruiting`, `/members`, and `/settings` —
-  which are client-rendered from token-gated JSON APIs (`/api/boards`,
-  `/api/feeds`, `/api/pages`, `/api/recruiting`, `/api/leads/*`,
-  `/api/admin/members`, `/api/settings`, `/api/overview`) that mirror the
-  `/board`, `/feed`, `/page`, `/recruit`, and member-admin (`/link`, `/setteam`,
-  …) Discord cogs. Every control writes DB state the `serve.py` board/feed loops
-  (and the cogs) re-read each tick, so a change goes live within one refresh
-  interval (an on-demand refresh renders immediately when the bot shares the
-  process, else reports `queued`). `ScoutManager` mirrors `SyncManager` to run
-  the network-bound recruitment scout (`/api/leads/capture`) as a background
-  task; `/recruiting` manages the `scout_leads` funnel + `recruitment_config`,
-  and `/members` edits the six manual-owned member columns.
+- **`web.py`** — `create_app(config)` returns the FastAPI app (the dashboard
+  shell + JSON API + Swagger at `/docs`). It serves **one single-page dashboard at
+  `/app`** (a static, dependency-free shell in `ftabot/static/`: `index.html` +
+  `css/app.css` + ES-module `js/` — `app.js` bootstrap, `router.js` hash router,
+  `api.js` fetch/unlock, `components.js`, and one module per `js/sections/`:
+  home, roster, raid, loot, recruitment, comms, settings). `/` redirects to
+  `/app`; `/static` is a `StaticFiles` mount. The shell is served unconditionally
+  and **every JSON API is gated by `SYNC_TOKEN`** (constant-time; the first 401
+  reveals an unlock overlay that posts to `/api/sync/unlock`, setting an http-only
+  cookie). The Raid-Helper webhook verifies a shared secret; `/healthz`,
+  `/webhooks/*` and `/api/upload/savedvars` stay open. All logic lives in
+  `views.py` (async, composing pure `metrics.py`) — the JS only fetches a dict and
+  paints, which keeps the coverage gate satisfiable. **Home** hydrates from
+  `GET /api/home` (`views.home` + `views.attention` — a guild-health pulse + a
+  ranked "needs attention" triage queue merged with live `SyncManager` status);
+  **Roster** from `/api/members` (+ `/api/members/{name}/detail` for the profile
+  drill-down + embedded manual-field editor → `/api/admin/members/{id}`); **Raid**
+  from `/api/raid` + `/api/roster`; **Loot** from `/api/loot` (+ `/api/loot/
+  priority`); **Recruitment** from `/api/recruiting` + `/api/leads/*`; **Comms**
+  from `/api/boards`, `/api/feeds`, `/api/pages` + `/api/content/{page}` (sticky-
+  page copy → `content_docs`); **Settings** from `/api/settings`, `/api/sync*`,
+  `/api/overview`. These mirror the `/board`, `/feed`, `/page`, `/recruit`, and
+  member-admin (`/link`, `/setteam`, …) Discord cogs. Every control writes DB
+  state the `serve.py` board/feed loops (and the cogs) re-read each tick, so a
+  change goes live within one refresh interval (an on-demand refresh renders
+  immediately when the bot shares the process, else reports `queued`).
+  `ScoutManager` mirrors `SyncManager` to run the network-bound recruitment scout
+  (`/api/leads/capture`) as a background task.
 - **`runtime_settings.py`** — the live config overlay. A frozen `Config` is built
   once from env, so the dashboard can't mutate it; instead a small whitelist
   (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`)

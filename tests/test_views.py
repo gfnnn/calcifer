@@ -106,3 +106,115 @@ async def test_loot_overview_and_priority(db):
     chars = [c["character"] for c in pr["ranked"]]
     assert set(chars) == {"Healer", "Slacker"}
     assert chars[0] == "Healer"  # BiS + bigger upgrade ranks first
+
+
+# --- Home: pulse + triage (Phase 1) -----------------------------------------
+
+def test_sparkline_points_geometry():
+    assert views._sparkline_points([]) == ""
+    assert views._sparkline_points([5]) == ""  # need >= 2 known points
+    pts = views._sparkline_points([0, 10], width=100, height=40).split(" ")
+    assert len(pts) == 2
+    assert pts[0].startswith("0.0,") and pts[1].startswith("100.0,")
+    # None values are skipped but still consume their x-slot.
+    assert len(views._sparkline_points([0, None, 10], width=100).split(" ")) == 2
+
+
+def _attn_kwargs(**over):
+    base = dict(
+        inactive_raiders=[], unprepped_raiders=[], low_readiness=[],
+        gm={"officers": [{"name": "Ok", "active": True}]},
+        roster={"groups": {}}, boards={"boards": []},
+        feeds={"pending_outbox": 0, "pending_digests": 0, "muted_sources": []},
+        pages={"pages": [{"title": "Rules", "placed": True}]},
+        recruiting={"config": {}}, leads=[], snapshot_age_days=0.5,
+        sync=None, now=NOW,
+    )
+    base.update(over)
+    return base
+
+
+def test_attention_all_clear_is_empty():
+    assert views.attention(**_attn_kwargs()) == []
+
+
+def test_attention_fires_and_ranks_signals():
+    items = views.attention(**_attn_kwargs(
+        inactive_raiders=["A", "B"],
+        unprepped_raiders=["A"],
+        gm={"officers": [{"name": "Sleepy", "active": False},
+                         {"name": "Awake", "active": True}]},
+        roster={"groups": {"Tentative": [{"name": "Maybe"}]}},
+        boards={"boards": [
+            {"name": "Hot 20", "enabled": True, "promoted": True,
+             "posted": False, "effective_destination": "123"},
+            {"name": "News", "enabled": True, "promoted": False,
+             "posted": True, "effective_destination": None},
+        ]},
+        feeds={"pending_outbox": 2, "pending_digests": 1, "muted_sources": ["wowhead"]},
+        pages={"pages": [{"title": "Rules", "placed": False},
+                         {"title": "Guides", "placed": True}]},
+        recruiting={"config": {"slots": {"TANK": {"open": 1}, "HEALER": {"open": 0}}}},
+        leads=[
+            {"name": "Cold", "state": "new", "updated_at": "2026-05-01T00:00:00+00:00"},
+            {"name": "Fresh", "state": "new", "updated_at": "2026-05-30T00:00:00+00:00"},
+            {"name": "Done", "state": "contacted", "updated_at": "2026-01-01T00:00:00+00:00"},
+        ],
+        snapshot_age_days=5.0,
+    ))
+    by = {it["kind"]: it for it in items}
+    assert by["inactive_raiders"]["count"] == 2
+    assert by["unprepped_raiders"]["count"] == 1
+    assert by["pending_signups"]["severity"] == "low"
+    assert by["cold_leads"]["count"] == 1 and "Cold" in by["cold_leads"]["detail"]
+    assert by["open_slots"]["count"] == 1  # only TANK has open > 0
+    assert by["board_issues"]["count"] == 2 and by["board_issues"]["severity"] == "high"
+    assert by["feed_backlog"]["count"] == 3 and by["feed_backlog"]["severity"] == "high"
+    assert "feed_muted" in by and by["feed_muted"]["severity"] == "low"
+    assert by["pages_unplaced"]["count"] == 1
+    assert by["sync_stale"]["severity"] == "high"  # 5d > 3d
+    assert by["officer_inactive"]["count"] == 1
+    assert "low_readiness" not in by  # empty list -> no item
+    # Ordered high -> low severity.
+    ranks = [views._SEVERITY_RANK[it["severity"]] for it in items]
+    assert ranks == sorted(ranks, reverse=True)
+
+
+def test_attention_sync_stale_severity_and_fallback():
+    med = views.attention(**_attn_kwargs(snapshot_age_days=2.0))
+    assert any(it["kind"] == "sync_stale" and it["severity"] == "med" for it in med)
+    # No snapshot yet -> fall back to the live sync's last_finished age.
+    fb = views.attention(**_attn_kwargs(
+        snapshot_age_days=None,
+        sync={"last_finished": "2026-05-20T00:00:00+00:00"},
+    ))
+    assert any(it["kind"] == "sync_stale" for it in fb)
+    # Fresh sync -> silent.
+    assert not any(it["kind"] == "sync_stale"
+                   for it in views.attention(**_attn_kwargs(snapshot_age_days=0.2)))
+
+
+async def test_home_shape(db):
+    await _seed(db)
+    r = await views.home(db, CFG, now=NOW)
+    assert r["guild"] == CFG.guild_name
+    pulse = r["pulse"]
+    assert "health" in pulse and "counts" in pulse
+    assert "sparklines" in pulse["trends"]
+    assert isinstance(r["attention"], list)
+    assert r["attention_total"] == sum(it["count"] for it in r["attention"])
+    assert r["generated_at"]
+
+
+async def test_home_surfaces_raider_signals(db):
+    mid = await db.upsert_synced(
+        Member("Ghost", class_name="Mage", role="DPS", item_level=600,
+               missing_enchants=2, missing_gems=0, best_parse_avg=10,
+               last_login="2025-01-01T00:00:00+00:00")
+    )
+    await db.set_raid_team(mid, "Cinder")
+    r = await views.home(db, CFG, now=NOW)
+    kinds = {it["kind"] for it in r["attention"]}
+    assert "inactive_raiders" in kinds   # last_login is ancient
+    assert "unprepped_raiders" in kinds  # missing_enchants=2
+    assert "low_readiness" in kinds      # weak gear/parse/inactive
