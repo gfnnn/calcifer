@@ -96,9 +96,19 @@ raiders with their team tag, Great Vault progress and wishlist/BiS. See
 
 - **Docs:** <https://develop.battle.net/documentation/world-of-warcraft>
 - **Hosts:** `https://{region}.api.blizzard.com` (`us`/`eu`/`kr`/`tw`)
-- **Token:** `POST https://oauth.battle.net/token` (client-credentials grant,
-  HTTP Basic with client id/secret). Tokens last ~24h.
-- **Namespaces:** `profile-{region}`, `static-{region}`, `dynamic-{region}`.
+- **Auth — two OAuth flows:**
+  - **Client-credentials** *(what we use today)* — `POST https://oauth.battle.net/token`,
+    HTTP Basic with client id/secret. Tokens last ~24h. Reads *public* data:
+    rosters, character profiles, all Game Data.
+  - **Authorization-code (user login)** — the member signs in with Battle.net and
+    grants the `wow.profile` scope; the resulting *user* access token (valid
+    ~30 days) unlocks the **Account / Protected Profile** endpoints. This is the
+    only way to learn the characters a person *actually owns* — see §2a.
+- **Namespaces:** `profile-{region}`, `static-{region}`, `dynamic-{region}`. The
+  namespace may be sent as a `Battlenet-Namespace` header instead of `?namespace=`.
+- **Rate limit:** ~36,000 requests/hour and 100 requests/second per client. A full
+  ~300-member enrich is one sequential pass, far under this; widening what we pull
+  should still chunk + back off like the Raider.IO path.
 
 **Endpoints of interest** (all under `/profile/wow/character/{realm}/{name}` unless noted):
 
@@ -113,10 +123,28 @@ raiders with their team tag, Great Vault progress and wishlist/BiS. See
 | Character **Media** | avatar / inset / full render image URLs. |
 | Character **Achievements, Statistics, Reputations, Collections, PvP** | as named. |
 | **Guild Roster** `/data/wow/guild/{realm}/{name}/roster` | members with character ref, **guild rank index**, level. |
-| **Game Data** (`/data/wow/...`) | realms, items, item media, journal/encounters, playable class/race/spec, M+ affixes/dungeons/seasons. |
+| **Guild Activity / Achievements** `/data/wow/guild/{realm}/{name}/activity`, `…/achievements` | recent guild-level events (member achievements, encounters) — a native, no-scrape feed source. |
+| **WoW Token** `/data/wow/token/index` (`dynamic-{region}`) | current token gold price — the one endpoint on the `dynamic` namespace. |
+| **Game Data** (`/data/wow/...`) | realms, items, item media, journal/encounters, playable class/race/spec, M+ affixes/dungeons/seasons, M+/raid leaderboards. |
 
 **Best for:** authoritative guild rank, exact level/race/faction, and detailed
 equipment/professions that Raider.IO doesn't expose.
+
+**§2a — User-authorization: owned characters (the identity signal).** Behind the
+authorization-code flow, `GET /profile/user/wow` (and
+`/profile/user/wow/protected-character/{realm-id}-{character-id}`) return the
+**characters the signed-in account owns** — an *authoritative* character→account
+binding no public endpoint exposes. Paired with the Discord identity we already
+hold, a member completing a Battle.net login is the leading candidate for the
+data-spine's still-open **character↔Discord** link (today a manual officer link;
+[`vision.md`](vision.md) §5c). It needs only an OAuth callback route on the
+existing `web.py` — no new service, token, or runtime dependency.
+
+**What we wire today:** only **Guild Roster** (rank + level) and the **Profile
+Summary** (race/faction/class/spec/level/ilvl). Everything else above is
+documented-but-unwired — the catalog lives here so a new pull maps without
+rediscovery, and the hardening to pick it up is tracked in [`vision.md`](vision.md)
+§9 / §7b.
 
 → Connector: [`ftabot/services/blizzard.py`](../ftabot/services/blizzard.py)
 
