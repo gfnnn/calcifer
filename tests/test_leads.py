@@ -173,3 +173,121 @@ async def test_lead_list_empty(db):
     it = _officer()
     await RecruitCog.lead_list.callback(cog, it, state=None)
     assert "No leads" in it.response.content
+
+
+async def test_lead_list_empty_scoped_by_state(db):
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_list.callback(
+        cog, it, state=app_commands.Choice(name="Trialing", value="trialing")
+    )
+    assert "trialing" in it.response.content  # the scope note names the state
+
+
+# --- lead-funnel officer gating (the _guard early returns) ------------------
+
+
+async def test_every_lead_command_is_officer_gated(db):
+    """The list/set/note/remove lead commands all bail for a plain user."""
+    lid = await db.upsert_lead({"name": "A", "realm": "r", "region": "eu"})
+    cog = _cog(db)
+
+    async def _denied(coro):
+        it = _Interaction()  # no perms
+        await coro(it)
+        assert it.response.ephemeral is True
+        assert "Manage Server" in it.response.content
+
+    await _denied(lambda it: RecruitCog.lead_list.callback(cog, it, state=None))
+    await _denied(
+        lambda it: RecruitCog.lead_set.callback(
+            cog, it, lid, app_commands.Choice(name="Contacted", value="contacted")
+        )
+    )
+    await _denied(lambda it: RecruitCog.lead_note.callback(cog, it, lid, "x"))
+    await _denied(lambda it: RecruitCog.lead_remove.callback(cog, it, lid))
+
+    # Nothing changed: state still 'new', no note, lead still present.
+    lead = await db.get_lead(lid)
+    assert lead is not None and lead["state"] == "new" and lead["notes"] is None
+
+
+# --- lead note / remove edge branches ---------------------------------------
+
+
+async def test_lead_note_clears_when_blank(db):
+    lid = await db.upsert_lead({"name": "A", "realm": "r", "region": "eu"})
+    await db.set_lead_note(lid, "old note")
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_note.callback(cog, it, lid, "   ")
+    assert "cleared" in it.response.content.lower()
+    assert (await db.get_lead(lid))["notes"] is None
+
+
+async def test_lead_note_unknown_id(db):
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_note.callback(cog, it, 999, "x")
+    assert "No lead" in it.response.content
+
+
+async def test_lead_remove_unknown_id(db):
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_remove.callback(cog, it, 999)
+    assert "No lead" in it.response.content
+    assert "remove" in it.response.content.lower()
+
+
+# --- lead capture: scout failures and the no-leads result -------------------
+
+
+async def test_lead_capture_handles_scout_unavailable(db, monkeypatch):
+    from ftabot import scout as scout_mod
+    from ftabot.scout import ScoutUnavailable
+
+    async def _boom(database, config, *, only_class=None):
+        raise ScoutUnavailable("no WCL credentials")
+
+    monkeypatch.setattr(scout_mod, "run_scout", _boom)
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_capture.callback(cog, it, wow_class=None)
+    assert it.followup.ephemeral is True
+    assert "Can't scout" in it.followup.content
+    assert await db.leads() == []
+
+
+async def test_lead_capture_surfaces_unexpected_error(db, monkeypatch):
+    from ftabot import scout as scout_mod
+
+    async def _boom(database, config, *, only_class=None):
+        raise ValueError("raider.io exploded")
+
+    monkeypatch.setattr(scout_mod, "run_scout", _boom)
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_capture.callback(cog, it, wow_class=None)
+    assert it.followup.ephemeral is True
+    assert "Scout failed" in it.followup.content
+
+
+async def test_lead_capture_reports_when_no_leads_worth_tracking(db, monkeypatch):
+    from ftabot import scout as scout_mod
+
+    async def _no_matches(database, config, *, only_class=None):
+        # A slot with no matches -> lead_dicts yields nothing to track.
+        slot = recruit.WeakSlot(
+            class_name="Mage", spec=None, role="DPS",
+            incumbent="x", incumbent_strength=0.3,
+        )
+        return [scout.SlotReport(slot=slot, matches=[])]
+
+    monkeypatch.setattr(scout_mod, "run_scout", _no_matches)
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.lead_capture.callback(cog, it, wow_class=None)
+    assert it.followup.ephemeral is True
+    assert "no upgrades worth tracking" in it.followup.content
+    assert await db.leads() == []

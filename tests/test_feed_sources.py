@@ -245,3 +245,154 @@ async def test_poll_once_marks_seen_when_event_routes_nowhere(db):
     assert send.sent == []
     # It was marked seen, so a re-poll doesn't reconsider it.
     assert await db.filter_unseen([new]) == []
+
+
+# --- wcl_prog.fetch live path (faked WCL client) ----------------------------
+
+
+class _FakeWclClient:
+    """Stands in for WarcraftLogsClient: an async-context client returning a
+    single report plus its fights, so the source's fetch body runs offline."""
+
+    last_kwargs: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        type(self).last_kwargs = kwargs
+        self._reports = [{"code": "RPT9"}]
+        self._fights = {
+            "startTime": 1780000000000,
+            "fights": [
+                {"name": "Boss", "difficulty": 5, "bossPercentage": 4.0},
+                {"name": "Boss", "difficulty": 5, "kill": True},
+            ],
+        }
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def guild_reports(self, *a, **k):
+        return self._reports
+
+    async def report_fights(self, code):
+        assert code == "RPT9"
+        return self._fights
+
+
+def _wcl_cfg():
+    return dataclasses.replace(
+        Config(),
+        warcraftlogs_client_id="cid",
+        warcraftlogs_client_secret="secret",
+        prog_alert_threshold=30.0,
+    )
+
+
+async def test_wcl_source_fetch_builds_events_from_a_report(monkeypatch):
+    # Exercises the credentialed fetch path: pull one report, summarise its
+    # fights, and emit a kill event (best pull collapses into the kill).
+    from ftabot.services import warcraftlogs as wcl_mod
+
+    monkeypatch.setattr(wcl_mod, "WarcraftLogsClient", _FakeWclClient)
+    events = await WclProgSource(_wcl_cfg()).fetch(session=None)
+
+    assert {e.event_type for e in events} == {"wcl.kill"}
+    kill = events[0]
+    assert "defeated" in kill.title
+    assert kill.published_at and kill.published_at.startswith("20")  # _iso_from_ms ran
+    # The zone falls back to 0 when unconfigured (the `or 0` branch in fetch).
+    assert _FakeWclClient.last_kwargs.get("session") is None
+
+
+async def test_wcl_source_fetch_returns_empty_without_reports(monkeypatch):
+    from ftabot.services import warcraftlogs as wcl_mod
+
+    class _NoReports(_FakeWclClient):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self._reports = []
+
+    monkeypatch.setattr(wcl_mod, "WarcraftLogsClient", _NoReports)
+    assert await WclProgSource(_wcl_cfg()).fetch(session=None) == []
+
+
+# --- wowaudit_raids.fetch live path (faked WoW Audit client) ----------------
+
+
+class _FakeWowAuditClient:
+    """Stands in for WowAuditClient: returns one upcoming raid so the source's
+    enabled fetch body runs offline."""
+
+    def __init__(self, *args, **kwargs):
+        self._raids = [
+            {"instance": "Manaforge", "difficulty": "Mythic", "date": "2026-06-06",
+             "time": "20:00", "present": 18, "total": 20, "start": None},
+        ]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def upcoming_raids(self, **kwargs):
+        return self._raids
+
+
+async def test_wowaudit_source_fetch_builds_reminders(monkeypatch):
+    from ftabot.services import wowaudit as wa_mod
+
+    monkeypatch.setattr(wa_mod, "WowAuditClient", _FakeWowAuditClient)
+    cfg = dataclasses.replace(Config(), wowaudit_api_key="key")  # enables the source
+    events = await WowAuditRaidSource(cfg).fetch(session=None)
+
+    assert len(events) == 1
+    assert events[0].event_type == "wowaudit.raid-reminder"
+    assert events[0].title == "🔥 Raid reminder: Manaforge Mythic"
+
+
+# --- wowprogress.fetch ranked path (faked WoWProgress client) ---------------
+
+
+async def test_wowprogress_source_fetch_emits_a_rank_event(monkeypatch):
+    # When the guild is ranked, fetch builds exactly one rank event. (The
+    # unranked short-circuit is covered in test_wowprogress.py.)
+    from ftabot.feeds import wowprogress as wp_mod
+    from ftabot.feeds.wowprogress import WowProgressSource
+
+    class _RankedClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def guild_rank(self, *a, **k):
+            return {"world_rank": 120, "realm_rank": 1, "area_rank": 12, "score": 4000}
+
+    monkeypatch.setattr(wp_mod, "WowProgressClient", _RankedClient)
+    events = await WowProgressSource(Config()).fetch(session=None)
+
+    assert len(events) == 1
+    assert events[0].event_type == "wowprogress.rank"
+    assert "realm #1" in events[0].title
+
+
+# --- raiderio_mplus._select_members cap guard -------------------------------
+
+
+def test_select_members_cap_zero_picks_nobody():
+    # A cap of zero (or less) means "poll nobody" — the early return.
+    from ftabot.feeds.raiderio_mplus import _select_members
+    from ftabot.models import Member
+
+    members = [Member("Stabby", mythic_plus_score=3000.0, raid_team="A")]
+    assert _select_members(members, 0) == []
+    assert _select_members(members, -5) == []
+    # A positive cap still selects the raider.
+    assert [m.character_name for m in _select_members(members, 5)] == ["Stabby"]

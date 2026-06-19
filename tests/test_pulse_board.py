@@ -49,3 +49,17 @@ async def test_pulse_fingerprint_moves_with_the_guild(db):
     await _seed(db, [("Two", "TANK", 640.0, 3000.0)])  # roster grows
     p3 = await board.render(db, Config(), {})
     assert p3.fingerprint != p1.fingerprint
+
+
+async def test_pulse_shows_progression_when_known(db):
+    # A member carrying a raid_progression summary surfaces the guild's
+    # progression field (the `if progression:` branch).
+    await db.upsert_synced(
+        Member("Pusher", class_name="Mage", role="DPS", item_level=630.0,
+               mythic_plus_score=3000.0, raid_progression="4/8 M")
+    )
+    payload = await RosterPulseBoard().render(db, Config(), {})
+    fields = {f.name: f.value for f in payload.embed.fields}
+    assert "Progression" in fields
+    assert "4/8 M" in fields["Progression"]
+    assert not brand.has_em_dash(fields["Progression"])

@@ -156,3 +156,61 @@ async def test_reset_clears_everything(db):
     await RecruitCog.reset.callback(cog, it)
     assert await db.recruitment_state() == {}
     assert "reset" in it.response.content.lower()
+
+
+# --- non-officer denial for every command in the group --------------------------
+
+
+async def test_every_recruit_config_command_is_officer_gated(db):
+    """Each command bails at its ``_guard`` for a plain user, writing nothing.
+
+    Covers the guard-deny early ``return`` in ilvl/note/rule_add/rule_remove/
+    rule_list/message/show/reset (the slots/lead branches are covered elsewhere).
+    """
+    cog = _cog(db)
+
+    async def _denied(coro):
+        it = _Interaction()  # no perms, no role
+        await coro(it)
+        assert it.response.ephemeral is True
+        assert "Manage Server" in it.response.content
+        return it
+
+    await _denied(lambda it: RecruitCog.ilvl.callback(cog, it, _TANK, 485))
+    await _denied(lambda it: RecruitCog.note.callback(cog, it, _TANK, "x"))
+    await _denied(lambda it: RecruitCog.rule_add.callback(cog, it, "Be on time."))
+    await _denied(lambda it: RecruitCog.rule_remove.callback(cog, it, 1))
+    await _denied(lambda it: RecruitCog.rule_list.callback(cog, it))
+    await _denied(lambda it: RecruitCog.message.callback(cog, it, "x"))
+    await _denied(lambda it: RecruitCog.reset.callback(cog, it))
+
+    # The guarded edits left the state untouched.
+    assert await db.recruitment_state() == {}
+
+
+async def test_show_is_officer_gated(db):
+    cog = _cog(db)
+    it = _Interaction()  # plain user
+    await RecruitCog.show.callback(cog, it)
+    assert it.response.ephemeral is True
+    assert "Manage Server" in it.response.content
+    assert it.response.deferred is False  # bailed before the defer
+
+
+async def test_show_reports_nothing_to_preview_when_board_renders_none(db, monkeypatch):
+    """When the board has nothing to render, show answers via followup (234-235)."""
+    from ftabot.boards import REGISTRY
+    from ftabot.boards.recruitment import RECRUITMENT_TYPE
+
+    board = REGISTRY[RECRUITMENT_TYPE]
+
+    async def _render_none(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(board, "render", _render_none)
+    cog = _cog(db)
+    it = _officer()
+    await RecruitCog.show.callback(cog, it)
+    assert it.response.deferred is True
+    assert it.followup.ephemeral is True
+    assert "Nothing to preview" in it.followup.content

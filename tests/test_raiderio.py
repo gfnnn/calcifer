@@ -86,3 +86,24 @@ async def test_guild_strength_skips_non_dict_entries_without_crashing():
 async def test_guild_strength_none_when_no_progression():
     client = RaiderIOClient(session=_FakeSession([_FakeResp(200, {})]))
     assert await client.guild_strength("G", "hellfire", "eu") is None
+
+
+async def test_guild_strength_none_when_total_bosses_zero():
+    # A raid entry with zero total bosses can't yield a ratio.
+    payload = {"raid_progression": {"current-tier": {
+        "total_bosses": 0, "mythic_bosses_killed": 0}}}
+    client = RaiderIOClient(session=_FakeSession([_FakeResp(200, payload)]))
+    assert await client.guild_strength("G", "hellfire", "eu") is None
+
+
+def test_session_headers_accept_json():
+    # The client-owned session is seeded to accept JSON.
+    assert RaiderIOClient()._session_headers() == {"Accept": "application/json"}
+
+
+async def test_get_with_no_attempts_raises_retries_exhausted():
+    # retries=-1 makes the attempt loop empty, hitting the final guard rather
+    # than any per-attempt raise.
+    client = RaiderIOClient(session=_FakeSession([_FakeResp(200, {"ok": 1})]))
+    with pytest.raises(RaiderIOError, match="retries exhausted"):
+        await client._get("/characters/profile", {"name": "X"}, retries=-1)

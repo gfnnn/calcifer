@@ -97,6 +97,48 @@ async def test_page_post_denied_for_non_admin(db):
 # --- the post -> move -> no-op flow ---------------------------------------------
 
 
+async def test_page_list_denied_for_non_admin(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    it = _Interaction(perms=_Perms())
+    await PagesCog.list_pages.callback(cog, it)
+    assert "Officer" in it.response.content
+
+
+async def test_page_refresh_denied_for_non_admin(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    it = _Interaction(perms=_Perms())
+    await PagesCog.refresh.callback(cog, it, _page_choice())
+    assert "Officer" in it.response.content
+
+
+async def test_page_remove_denied_for_non_admin(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    it = _Interaction(perms=_Perms())
+    await PagesCog.remove.callback(cog, it, _page_choice())
+    assert "Officer" in it.response.content
+
+
+async def test_page_post_unknown_page_is_rejected(db):
+    # A choice value that isn't a registered page (shouldn't happen via the UI,
+    # but the cog guards it) is turned away before any placement/defer.
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    ghost = app_commands.Choice(name="Ghost", value="ghost")
+    it = _admin()
+    await PagesCog.post.callback(cog, it, ghost, _Channel(111))
+    assert "Unknown page" in it.response.content
+    assert await db.get_sticky_page("ghost") is None
+
+
+async def test_page_refresh_reports_guardrail_block(db):
+    # Page is placed, but posting is off -> refresh holds at the guardrail.
+    bot = _PageBot(db, Config(admin_role_name="Officer"))  # POSTING_MODE=off
+    cog = PagesCog(bot)
+    await db.upsert_sticky_page("rules_info", "111")  # registered, nothing posted
+    it = _admin()
+    await PagesCog.refresh.callback(cog, it, _page_choice())
+    assert "Guardrail held" in it.followup.content
+
+
 async def test_page_post_first_time_creates(db):
     bot = _PageBot(db, _live_cfg())
     cog = PagesCog(bot)

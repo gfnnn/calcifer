@@ -62,9 +62,19 @@ async def test_raidhelper_check_is_offline_and_passes_on_a_sample():
     assert result.name == "Raid-Helper"
 
 
+async def test_raidhelper_check_fails_when_parser_rejects_the_sample(monkeypatch):
+    # If the parser ever stops accepting the canned payload, that's a real failure
+    # the smoke check must surface — not a silent pass.
+    smoke = importlib.import_module("scripts.smoke_all")
+    monkeypatch.setattr("ftabot.services.raidhelper.parse_webhook", lambda payload: None)
+    result = await smoke._check_raidhelper(Config(raidhelper_webhook_secret="shh"))
+    assert result.status == FAIL
+    assert "parser returned None" in result.detail
+
+
 def test_standalone_check_scripts_import_cleanly():
     # Importing covers each script's module body (the network main() is pragma'd).
     for name in ("check_blizzard", "check_warcraftlogs", "check_raiderio",
-                 "check_raidhelper"):
+                 "check_raidhelper", "check_wowaudit"):
         module = importlib.import_module(f"scripts.{name}")
         assert callable(module.main)

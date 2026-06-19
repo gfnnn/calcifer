@@ -50,6 +50,15 @@ def test_retry_after_http_date_past_clamps_to_zero():
     assert out == 0.0
 
 
+def test_retry_after_http_date_without_zone_is_treated_as_utc():
+    # An HTTP-date carrying no timezone is implicitly UTC (RFC 9110). A far-past
+    # such date clamps to zero rather than drifting by the local offset.
+    out = retry_after_seconds(
+        {"Retry-After": "Wed, 21 Oct 2015 07:28:00"}, fallback=9.0
+    )
+    assert out == 0.0
+
+
 # --- session lifecycle ------------------------------------------------------
 
 

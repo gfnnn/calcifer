@@ -39,7 +39,7 @@ def retry_after_seconds(headers: Mapping[str, str], *, fallback: float) -> float
         when = parsedate_to_datetime(raw)
     except (TypeError, ValueError):
         return fallback
-    if when is None:
+    if when is None:  # pragma: no cover - parsedate_to_datetime raises (never None) on 3.10+
         return fallback
     if when.tzinfo is None:  # an HTTP-date with no zone is implicitly UTC
         when = when.replace(tzinfo=timezone.utc)

@@ -1,6 +1,7 @@
 """Tests for the RCLootCouncil loot-history mapper."""
 
 from ftabot.services.rclootcouncil import (
+    _difficulty_name,
     _normalize_when,
     _parse_item_link,
     loot_from_savedvars,
@@ -118,3 +119,24 @@ def test_normalize_when_variants():
     assert _normalize_when("2026-06-01", None) == "2026-06-01"
     assert _normalize_when("not a date", "x") is None
     assert _normalize_when("", "") is None
+
+
+def test_difficulty_name_falls_back_to_instance_suffix():
+    # No difficultyID: derive the difficulty from the instance "Name-Difficulty".
+    assert _difficulty_name({"instance": "Manaforge Omega-Mythic"}) == "Mythic"
+    # Unknown numeric id falls back to its string form.
+    assert _difficulty_name({"difficultyID": 99}) == "99"
+    # Neither a usable id nor an instance suffix -> None.
+    assert _difficulty_name({}) is None
+    assert _difficulty_name({"instance": "No suffix here"}) is None
+
+
+def test_loot_from_savedvars_skips_bad_player_keys_and_empty_names():
+    table = {
+        42: {1: {"lootWon": SWORD, "date": "2026/06/01"}},  # non-str key -> skip
+        "Calcifer-Hellfire": "not-a-dict",                   # non-dict awards -> skip
+        "-Hellfire": {1: {"lootWon": SWORD, "date": "2026/06/01"}},  # empty name -> skip
+        "Real-Hellfire": {1: {"lootWon": SWORD, "date": "2026/06/01"}},
+    }
+    entries = loot_from_savedvars(table)
+    assert [e.character_name for e in entries] == ["Real"]

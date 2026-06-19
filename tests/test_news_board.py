@@ -209,6 +209,21 @@ async def test_board_own_framing_has_no_em_dash(db):
     assert not brand.has_em_dash(payload.embed.title)
 
 
+async def test_board_renders_naive_and_unparseable_timestamps(db):
+    # A naive (no-tz) published_at is assumed UTC and still gets a relative
+    # stamp; an unparseable one yields no stamp but the headline still renders.
+    await db.record_news([
+        _item("naive", "Naive ts", tier="high", event_type="wowhead.news",
+              published_at="2026-06-05T00:00:00"),  # no tzinfo -> _epoch line 59
+        _item("garbage", "Garbage ts", tier="high", event_type="wowhead.news",
+              published_at="not-a-timestamp"),  # ValueError -> _epoch lines 56-57
+    ])
+    payload = await NewsHighlightsBoard().render(db, Config(), {})
+    desc = payload.embed.description
+    assert "Naive ts" in desc and "<t:" in desc  # naive ts produced an epoch
+    assert "Garbage ts" in desc  # bad ts: headline still shown, just no stamp
+
+
 async def test_board_fingerprint_stable_until_news_changes(db):
     await db.record_news([_item("a", "A"), _item("b", "B")])
     board = NewsHighlightsBoard()
@@ -297,3 +312,44 @@ def test_wowhead_source_without_config_is_pure_url():
     assert source.config is None
     # parse_rss remains the pure, independently tested core.
     assert parse_rss("not xml") == []
+
+
+async def test_archive_is_a_noop_without_config_or_events(db):
+    # No config => nowhere to persist; no events => nothing to persist. Either
+    # way _archive returns early without touching a DB (and never crashes).
+    from ftabot.feeds.base import FeedEvent
+
+    no_config = WowheadSource(url="https://x/rss")
+    assert no_config.config is None
+    # A real event, but no config: returns early, nothing to assert beyond "no crash".
+    assert await no_config._archive(
+        [FeedEvent(source="wowhead", event_type="wowhead.news", external_id="z", title="T")]
+    ) is None
+
+    # A config but an empty event list: the DB is left untouched.
+    cfg = dataclasses.replace(Config(), database_path=db.path)
+    await WowheadSource(cfg)._archive([])
+    assert await db.recent_news(limit=10) == []  # nothing archived
+
+
+_CLASSIC_ONLY_RSS = """<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <item>
+    <title>Siege of Orgrimmar Speedrun</title>
+    <link>https://www.wowhead.com/news/classic-1</link>
+    <guid>classic-1</guid>
+    <pubDate>Mon, 01 Jun 2026 09:00:00 +0000</pubDate>
+    <category>Mists</category>
+  </item>
+</channel></rss>
+"""
+
+
+async def test_archive_skips_when_every_item_is_off_board(db):
+    # A feed of only classic-section items (tier None) archives nothing: the
+    # `if not rows` guard short-circuits before opening the database. The events
+    # are still returned for the alert pipeline.
+    cfg = dataclasses.replace(Config(), database_path=db.path)
+    events = await WowheadSource(cfg).fetch(_FakeSession(_CLASSIC_ONLY_RSS))
+    assert len(events) == 1  # still flows to the router
+    assert await db.recent_news(limit=10) == []  # but nothing archived

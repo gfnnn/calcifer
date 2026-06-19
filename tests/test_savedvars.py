@@ -4,6 +4,7 @@ import pytest
 
 from ftabot.services.savedvars import (
     LuaParseError,
+    dump,
     parse_lua_value,
     parse_savedvariables,
 )
@@ -171,3 +172,98 @@ def test_bare_global_value_is_rejected():
 def test_trailing_data_after_value_raises():
     with pytest.raises(LuaParseError):
         parse_lua_value("{} garbage")
+
+
+def test_empty_input_expects_a_value():
+    # An empty value position (e.g. inside a stray sep) hits "expected a value".
+    with pytest.raises(LuaParseError, match="expected a value"):
+        parse_lua_value("   ")
+
+
+def test_malformed_number_after_minus_raises():
+    # A '-' followed by a non-number is a malformed number, not unary minus.
+    with pytest.raises(LuaParseError, match="malformed number"):
+        parse_lua_value("-x")
+
+
+def test_dangling_escape_at_end_of_string_raises():
+    # A trailing backslash with nothing after it inside a string.
+    with pytest.raises(LuaParseError, match="dangling escape"):
+        parse_lua_value('"abc\\')
+
+
+def test_hex_byte_escape_and_fallthrough():
+    # \xHH (Lua 5.2+) is tolerated; an incomplete \x falls through to literal 'x'.
+    assert parse_lua_value(r'"\x41\x42"') == "AB"
+    assert parse_lua_value(r'"\xZZ"') == "xZZ"  # bad hex -> 'x' then the two Zs
+
+
+def test_unterminated_long_bracket_raises():
+    with pytest.raises(LuaParseError, match="unterminated long bracket"):
+        parse_lua_value("[[ no close here")
+
+
+def test_long_bracket_drops_leading_crlf():
+    # Lua drops a single newline after the opener; here it's a CRLF.
+    assert parse_lua_value("[[\r\nbody]]") == "body"
+
+
+def test_table_key_missing_closing_bracket_raises():
+    with pytest.raises(LuaParseError, match=r"expected ']' after table key"):
+        parse_lua_value('{ ["k" = 1 }')
+
+
+def test_table_key_without_eq_raises():
+    with pytest.raises(LuaParseError, match="expected '='"):
+        parse_lua_value('{ ["k"] 1 }')
+
+
+def test_bare_identifier_in_value_position_is_rejected():
+    # An identifier not followed by '=' isn't a key; it's an attempted bare
+    # value, which the grammar rejects (never a global).
+    with pytest.raises(LuaParseError, match="unexpected token"):
+        parse_lua_value("{ foo }")
+
+
+def test_savedvariables_strips_utf8_bom():
+    # A leading UTF-8 BOM is tolerated before the first global assignment.
+    out = parse_savedvariables("﻿MyAddonDB = { x = 1 }")
+    assert out["MyAddonDB"] == {"x": 1}
+
+
+def test_savedvariables_expects_a_global_name():
+    # A line that isn't a Name = value assignment is rejected.
+    with pytest.raises(LuaParseError, match="expected a global name"):
+        parse_savedvariables("= 1")
+
+
+# --- dump (round-trip serialiser) -------------------------------------------
+
+
+def test_dump_round_trips_scalars_tables_and_empty():
+    data = {
+        "Flag": True,
+        "Off": False,
+        "Nope": None,
+        "Count": 3,
+        "Ratio": 1.5,
+        "Name": 'a "quoted"\tname',
+        "Empty": {},
+        "Nested": {"k": [1, 2]},  # list -> 1-indexed table
+    }
+    text = dump(data)
+    assert "Empty = {}" in text
+    reparsed = parse_savedvariables(text)
+    assert reparsed["Flag"] is True
+    assert reparsed["Off"] is False
+    assert reparsed["Nope"] is None
+    assert reparsed["Count"] == 3
+    assert reparsed["Ratio"] == 1.5
+    assert reparsed["Name"] == 'a "quoted"\tname'
+    assert reparsed["Empty"] == {}
+    assert reparsed["Nested"] == {"k": {1: 1, 2: 2}}
+
+
+def test_dump_rejects_unserialisable_type():
+    with pytest.raises(TypeError, match="cannot serialise"):
+        dump({"bad": object()})

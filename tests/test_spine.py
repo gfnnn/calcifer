@@ -62,6 +62,13 @@ async def test_ingest_ignores_unknown_globals(db):
     assert summary["detected"] == []
 
 
+async def test_ingest_returns_empty_summary_for_non_dict_input(db):
+    # A parse that yields something other than a dict (e.g. a list) is handled
+    # gracefully: nothing detected, no crash.
+    summary = await ingest_savedvars(db, ["not", "a", "dict"])  # type: ignore[arg-type]
+    assert summary == {"detected": []}
+
+
 async def test_ingest_grm_links_alts_in_roster(db):
     from ftabot.services.savedvars import parse_savedvariables
 

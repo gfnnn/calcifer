@@ -15,6 +15,7 @@ from ftabot.models import Member
 from ftabot.pages import (
     MAX_POST_CHARS,
     PAGES,
+    _delete_messages,
     load_page_doc,
     refresh_page,
     remove_page,
@@ -295,6 +296,28 @@ async def test_remove_page_counts_only_real_deletions(db):
     m.dead.add(row["message_ids"][0])  # already gone in Discord
     assert await remove_page(db, row, m) == 1
     assert await db.get_sticky_page(RULES.name) is None
+
+
+async def test_delete_messages_skips_when_no_channel():
+    # A page registered but never posted has message ids with no channel: there's
+    # nothing to delete, so the helper skips each id and reports zero.
+    m = FakeMessenger()
+    assert await _delete_messages(m, None, ["1", "2"]) == 0
+    assert m.deleted == []  # never called delete with a missing channel
+
+
+async def test_delete_messages_swallows_a_stuck_delete():
+    # A delete that raises (a wedged channel) must not abort the whole move; the
+    # helper logs it off and keeps counting the ones that went.
+    class _PartlyStuck(FakeMessenger):
+        async def delete(self, channel_id, message_id):
+            if message_id == "boom":
+                raise RuntimeError("Discord 500")
+            return await super().delete(channel_id, message_id)
+
+    m = _PartlyStuck()
+    deleted = await _delete_messages(m, "111", ["ok1", "boom", "ok2"])
+    assert deleted == 2  # the two good deletes counted; the raise was swallowed
 
 
 async def test_sticky_pages_listing_and_corrupt_ids(db):

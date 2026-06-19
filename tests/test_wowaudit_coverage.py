@@ -26,6 +26,7 @@ from ftabot.services.wowaudit import (
     parse_signups,
     parse_wishlists,
     raid_start_dt,
+    select_next_raid,
     select_upcoming_raids,
 )
 
@@ -228,3 +229,55 @@ async def test_get_propagates_other_error_statuses():
     session = _FakeSession({"/team": _FakeResp(503, text="overloaded")})
     with pytest.raises(WowAuditError, match="HTTP 503"):
         await _client(session).team()
+
+
+def test_select_next_raid_skips_non_dict_entries():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 6, 18, 0, tzinfo=timezone.utc)
+    raids = ["not-a-dict", {"date": "2026-06-08", "start_time": "20:00"}]
+    chosen = select_next_raid(raids, now)
+    assert chosen is not None
+    raid, _start = chosen
+    assert raid["date"] == "2026-06-08"  # the non-dict was skipped
+
+
+async def test_upcoming_raid_signups_returns_next_with_signups():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 6, 18, 0, tzinfo=timezone.utc)
+    raids = {"raids": [{"id": 9, "date": "2026-06-08", "start_time": "20:00",
+                        "instance": "Palace", "difficulty": "Mythic"}]}
+    detail = {"signups": [{"character": {"name": "Testcaller"}, "status": "Present"}]}
+    session = _FakeSession({
+        "/raids/9": _FakeResp(200, detail),
+        "/raids": _FakeResp(200, raids),
+    })
+    out = await _client(session).upcoming_raid_signups(now=now)
+    assert out["instance"] == "Palace"
+    assert out["signups"] == [("Testcaller", "present")]
+
+
+async def test_upcoming_raid_signups_none_when_nothing_scheduled():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 6, 18, 0, tzinfo=timezone.utc)
+    # The only raid is in the past, so nothing is scheduled at/after now.
+    raids = {"raids": [{"id": 1, "date": "2020-01-01", "start_time": "20:00"}]}
+    session = _FakeSession({"/raids": _FakeResp(200, raids)})
+    assert await _client(session).upcoming_raid_signups(now=now) is None
+
+
+async def test_upcoming_raid_signups_swallows_detail_error():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 6, 18, 0, tzinfo=timezone.utc)
+    raids = {"raids": [{"id": 9, "date": "2026-06-08", "start_time": "20:00",
+                        "instance": "Palace"}]}
+    session = _FakeSession({
+        "/raids/9": _FakeResp(500, text="boom"),  # detail fetch errors -> []
+        "/raids": _FakeResp(200, raids),
+    })
+    out = await _client(session).upcoming_raid_signups(now=now)
+    assert out["instance"] == "Palace"
+    assert out["signups"] == []  # error swallowed, raid still returned

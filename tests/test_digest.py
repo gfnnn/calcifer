@@ -172,6 +172,53 @@ async def test_flush_digests_returns_zero_when_empty(db):
     assert send.sent == []
 
 
+async def test_flush_digests_keeps_batch_buffered_when_blocked(db):
+    """The posting guardrail blocking a digest leaves the batch buffered, so it
+    flushes once the gate opens (no items lost)."""
+    from ftabot.posting import PostBlocked
+
+    e = _event(external_id="blk", title="Buffered")
+    await db.enqueue_digest("ch9", "wowhead", e.to_json(), "{}", rule_id=1)
+
+    async def _blocked(channel_id, embed, content=None):
+        raise PostBlocked(channel_id)
+
+    assert await flush_digests(db, _cfg(), _blocked) == 0
+    # Still queued — nothing was marked flushed.
+    assert len(await db.pending_digests()) == 1
+
+    # Gate opens: the same batch flushes exactly once.
+    send = _Recorder()
+    assert await flush_digests(db, _cfg(), send) == 1
+    assert await db.pending_digests() == []
+
+
+async def test_flush_digests_skips_a_group_on_send_error(db):
+    """A non-PostBlocked send error skips that group (logged) but the batch is
+    left buffered for the next flush; other groups are unaffected."""
+    eok = _event(external_id="ok", title="Delivered")
+    ebad = _event(external_id="bad", title="Errors")
+    await db.enqueue_digest("good", "wowhead", eok.to_json(), "{}", rule_id=1)
+    await db.enqueue_digest("bad", "wowhead", ebad.to_json(), "{}", rule_id=2)
+
+    class _FailsOneChannel:
+        def __init__(self):
+            self.sent = []
+
+        async def __call__(self, channel_id, embed, content=None):
+            if channel_id == "bad":
+                raise RuntimeError("discord 500")
+            self.sent.append(channel_id)
+
+    sender = _FailsOneChannel()
+    posted = await flush_digests(db, _cfg(), sender)
+    assert posted == 1  # only the good group posted
+    assert sender.sent == ["good"]
+    # The failed group is still buffered; the good one was flushed.
+    remaining = await db.pending_digests()
+    assert [r["channel_id"] for r in remaining] == ["bad"]
+
+
 # ---------------------------------------------------------------------------
 # render_digest_embed
 # ---------------------------------------------------------------------------
@@ -208,6 +255,33 @@ def test_render_digest_caps_at_20_items():
 def test_render_digest_empty_returns_placeholder():
     embed = publisher.render_digest_embed([], {}, tone="off")
     assert embed is not None  # at least returns a valid embed
+
+
+def test_render_digest_mixed_sources_use_generic_roundup_title():
+    # Events span more than one source, so neither the M+ nor the Wowhead
+    # special-case title applies and the generic roundup heading is used.
+    events = [
+        FeedEvent(source="wowhead", event_type="wowhead.news",
+                  external_id="a", title="News item"),
+        FeedEvent(source="raiderio_mplus", event_type="raiderio.mplus-log",
+                  external_id="b", title="Key run"),
+    ]
+    embed = publisher.render_digest_embed(events, {}, tone="off")
+    assert "Weekly roundup" in embed.title
+    assert "2 item" in embed.title
+
+
+def test_render_digest_full_tone_adds_a_signoff_footer():
+    # With the persona tone on, the digest gets a Calcifer sign-off in the
+    # footer (the footer branch only runs when flavour returns a line).
+    events = [
+        FeedEvent(source="wowhead", event_type="wowhead.news",
+                  external_id="a", title="News item"),
+    ]
+    embed = publisher.render_digest_embed(
+        events, {}, tone="full", rng=random.Random(1)
+    )
+    assert embed.footer.text  # a non-empty sign-off was set
 
 
 # ---------------------------------------------------------------------------

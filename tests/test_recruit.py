@@ -30,6 +30,17 @@ def test_trajectory_single_season_is_a_spike():
     assert t.trend == "unknown"
 
 
+def test_trajectory_no_data_is_unknown():
+    # All-None (no surviving seasons) -> the empty Trajectory.
+    t = recruit.trajectory([None, None])
+    assert t.seasons == 0
+    assert t.latest is None
+    assert t.slope == 0.0
+    assert t.consistency == 0.0
+    assert t.trend == "unknown"
+    assert t.spike is False
+
+
 def test_trajectory_drops_missing_seasons_but_counts_present():
     t = recruit.trajectory([None, 2000, None, 2400])
     assert t.seasons == 2
@@ -88,6 +99,13 @@ def test_weak_slots_picks_weakest_holder_of_each_class():
     ]
     slots = recruit.weak_slots(roster, threshold=0.5)
     assert [s.incumbent for s in slots] == ["Pal2"]
+
+
+def test_player_strength_zero_when_no_measurable_stats():
+    # A member with no parse / M+ / ilvl has zero measurable weight -> 0.0.
+    blank = _m("Blank", "Paladin", parse=None, mplus=None, ilvl=None)
+    other = _m("Other", "Mage", parse=80, mplus=2500, ilvl=290)
+    assert recruit.player_strength(blank, [blank, other]) == 0.0
 
 
 def test_weak_slots_team_filter():
@@ -212,3 +230,33 @@ def test_meets_requirements_does_not_reject_unknown_role():
     # Can't measure the role -> don't reject (mirrors the ilvl skip-when-None).
     req = recruit.Requirements(min_item_level=275, roles_open=("DPS",), region="eu")
     assert recruit.meets_requirements(_cand(role=None), req)[0] is True
+
+
+def test_score_candidate_flags_recent_decline():
+    # A declining curve on either metric raises the 🟡 recent decline flag.
+    slot = _slot(strength=0.1)
+    decliner = recruit.Candidate(
+        "Fader", "ravencrest", "eu", "Paladin", item_level=290,
+        parse_seasons=[95, 80, 60], mplus_seasons=[3300, 2900, 2400],
+    )
+    match = recruit.score_candidate(decliner, slot)
+    assert any("decline" in f for f in match.flags)
+
+
+def test_rank_candidates_drops_gate_failures_and_non_upgrades():
+    slot = _slot(klass="Paladin", strength=0.9)  # strong incumbent
+    req = recruit.Requirements(min_item_level=275, region="eu")
+    cands = [
+        # Fails the ilvl gate -> dropped before scoring.
+        recruit.Candidate("Lowilvl", "ravencrest", "eu", "Paladin", item_level=200,
+                          parse_seasons=[90], mplus_seasons=[3000]),
+        # Clears the gate but doesn't out-score the strong incumbent -> dropped
+        # by upgrades_only.
+        recruit.Candidate("NoUpgrade", "ravencrest", "eu", "Paladin", item_level=290,
+                          parse_seasons=[20, 22, 25], mplus_seasons=[800, 850, 900]),
+    ]
+    assert recruit.rank_candidates(cands, slot, req, upgrades_only=True) == []
+    # Without the upgrades_only filter the gated-out candidate is still gone but
+    # the non-upgrade one is kept (so we know line 347 was the ilvl gate).
+    kept = recruit.rank_candidates(cands, slot, req, upgrades_only=False)
+    assert [m.candidate.name for m in kept] == ["NoUpgrade"]

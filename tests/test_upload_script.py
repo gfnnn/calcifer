@@ -1,6 +1,8 @@
 """Offline tests for the stdlib-only companion uploader script."""
 
+import io
 import json
+import urllib.error
 
 from scripts.upload_savedvars import _build_request, main, post
 
@@ -74,3 +76,25 @@ def test_main_reports_http_failure(tmp_path, monkeypatch, capsys):
     )
     assert main([str(f), "--url", "https://host/up", "--token", "bad"]) == 1
     assert "failed (HTTP 401)" in capsys.readouterr().err
+
+
+def test_post_reads_body_and_code_from_an_http_error():
+    # A raised HTTPError still carries a status + body; post() must surface them
+    # rather than propagate, so the caller can report a clean failure.
+    def fake_opener(req, timeout=0):
+        raise urllib.error.HTTPError(
+            req.full_url, 503, "Service Unavailable", {}, io.BytesIO(b'{"error": "down"}')
+        )
+
+    status, body = post("https://host/up", "tok", "DB = {}", opener=fake_opener)
+    assert status == 503
+    assert body == {"error": "down"}
+
+
+def test_main_reports_unreadable_file_and_skips_it(tmp_path, capsys):
+    # A missing/unreadable path is reported and counted as a failure, but the run
+    # continues to the next file (no network call is attempted for it).
+    missing = tmp_path / "nope.lua"
+    rc = main([str(missing), "--url", "https://host/up", "--token", "tok"])
+    assert rc == 1
+    assert "cannot read" in capsys.readouterr().err

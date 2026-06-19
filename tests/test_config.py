@@ -83,3 +83,26 @@ def test_cookie_secure_defaults_on_and_respects_env(monkeypatch):
     assert Config.from_env().cookie_secure is True
     monkeypatch.setenv("COOKIE_SECURE", "0")
     assert Config.from_env().cookie_secure is False
+
+
+def test_non_numeric_int_and_float_env_fall_back_to_default(monkeypatch):
+    # A garbage value for a numeric env var must not crash from_env; it parses to
+    # None and the field keeps its default rather than raising.
+    monkeypatch.setenv("DISCORD_GUILD_ID", "not-a-number")  # _int -> None
+    monkeypatch.setenv("RECRUIT_MIN_ITEM_LEVEL", "high")    # _float -> None
+    c = Config.from_env()
+    assert c.discord_guild_id is None
+    assert c.recruit_min_item_level == Config().recruit_min_item_level  # default kept
+
+
+def test_int_list_skips_non_numeric_entries(monkeypatch):
+    # WARCRAFTLOGS_ZONE_IDS is comma-separated ints; a stray non-int is dropped,
+    # not fatal.
+    monkeypatch.setenv("WARCRAFTLOGS_ZONE_IDS", "12, bad, 34")
+    assert Config.from_env().warcraftlogs_zone_ids == (12, 34)
+
+
+def test_scout_zone_ids_falls_back_to_single_zone():
+    # No zone-ids list, but a single pinned zone -> that one becomes the scan set.
+    assert Config(warcraftlogs_zone_id=42).scout_zone_ids == (42,)
+    assert Config().scout_zone_ids == ()  # nothing configured

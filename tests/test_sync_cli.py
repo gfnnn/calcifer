@@ -8,6 +8,7 @@ print, and the optional ``--list`` roster dump — all offline.
 from __future__ import annotations
 
 import argparse
+import sys
 
 from ftabot.config import Config
 from ftabot.models import Member
@@ -66,3 +67,41 @@ async def test_run_no_prune_flag_inverts_prune(tmp_path, monkeypatch, capsys):
 
     await sync_cli._run(_args(tmp_path, no_prune=True))
     assert seen["prune"] is False
+
+
+def test_main_parses_flags_and_runs(monkeypatch):
+    """``main`` builds the argparse namespace from argv and hands it to ``_run``."""
+    captured = {}
+
+    async def _fake_run(args):
+        captured["args"] = args
+
+    monkeypatch.setattr(sync_cli, "_run", _fake_run)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["sync_cli", "--name", "Guild", "--realm", "hellfire", "--region", "eu",
+         "--no-prune", "--list"],
+    )
+
+    sync_cli.main()
+
+    args = captured["args"]
+    assert (args.name, args.realm, args.region) == ("Guild", "hellfire", "eu")
+    assert args.no_prune is True
+    assert args.list is True
+
+
+def test_main_defaults_when_no_flags(monkeypatch):
+    captured = {}
+
+    async def _fake_run(args):
+        captured["args"] = args
+
+    monkeypatch.setattr(sync_cli, "_run", _fake_run)
+    monkeypatch.setattr(sys, "argv", ["sync_cli"])
+
+    sync_cli.main()
+
+    args = captured["args"]
+    assert args.name is None and args.realm is None and args.region is None
+    assert args.no_prune is False and args.list is False

@@ -138,6 +138,45 @@ async def test_board_refresh_blocked_by_guardrail(db):
     assert "off" in it.followup.content
 
 
+def _live_board_cfg():
+    return Config(admin_role_name="Officer", posting_mode="live")
+
+
+async def _refresh_with_action(db, monkeypatch, action):
+    """Drive /board refresh on a promoted board in live mode, with refresh_board
+    forced to return ``action`` so the post-resolution reply branch is exercised."""
+    from ftabot.cogs import boards as boards_mod
+
+    board_id = await db.add_board("hot20", "123")
+    await db.set_board_promoted(board_id, True)  # live + promoted -> resolves to #123
+
+    async def _act(*_a, **_k):
+        return action
+
+    monkeypatch.setattr(boards_mod, "refresh_board", _act)
+    cog = BoardsCog(_Bot(db, _live_board_cfg()))
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    await BoardsCog.refresh.callback(cog, it, board_id)
+    return it
+
+
+async def test_board_refresh_reports_unchanged(db, monkeypatch):
+    it = await _refresh_with_action(db, monkeypatch, "unchanged")
+    assert "already current" in it.followup.content
+    assert "<#123>" in it.followup.content  # destination resolved to the real channel
+
+
+async def test_board_refresh_reports_nothing_to_show(db, monkeypatch):
+    it = await _refresh_with_action(db, monkeypatch, "skip")
+    assert "had nothing to show yet" in it.followup.content
+
+
+async def test_board_refresh_reports_a_post(db, monkeypatch):
+    it = await _refresh_with_action(db, monkeypatch, "posted")
+    assert "posted in" in it.followup.content
+    assert "<#123>" in it.followup.content
+
+
 async def test_board_promote_and_demote(db):
     board_id = await db.add_board("hot20", "123")
     cog = BoardsCog(_Bot(db, _cfg()))

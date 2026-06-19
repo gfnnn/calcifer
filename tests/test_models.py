@@ -2,6 +2,7 @@ from ftabot.models import (
     CLASSES,
     DEFAULT_EMBED_COLOR,
     Member,
+    WishlistItem,
     class_color,
     normalize_realm,
 )
@@ -55,3 +56,12 @@ def test_summarize_progression_without_summary():
 
 def test_summarize_progression_empty():
     assert _summarize_progression({}) is None
+
+
+def test_wishlist_dedup_key_lowercases_name_with_id_and_difficulty():
+    # The dedup key normalises the character name and carries item id +
+    # difficulty, so the same item at the same difficulty de-dupes case-blind.
+    item = WishlistItem("Emberlyn", item_id=212396, difficulty="Mythic")
+    assert item.dedup_key == ("emberlyn", 212396, "Mythic")
+    bare = WishlistItem("Emberlyn")  # no id/difficulty supplied
+    assert bare.dedup_key == ("emberlyn", None, None)

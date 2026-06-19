@@ -81,6 +81,55 @@ async def _noop_sleep(_seconds):
     return None
 
 
+class _RaiseSeq:
+    """An async callable that raises the next exception in ``seq`` on each call
+    (``None`` means 'return cleanly'); the last entry repeats once exhausted."""
+
+    def __init__(self, seq):
+        self.seq = list(seq)
+        self.calls = 0
+
+    async def __call__(self, *args, **kwargs):
+        exc = self.seq[self.calls] if self.calls < len(self.seq) else self.seq[-1]
+        self.calls += 1
+        if exc is not None:
+            raise exc
+        return None
+
+
+class _SleepRaiseOnNth:
+    """A no-op sleep that raises ``CancelledError`` on its ``n``-th call, used to
+    break a loop after a chosen number of sleeps so a full iteration is exercised."""
+
+    def __init__(self, n: int):
+        self.n = n
+        self.calls = 0
+
+    async def __call__(self, _seconds):
+        self.calls += 1
+        if self.calls >= self.n:
+            raise asyncio.CancelledError
+        return None
+
+
+class _FakeDBRaises:
+    """Stand-in for ``serve.Database``: entering the context raises the next error,
+    so a loop's *outer* try/except (its consecutive-failure backoff) is exercised,
+    then the loop unwinds on the iteration that raises ``CancelledError``."""
+
+    def __init__(self, *errors):
+        self._errors = list(errors)
+
+    def __call__(self, _path):
+        return self
+
+    async def __aenter__(self):
+        raise self._errors.pop(0)
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 def _cfg(tmp_path, **over):
     base = dict(
         guild_name="From the Ashes",
@@ -334,3 +383,122 @@ async def test_periodic_sync_runs_sync_guild(tmp_path, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await serve._periodic_sync(_cfg(tmp_path))
     assert sync.calls == 2
+
+
+# --- loop resilience: a bad board/page, and each loop's outer backoff ---------
+
+
+async def test_board_loop_logs_a_bad_board_and_a_bad_page(tmp_path, monkeypatch, caplog):
+    """One board or page raising is caught per-item so the loop keeps going and
+    still reconciles the rest (the sticky-pages branch rides the same tick)."""
+    import logging
+
+    cfg = _cfg(tmp_path)
+    async with Database(cfg.database_path) as d:
+        await d.add_board("hot20", "111")
+        await d.upsert_sticky_page("rules_info", "222")
+
+    async def _board_boom(*a, **k):
+        raise RuntimeError("board boom")
+
+    # First page refresh raises (per-page except), the second stops the loop.
+    page = _RaiseSeq([RuntimeError("page boom"), asyncio.CancelledError()])
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr("ftabot.boards.refresh_board", _board_boom)
+    monkeypatch.setattr("ftabot.pages.refresh_page", page)
+    caplog.set_level(logging.WARNING)
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve._board_loop(cfg, _Bot(_Channel()))
+
+    assert "board hot20 failed" in caplog.text  # a bad board never kills the loop
+    assert "page rules_info failed" in caplog.text  # nor does a bad page
+
+
+async def test_board_loop_skips_unknown_sticky_page(tmp_path, monkeypatch):
+    """A placed page whose name isn't in the registry is skipped, not crashed on
+    (mirrors the unknown-board guard)."""
+    cfg = _cfg(tmp_path)
+    async with Database(cfg.database_path) as d:
+        await d.upsert_sticky_page("bogus_page", "222")  # not in PAGES -> skipped
+
+    refresh_page = _RaiseSeq([RuntimeError("should never be reached")])
+    # No boards/pages do real work, so the outer retry sleep is what stops us:
+    # settle sleep (1) then the outer sleep (2).
+    monkeypatch.setattr(serve.asyncio, "sleep", _SleepRaiseOnNth(2))
+    monkeypatch.setattr("ftabot.pages.refresh_page", refresh_page)
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve._board_loop(cfg, _Bot(_Channel()))
+    assert refresh_page.calls == 0  # unknown page never refreshed
+
+
+async def test_board_loop_backs_off_on_db_error(tmp_path, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr(serve, "Database", _FakeDBRaises(RuntimeError("db gone"),
+                                                         asyncio.CancelledError()))
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(asyncio.CancelledError):
+        await serve._board_loop(_cfg(tmp_path), _Bot(_Channel()))
+    assert "board loop error (failure 1)" in caplog.text
+
+
+async def test_score_loop_logs_and_resets_after_a_refresh(tmp_path, monkeypatch, caplog):
+    """The success tail: changed scores -> boards nudged, the info log fires, and
+    the failure counter resets."""
+    import logging
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _SleepRaiseOnNth(2))  # settle, then stop
+    monkeypatch.setattr("ftabot.scores.select_active", lambda members, config: members)
+
+    async def _refresh_scores(db, config, active, *, session):
+        return ["changed-member"]  # always "changed" -> drives the if-branch
+
+    async def _refresh_boards(db, config, bot, **kw):
+        return None  # succeeds, so the info log + failures reset run
+
+    monkeypatch.setattr("ftabot.scores.refresh_scores", _refresh_scores)
+    monkeypatch.setattr("ftabot.scores.refresh_boards", _refresh_boards)
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(asyncio.CancelledError):
+        await serve._score_loop(_cfg(tmp_path), _Bot(_Channel()))
+    assert "scores: 1 updated, boards refreshed" in caplog.text
+
+
+async def test_score_loop_backs_off_on_db_error(tmp_path, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr(serve, "Database", _FakeDBRaises(RuntimeError("db gone"),
+                                                         asyncio.CancelledError()))
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(asyncio.CancelledError):
+        await serve._score_loop(_cfg(tmp_path), _Bot(_Channel()))
+    assert "score loop error (failure 1)" in caplog.text
+
+
+async def test_digest_loop_backs_off_on_db_error(tmp_path, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr(serve, "Database", _FakeDBRaises(RuntimeError("db gone"),
+                                                         asyncio.CancelledError()))
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(asyncio.CancelledError):
+        await serve._digest_loop(_cfg(tmp_path), _Bot(_Channel()))
+    assert "digest loop error (failure 1)" in caplog.text
+
+
+async def test_periodic_sync_backs_off_on_db_error(tmp_path, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr(serve, "Database", _FakeDBRaises(RuntimeError("db gone"),
+                                                         asyncio.CancelledError()))
+    caplog.set_level(logging.WARNING)
+    with pytest.raises(asyncio.CancelledError):
+        await serve._periodic_sync(_cfg(tmp_path))
+    assert "scheduled sync failed (failure 1)" in caplog.text
