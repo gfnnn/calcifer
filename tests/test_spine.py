@@ -136,9 +136,11 @@ async def test_ingest_grm_skips_account_whose_main_is_untracked(db):
 
 
 def test_uploaded_identity_is_readable(tmp_path):
-    cfg = Config(database_path=str(tmp_path / "id.db"), savedvars_upload_secret="s3cret")
+    cfg = Config(database_path=str(tmp_path / "id.db"), savedvars_upload_secret="s3cret",
+                 sync_token="s3cret", cookie_secure=False)
     with TestClient(create_app(cfg)) as client:
         client.post("/api/upload/savedvars?token=s3cret", content=GRM_LUA)
+        client.post("/api/sync/unlock", json={"token": "s3cret"})  # /api/identity now gated
         resp = client.get("/api/identity/Calcifer")
         assert resp.status_code == 200, resp.text
         record = resp.json()

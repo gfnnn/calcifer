@@ -113,6 +113,31 @@ _TREND_FIELDS = (
 )
 
 
+def _sparkline_points(
+    values: list, *, width: int = 200, height: int = 36
+) -> str:
+    """A polyline ``"x,y x,y …"`` string for an inline-SVG sparkline.
+
+    Keeps the geometry in (unit-tested) Python so the dashboard JS only has to
+    drop the string into an ``<svg>`` — it does no math. ``None`` values are
+    skipped; fewer than two known points yields an empty string (the client then
+    renders a "no trend yet" placeholder). Mirrors the Python ``_sparkline`` and
+    the JS ``sparkline`` fallback.
+    """
+    known = [v for v in values if v is not None]
+    if len(known) < 2:
+        return ""
+    lo, hi = min(known), max(known)
+    span = (hi - lo) or 1
+    step = width / max(1, len(values) - 1)
+    coords = [
+        f"{i * step:.1f},{height - ((v - lo) / span) * (height - 4) - 2:.1f}"
+        for i, v in enumerate(values)
+        if v is not None
+    ]
+    return " ".join(coords)
+
+
 async def _trend_series(db: Database, *, limit: int = 30) -> dict:
     """Chronological snapshot series + first→latest deltas for each metric."""
     snaps = list(reversed(await db.snapshots(limit=limit)))  # oldest -> newest
@@ -130,6 +155,7 @@ async def _trend_series(db: Database, *, limit: int = 30) -> dict:
         "count": len(snaps),
         "points": points,
         "series": series,
+        "sparklines": {f: _sparkline_points(series[f]) for f in _TREND_FIELDS},
         "deltas": deltas,
         "latest": points[-1] if points else None,
         "first": points[0] if points else None,
@@ -458,6 +484,212 @@ async def overview(db: Database, config: Config) -> dict:
         },
         "health": snaps[0]["health_score"] if snaps else None,
         "health_at": snaps[0]["taken_at"] if snaps else None,
+    }
+
+
+# --- Home: pulse + "needs attention" triage ---------------------------------
+
+# Triage thresholds for the Home queue (module constants so they are easy to
+# tune and to assert against in tests).
+COLD_LEAD_DAYS = 7.0
+LOW_READINESS = 50.0
+SYNC_STALE_DAYS_HIGH = 3.0
+SYNC_STALE_DAYS_MED = 1.0
+
+_SEVERITY_RANK = {"high": 3, "med": 2, "low": 1}
+
+
+def _names_detail(names: list, cap: int = 6) -> str:
+    """Join a list of names for a triage item's one-line detail, capped."""
+    clean = [str(n) for n in names if n]
+    shown = clean[:cap]
+    text = ", ".join(shown)
+    extra = len(clean) - len(shown)
+    if extra > 0:
+        text += f" +{extra} more"
+    return text
+
+
+def attention(
+    *,
+    inactive_raiders: list[str],
+    unprepped_raiders: list[str],
+    low_readiness: list[str],
+    gm: dict,
+    roster: dict,
+    boards: dict,
+    feeds: dict,
+    pages: dict,
+    recruiting: dict,
+    leads: list[dict],
+    snapshot_age_days: float | None,
+    sync: dict | None,
+    now: datetime,
+) -> list[dict]:
+    """Rank the guild's open issues into a triage queue. Pure (no I/O).
+
+    Takes the already-fetched view dicts plus the derived raider name lists, so
+    the ranking and formatting are unit-testable without a database. Returns
+    items ordered high->low severity, then by count, each shaped
+    ``{kind, severity, title, detail, count, action_url}``.
+    """
+    items: list[dict] = []
+
+    def add(kind: str, severity: str, title: str, detail: str,
+            count: int, action_url: str) -> None:
+        items.append({
+            "kind": kind, "severity": severity, "title": title,
+            "detail": detail, "count": count, "action_url": action_url,
+        })
+
+    def s(n: int) -> str:
+        return "s" if n != 1 else ""
+
+    if inactive_raiders:
+        n = len(inactive_raiders)
+        add("inactive_raiders", "med", f"{n} raider{s(n)} inactive",
+            _names_detail(inactive_raiders), n, "#raid")
+    if unprepped_raiders:
+        n = len(unprepped_raiders)
+        add("unprepped_raiders", "med", f"{n} raider{s(n)} missing enchants/gems",
+            _names_detail(unprepped_raiders), n, "#raid/readiness")
+    if low_readiness:
+        n = len(low_readiness)
+        add("low_readiness", "med",
+            f"{n} raider{s(n)} below readiness {int(LOW_READINESS)}",
+            _names_detail(low_readiness), n, "#raid")
+
+    tentative = (roster.get("groups") or {}).get("Tentative") or []
+    if tentative:
+        n = len(tentative)
+        add("pending_signups", "low", f"{n} tentative sign-up{s(n)} for next raid",
+            _names_detail([r.get("name") for r in tentative]), n, "#raid/signups")
+
+    cold = [
+        ld for ld in leads
+        if ld.get("state") == "new"
+        and (_days_since(ld.get("updated_at") or ld.get("first_seen"), now) or 0)
+        > COLD_LEAD_DAYS
+    ]
+    if cold:
+        n = len(cold)
+        add("cold_leads", "med", f"{n} new lead{s(n)} untouched >{int(COLD_LEAD_DAYS)}d",
+            _names_detail([ld.get("name") for ld in cold]), n, "#recruitment")
+
+    slots = (recruiting.get("config") or {}).get("slots") or {}
+    open_roles = [r for r, slot in slots.items() if int((slot or {}).get("open") or 0) > 0]
+    if open_roles:
+        n = len(open_roles)
+        add("open_slots", "low", f"{n} role{s(n)} recruiting",
+            ", ".join(sorted(open_roles)), n, "#recruitment")
+
+    bad_boards = [
+        b for b in boards.get("boards", [])
+        if (b["enabled"] and not b["effective_destination"])
+        or (b["promoted"] and not b["posted"])
+    ]
+    if bad_boards:
+        n = len(bad_boards)
+        add("board_issues", "high", f"{n} board{s(n)} not landing",
+            _names_detail([b["name"] for b in bad_boards]), n, "#comms/boards")
+
+    backlog = (feeds.get("pending_outbox") or 0) + (feeds.get("pending_digests") or 0)
+    if backlog:
+        add("feed_backlog", "high", f"{backlog} feed message{s(backlog)} queued",
+            "Outbox/digest queue not draining.", backlog, "#comms/feeds")
+    muted = feeds.get("muted_sources") or []
+    if muted:
+        n = len(muted)
+        add("feed_muted", "low", f"{n} feed source{s(n)} muted",
+            ", ".join(muted), n, "#comms/feeds")
+
+    unplaced = [p for p in pages.get("pages", []) if not p["placed"]]
+    if unplaced:
+        n = len(unplaced)
+        add("pages_unplaced", "low", f"{n} page{s(n)} not posted",
+            _names_detail([p["title"] for p in unplaced]), n, "#comms/pages")
+
+    # Sync staleness: prefer the newest snapshot's age, else the live sync's
+    # last-finished time (passed in by the endpoint).
+    age = snapshot_age_days
+    if age is None and sync:
+        age = _days_since(sync.get("last_finished"), now)
+    if age is not None and age > SYNC_STALE_DAYS_MED:
+        sev = "high" if age > SYNC_STALE_DAYS_HIGH else "med"
+        add("sync_stale", sev, f"Last sync {int(age)}d ago",
+            "Roster data is going stale — run a sync.", 1, "#settings/sync")
+
+    dark = [o["name"] for o in gm.get("officers", []) if o.get("active") is False]
+    if dark:
+        n = len(dark)
+        add("officer_inactive", "med", f"{n} officer{s(n)} inactive",
+            _names_detail(dark), n, "#roster")
+
+    items.sort(key=lambda it: (_SEVERITY_RANK[it["severity"]], it["count"]), reverse=True)
+    return items
+
+
+async def home(db: Database, config: Config, *, now: datetime | None = None) -> dict:
+    """The opinionated landing view: a guild-health pulse strip + a ranked
+    "needs attention" triage queue. Composes the existing view-models so the
+    dashboard never disagrees with the GM/Raid/Comms surfaces. The web endpoint
+    merges the live :class:`SyncManager` status onto the result."""
+    now = _now(now)
+    window = config.activity_window_days
+
+    gm = await gm_report(db, config, now=now)
+    roster = await roster_board(db, config)
+    boards = await boards_status(db, config)
+    feeds = await feed_health(db, config)
+    pages = await pages_status(db, config)
+    recruit = await recruiting(db, config)
+    leads = await db.leads(limit=200)
+    snaps = await db.snapshots(limit=1)
+    snapshot_age = _days_since(snaps[0]["taken_at"], now) if snaps else None
+
+    # Raider-specific signals (raiders = members with a raid_team). Readiness is
+    # scored against the raiders' own item-level spread.
+    raiders = await db.team_roster()
+    raider_ilvls = [m.item_level for m in raiders if m.item_level is not None]
+    inactive_raiders: list[str] = []
+    unprepped: list[str] = []
+    low_readiness: list[str] = []
+    for m in raiders:
+        if not metrics.is_active(m, window_days=window, now=now):
+            inactive_raiders.append(m.character_name)
+        if metrics.prep_ready(m) is False:
+            unprepped.append(m.character_name)
+        rr = metrics.compute_readiness(
+            m, team_item_levels=raider_ilvls, now=now, window_days=window
+        )
+        if rr.score < LOW_READINESS:
+            low_readiness.append(m.character_name)
+
+    queue = attention(
+        inactive_raiders=inactive_raiders,
+        unprepped_raiders=unprepped,
+        low_readiness=low_readiness,
+        gm=gm, roster=roster, boards=boards, feeds=feeds, pages=pages,
+        recruiting=recruit, leads=leads, snapshot_age_days=snapshot_age,
+        sync=None, now=now,
+    )
+
+    return {
+        "guild": config.guild_name,
+        "pulse": {
+            "health": gm["health"],
+            "counts": gm["counts"],
+            "prep_rate": gm["prep_rate"],
+            "vault_rate": gm["vault_rate"],
+            "progression": gm["progression"],
+            "missing_buffs": gm["missing_buffs"],
+            "buff_coverage": gm["buff_coverage"],
+            "role_counts": gm["role_counts"],
+            "trends": gm["trends"],
+        },
+        "attention": queue,
+        "attention_total": sum(it["count"] for it in queue),
+        "generated_at": now.isoformat(),
     }
 
 

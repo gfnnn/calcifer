@@ -1,0 +1,280 @@
+/* From the Ashes — command center design system.
+   Dependency-free, dark "ember" theme. Ported and expanded from the old
+   inline _CSS, restructured around a left-rail app shell. */
+
+:root {
+  color-scheme: dark;
+  --bg: #16110f;
+  --bg-rail: #1c1410;
+  --bg-panel: #221712;
+  --bg-raised: #2a1c15;
+  --border: #3a2820;
+  --border-soft: #332620;
+  --ember: #ff7043;
+  --ember-deep: #cc4422;
+  --ember-soft: #ffab91;
+  --text: #eee;
+  --muted: #b3a59c;
+  --ok: #9ccc65;
+  --bad: #ef5350;
+  --warn: #ffca28;
+  --rail-w: 220px;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--ember-soft); text-decoration: none; }
+a:hover { color: var(--ember); }
+
+.muted { color: var(--muted); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }
+.pad { padding: 1.2rem 1.5rem; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.center { text-align: center; }
+
+/* --- App shell --------------------------------------------------------- */
+
+#shell { display: flex; min-height: 100vh; }
+
+#rail {
+  width: var(--rail-w);
+  flex: 0 0 var(--rail-w);
+  background: var(--bg-rail);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: 1.1rem 1.1rem .9rem;
+  border-bottom: 1px solid var(--border);
+}
+.brand .spark { font-size: 1.3rem; }
+.brand-name { font-weight: 700; color: var(--ember); font-size: 1.02rem; }
+
+#nav { display: flex; flex-direction: column; padding: .6rem .5rem; gap: .1rem; flex: 1; }
+#nav a {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .55rem .75rem;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: .92rem;
+}
+#nav a:hover { background: var(--bg-raised); color: var(--text); }
+#nav a.active { background: var(--bg-raised); color: #fff; box-shadow: inset 3px 0 0 var(--ember-deep); }
+#nav a .badge {
+  margin-left: auto;
+  background: var(--ember-deep);
+  color: #fff;
+  border-radius: 10px;
+  font-size: .7rem;
+  padding: .02rem .42rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-foot { padding: .8rem 1.1rem; border-top: 1px solid var(--border); font-size: .78rem; }
+
+#content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  background: #2a1812;
+  border-bottom: 2px solid var(--ember-deep);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+#topbar h1 { margin: 0; font-size: 1.25rem; color: var(--ember); }
+#topbar-actions { display: flex; gap: .5rem; align-items: center; }
+
+#app { padding: 1.2rem 1.5rem; flex: 1; }
+
+/* Section sub-tabs (Raid/Loot/Comms/Settings). */
+.tabs { display: flex; gap: .4rem; margin: 0 0 1.1rem; flex-wrap: wrap; }
+.tabs button {
+  background: var(--bg-panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.tabs button.active { background: var(--ember-deep); color: #fff; border-color: var(--ember-deep); }
+
+/* --- Cards & stats ----------------------------------------------------- */
+
+.cards { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.2rem; }
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+  min-width: 150px;
+}
+.card .big { font-size: 1.85rem; font-weight: 700; color: var(--ember); line-height: 1.1; }
+.card .lbl { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: .15rem; }
+.card .delta { font-size: .8rem; margin-left: .4rem; }
+.card .delta.up { color: var(--ok); }
+.card .delta.down { color: var(--bad); }
+.card .spark { margin-top: .5rem; }
+
+/* --- Panels & tables --------------------------------------------------- */
+
+h2 { font-size: 1rem; color: var(--ember-soft); margin: 1.4rem 0 .5rem; }
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  margin-bottom: 1.4rem;
+}
+.panel h2 { margin-top: 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border-soft); }
+th { position: sticky; top: 0; background: #241712; }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr:hover td { background: #1f1713; }
+
+/* --- Bars, pills, tags ------------------------------------------------- */
+
+.bar { background: var(--border); border-radius: 5px; height: 9px; overflow: hidden; min-width: 80px; }
+.bar > span { display: block; height: 100%; background: var(--ember-deep); }
+
+.pill { display: inline-block; background: var(--border); border-radius: 10px; padding: .05rem .55rem; margin: .1rem; font-size: .8rem; }
+
+.tag { display: inline-block; border-radius: 6px; padding: .05rem .45rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; }
+.tag.on, .tag.live { background: #1e4620; color: var(--ok); }
+.tag.off { background: #4a1818; color: #ef9a9a; }
+.tag.sandboxed, .tag.warn { background: #4a3a12; color: var(--warn); }
+.tag.disabled { background: var(--border); color: #999; }
+
+/* Severity chips for the triage queue. */
+.sev { display: inline-block; border-radius: 6px; padding: .05rem .5rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; font-weight: 700; }
+.sev.high { background: #4a1818; color: #ff8a80; }
+.sev.med { background: #4a3a12; color: var(--warn); }
+.sev.low { background: var(--border); color: var(--muted); }
+
+/* --- Forms & buttons --------------------------------------------------- */
+
+button {
+  padding: .42rem .85rem;
+  border-radius: 6px;
+  border: 0;
+  background: var(--ember-deep);
+  color: #fff;
+  cursor: pointer;
+  font-size: .88rem;
+}
+button:hover { filter: brightness(1.08); }
+button.ghost { background: var(--bg-raised); }
+button.danger { background: #7a2018; }
+button.sm { padding: .2rem .5rem; font-size: .8rem; }
+
+input, select, textarea {
+  padding: .42rem .6rem;
+  border-radius: 6px;
+  border: 1px solid #543;
+  background: #1c1310;
+  color: var(--text);
+  font-size: .9rem;
+}
+textarea {
+  width: 100%;
+  min-height: 160px;
+  font-family: ui-monospace, monospace;
+  font-size: .85rem;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; margin: .4rem .6rem .4rem 0; }
+.field label { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.field input, .field select { min-width: 160px; }
+
+code.chan::before { content: '#'; color: #888; }
+
+/* --- Triage queue ------------------------------------------------------ */
+
+.triage { display: flex; flex-direction: column; gap: .55rem; }
+.triage-item {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: .65rem .9rem;
+}
+.triage-item.high { border-left-color: var(--bad); }
+.triage-item.med { border-left-color: var(--warn); }
+.triage-item.low { border-left-color: var(--border); }
+.triage-item .ti-body { flex: 1; min-width: 0; }
+.triage-item .ti-title { font-weight: 600; }
+.triage-item .ti-detail { font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.triage-empty { color: var(--ok); padding: 1rem; text-align: center; }
+
+/* --- Overlay & toast --------------------------------------------------- */
+
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(8, 5, 4, .82);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50;
+}
+.unlock-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.6rem 1.8rem;
+  width: min(360px, 90vw);
+  display: flex; flex-direction: column; gap: .7rem;
+}
+.unlock-card h2 { margin: 0; color: var(--ember); }
+
+#toast-host { position: fixed; bottom: 1.2rem; right: 1.2rem; display: flex; flex-direction: column; gap: .5rem; z-index: 60; }
+.toast {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ember-deep);
+  border-radius: 8px;
+  padding: .6rem .9rem;
+  font-size: .88rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
+  animation: toast-in .15s ease-out;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.bad { border-left-color: var(--bad); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* --- Responsive: collapse the rail on narrow screens ------------------- */
+
+@media (max-width: 720px) {
+  #shell { flex-direction: column; }
+  #rail { width: 100%; height: auto; position: static; flex: none; flex-direction: column; }
+  #nav { flex-direction: row; flex-wrap: wrap; }
+  #nav a { flex: 1 1 auto; }
+  #nav a.active { box-shadow: inset 0 -3px 0 var(--ember-deep); }
+}

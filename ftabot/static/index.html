@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>From the Ashes — Command Center</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <!-- App shell. The nav rail + header are static chrome; <main id=app> is
+       painted by the active section module. Auth is enforced by the JSON APIs:
+       the first 401 reveals #unlock, which posts the token to /api/sync/unlock
+       (sets the http-only cookie) and re-runs the route. -->
+  <div id="shell">
+    <aside id="rail">
+      <div class="brand">
+        <span class="spark">&#x1F525;</span>
+        <span class="brand-name">From the Ashes</span>
+      </div>
+      <nav id="nav"><!-- links injected by app.js --></nav>
+      <div class="rail-foot">
+        <span class="muted" id="gen">command center</span>
+      </div>
+    </aside>
+
+    <div id="content">
+      <header id="topbar">
+        <h1 id="section-title">Home</h1>
+        <div id="topbar-actions"></div>
+      </header>
+      <main id="app"><div class="muted pad">Loading&hellip;</div></main>
+    </div>
+  </div>
+
+  <!-- Token unlock overlay (hidden until an API returns 401). -->
+  <div id="unlock" class="overlay" hidden>
+    <form id="unlock-form" class="unlock-card">
+      <h2><span class="spark">&#x1F525;</span> Unlock the command center</h2>
+      <p class="muted">Enter the sync token to manage the guild.</p>
+      <input id="unlock-token" type="password" autocomplete="current-password"
+             placeholder="SYNC_TOKEN" required>
+      <button type="submit">Unlock</button>
+      <p id="unlock-error" class="bad" hidden>Invalid token.</p>
+    </form>
+  </div>
+
+  <!-- Transient toast host. -->
+  <div id="toast-host" aria-live="polite"></div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
