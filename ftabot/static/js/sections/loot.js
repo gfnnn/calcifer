@@ -2,10 +2,12 @@
 // (#loot/fairness, #loot/recent, #loot/priority).
 
 import { api } from '../api.js';
-import { panel, table, esc, tabs } from '../components.js';
+import { card, panel, table, esc, pill, tabs } from '../components.js';
 
 const TABS = [
   ['fairness', 'Fairness'],
+  ['equity', 'Equity'],
+  ['wishlist', 'Wishlist'],
   ['recent', 'Recent'],
   ['priority', 'Priority tool'],
 ];
@@ -75,11 +77,65 @@ function renderPriority(main) {
   document.getElementById('loot-item').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
 
+function breakdownPanel(title, rows) {
+  if (!rows || !rows.length) return '';
+  const pills = rows.map(r => pill(`${esc(r.key)} ${r.count}`)).join(' ');
+  return panel(title, pills);
+}
+
+async function renderEquity(main) {
+  const d = await api('/api/analytics/loot');
+  if (!d) return;
+  const cards = '<div class="cards">'
+    + card('Total awards', d.total_awards)
+    + card('Avg / player', d.avg_per_player)
+    + card('Never won', (d.never_won || []).length)
+    + '</div>';
+  const drought = panel('Longest drought', table([
+    { label: 'Player', html: r => `<a href="#roster/${encodeURIComponent(r.name)}">${esc(r.name)}</a>` },
+    { label: 'Days since', num: true, html: r => r.days_since_last_loot == null ? '—' : Math.round(r.days_since_last_loot) },
+    { label: 'Won', num: true, key: 'items_won' },
+    { label: 'Raids', num: true, html: r => fmt(r.raids_attended) },
+  ], d.drought));
+  const never = (d.never_won || []).length
+    ? panel('No loot yet', d.never_won.map(n => pill(n, 'warn')).join(' ')) : '';
+  const bd = (d.breakdown || {});
+  main.innerHTML = cards + drought + never
+    + breakdownPanel('By slot', bd.slot)
+    + breakdownPanel('By difficulty', bd.difficulty)
+    + breakdownPanel('By response', bd.response);
+}
+
+async function renderWishlist(main) {
+  const d = await api('/api/analytics/wishlist');
+  if (!d) return;
+  const contention = (d.contention || []).length
+    ? panel('Most contested drops', table([
+        { label: 'Item', html: r => esc(r.item_name || r.item_id) },
+        { label: 'Slot', html: r => fmt(r.slot) },
+        { label: 'Wishlisters', num: true, key: 'wishlisters' },
+        { label: 'BiS', num: true, key: 'bis' },
+        { label: 'Open', num: true, key: 'open' },
+        { label: 'Avg upgrade', num: true, html: r => r.avg_upgrade == null ? '—' : r.avg_upgrade + '%' },
+      ], d.contention))
+    : panel('Most contested drops', '<p class="muted">No wishlists uploaded yet.</p>');
+  const coverage = (d.coverage || []).length
+    ? panel('BiS completion (lowest first)', table([
+        { label: 'Player', html: r => `<a href="#roster/${encodeURIComponent(r.name)}">${esc(r.name)}</a>` },
+        { label: 'Obtained', num: true, html: r => `${r.obtained}/${r.total}` },
+        { label: 'Complete', num: true, html: r => pct(r.pct) },
+      ], d.coverage))
+    : '';
+  main.innerHTML = contention + coverage;
+}
+
 export async function render(main, sub) {
   const active = TABS.some(([k]) => k === sub) ? sub : 'fairness';
   main.innerHTML = tabs('loot', TABS, active) + '<div id="loot-body" class="muted">Loading…</div>';
   const body = document.getElementById('loot-body');
   if (active === 'recent') await renderRecent(body);
   else if (active === 'priority') renderPriority(body);
+  else if (active === 'equity') await renderEquity(body);
+  else if (active === 'wishlist') await renderWishlist(body);
   else await renderFairness(body);
 }

@@ -913,6 +913,24 @@ def create_app(config: Config | None = None) -> FastAPI:
         await db.set_recruitment_state({})
         return JSONResponse({"status": "reset"})
 
+    # -- deeper analytics (enrich Raid / Loot / Recruitment) -----------------
+
+    @app.get("/api/analytics/attendance", dependencies=gated)
+    async def api_analytics_attendance() -> JSONResponse:
+        return JSONResponse(await views.attendance_report(db, config))
+
+    @app.get("/api/analytics/loot", dependencies=gated)
+    async def api_analytics_loot() -> JSONResponse:
+        return JSONResponse(await views.loot_analytics(db, config))
+
+    @app.get("/api/analytics/wishlist", dependencies=gated)
+    async def api_analytics_wishlist() -> JSONResponse:
+        return JSONResponse(await views.wishlist_analytics(db, config))
+
+    @app.get("/api/analytics/funnel", dependencies=gated)
+    async def api_analytics_funnel() -> JSONResponse:
+        return JSONResponse(await views.recruitment_funnel(db, config))
+
     # -- member admin (the six manual-owned columns) -------------------------
 
     @app.get("/api/admin/members", dependencies=gated)
