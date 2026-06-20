@@ -697,3 +697,22 @@ def test_app_phase4_section_assets_served(tmp_path):
     with TestClient(_app(tmp_path)) as client:
         for module in ("recruitment.js", "comms.js", "settings.js"):
             assert client.get(f"/static/js/sections/{module}").status_code == 200, module
+
+
+# --- deeper analytics endpoints (gated; enrich Raid/Loot/Recruitment) -------
+
+def test_analytics_endpoints_gated_and_shaped(tmp_path):
+    with TestClient(_admin_app(tmp_path)) as client:
+        paths = ("/api/analytics/attendance", "/api/analytics/loot",
+                 "/api/analytics/wishlist", "/api/analytics/funnel")
+        for p in paths:
+            assert client.get(p).status_code == 401, p
+        client.post("/api/sync/unlock", json={"token": "s3cret"})
+        att = client.get("/api/analytics/attendance").json()
+        assert "characters" in att and "raids" in att and "turnout" in att
+        loot = client.get("/api/analytics/loot").json()
+        assert "drought" in loot and "breakdown" in loot and "avg_per_player" in loot
+        wish = client.get("/api/analytics/wishlist").json()
+        assert "contention" in wish and "coverage" in wish
+        funnel = client.get("/api/analytics/funnel").json()
+        assert "stages" in funnel and "close_rate" in funnel and "by_class" in funnel

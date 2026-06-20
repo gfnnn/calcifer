@@ -758,6 +758,93 @@ class Database:
         pct = (100.0 * present / scheduled) if scheduled else None
         return present, scheduled, pct
 
+    # -- analytics aggregations (read-only roll-ups for the dashboard) --------
+    # Pure SQL roll-ups; the view layer shapes/sorts/scores them. "Present"
+    # mirrors attendance_stats: any status other than 'absent' counts.
+
+    async def recent_raids(self, *, limit: int = 12) -> list[dict]:
+        """Recent raid events with team-level turnout (present / roster)."""
+        cur = await self.conn.execute(
+            "SELECT e.id, e.started_at, e.instance, e.difficulty, "
+            "COUNT(a.id) AS roster, "
+            "SUM(CASE WHEN lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
+            "  AS present "
+            "FROM raid_events e LEFT JOIN attendance a ON a.raid_event_id = e.id "
+            "GROUP BY e.id "
+            "ORDER BY substr(e.started_at, 1, 10) DESC, e.id DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def attendance_by_character(self, *, recent_window: int = 4) -> list[dict]:
+        """Per-character present/scheduled overall, plus over the most recent
+        ``recent_window`` events (so the view can show a slipping/steady trend)."""
+        recent = (
+            "SELECT id FROM raid_events "
+            "ORDER BY substr(started_at, 1, 10) DESC, id DESC LIMIT ?"
+        )
+        cur = await self.conn.execute(
+            "SELECT MIN(a.character_name) AS name, "
+            "COUNT(*) AS scheduled, "
+            "SUM(CASE WHEN lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
+            "  AS present, "
+            f"SUM(CASE WHEN a.raid_event_id IN ({recent}) THEN 1 ELSE 0 END) "
+            "  AS recent_scheduled, "
+            f"SUM(CASE WHEN a.raid_event_id IN ({recent}) "
+            "  AND lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
+            "  AS recent_present "
+            "FROM attendance a GROUP BY lower(a.character_name)",
+            (recent_window, recent_window),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def loot_breakdown(self) -> dict[str, list[dict]]:
+        """Award counts grouped by slot, difficulty and response."""
+        out: dict[str, list[dict]] = {}
+        for field in ("slot", "difficulty", "response"):
+            cur = await self.conn.execute(
+                f"SELECT COALESCE({field}, '?') AS key, COUNT(*) AS count "
+                f"FROM loot_history GROUP BY {field} ORDER BY count DESC"
+            )
+            out[field] = [dict(r) for r in await cur.fetchall()]
+        return out
+
+    async def wishlist_contention(self, *, limit: int = 40) -> list[dict]:
+        """Per item: how many characters want it, how many call it BiS, how many
+        already have it, and the average upgrade %. Most-contested first."""
+        cur = await self.conn.execute(
+            "SELECT item_id, MIN(item_name) AS item_name, MIN(slot) AS slot, "
+            "COUNT(DISTINCT lower(character_name)) AS wishlisters, "
+            "SUM(CASE WHEN is_bis THEN 1 ELSE 0 END) AS bis, "
+            "SUM(CASE WHEN obtained THEN 1 ELSE 0 END) AS obtained, "
+            "AVG(upgrade_pct) AS avg_upgrade "
+            "FROM wishlist_items GROUP BY item_id "
+            "ORDER BY wishlisters DESC, avg_upgrade DESC LIMIT ?",
+            (limit,),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def wishlist_coverage(self) -> list[dict]:
+        """Per character: obtained vs total wishlisted items (BiS completion)."""
+        cur = await self.conn.execute(
+            "SELECT MIN(character_name) AS name, COUNT(*) AS total, "
+            "SUM(CASE WHEN obtained THEN 1 ELSE 0 END) AS obtained "
+            "FROM wishlist_items GROUP BY lower(character_name)"
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def lead_funnel(self) -> dict[str, dict[str, int]]:
+        """Lead counts grouped by funnel state, by source and by class."""
+        out: dict[str, dict[str, int]] = {}
+        for label, field in (("by_state", "state"), ("by_source", "source"),
+                             ("by_class", "class_name")):
+            cur = await self.conn.execute(
+                f"SELECT COALESCE({field}, '?') AS key, COUNT(*) AS count "
+                f"FROM scout_leads GROUP BY {field} ORDER BY count DESC"
+            )
+            out[label] = {r["key"]: r["count"] for r in await cur.fetchall()}
+        return out
+
     # -- snapshots -----------------------------------------------------------
 
     async def add_snapshot(self, snapshot: dict) -> int:

@@ -826,3 +826,120 @@ async def members_admin(db: Database, config: Config, *, q: str | None = None) -
             }
         )
     return {"members": rows, "query": q or ""}
+
+
+# --- Deeper analytics (roll-ups that enrich Raid / Loot / Recruitment) -------
+
+ATTENDANCE_TREND_DELTA = 10.0  # pct swing (recent vs overall) to call a trend
+
+
+async def attendance_report(
+    db: Database, config: Config, *, recent_window: int = 4, limit: int = 12
+) -> dict:
+    """Per-raider attendance + reliability trend, plus recent raid turnout.
+
+    Reuses the same "present = not absent" rule as ``db.attendance_stats``. A
+    raider whose recent window is >=10pts below their overall rate is flagged
+    ``down`` (slipping); >=10pts above is ``up``.
+    """
+    raids = await db.recent_raids(limit=limit)
+    characters = []
+    for r in await db.attendance_by_character(recent_window=recent_window):
+        pct = round(100.0 * r["present"] / r["scheduled"], 1) if r["scheduled"] else None
+        rpct = (
+            round(100.0 * r["recent_present"] / r["recent_scheduled"], 1)
+            if r["recent_scheduled"]
+            else None
+        )
+        trend = None
+        if pct is not None and rpct is not None:
+            delta = rpct - pct
+            trend = (
+                "down" if delta <= -ATTENDANCE_TREND_DELTA
+                else "up" if delta >= ATTENDANCE_TREND_DELTA
+                else "steady"
+            )
+        characters.append({**r, "pct": pct, "recent_pct": rpct, "trend": trend})
+    # Worst attendance first — that is the GM's triage order.
+    characters.sort(key=lambda c: (c["pct"] if c["pct"] is not None else 999))
+    # Oldest -> newest turnout so the JS can sparkline it.
+    turnout = [
+        {"started_at": e["started_at"], "present": e["present"], "roster": e["roster"]}
+        for e in reversed(raids)
+    ]
+    return {
+        "raids": raids,            # newest first
+        "characters": characters,  # worst first
+        "turnout": turnout,
+        "event_count": len(raids),
+    }
+
+
+async def loot_analytics(
+    db: Database, config: Config, *, now: datetime | None = None
+) -> dict:
+    """Loot equity + drought + distribution, built on the loot fairness view."""
+    now = _now(now)
+    overview = await loot_overview(db, config, now=now)
+    fairness = overview["fairness"]
+    won = [f["items_won"] for f in fairness]
+    avg = round(sum(won) / len(won), 2) if won else 0.0
+    drought = sorted(
+        (f for f in fairness if f.get("days_since_last_loot") is not None),
+        key=lambda f: f["days_since_last_loot"],
+        reverse=True,
+    )[:15]
+    # Players who have never received loot (and have attended at least one raid).
+    never = [f["name"] for f in fairness if f["items_won"] == 0 and f["raids_attended"]]
+    return {
+        "total_awards": overview["total_awards"],
+        "avg_per_player": avg,
+        "drought": drought,            # longest since last drop first
+        "never_won": never,
+        "fairness": fairness,          # full table, most won first
+        "breakdown": await db.loot_breakdown(),  # by slot / difficulty / response
+    }
+
+
+async def wishlist_analytics(db: Database, config: Config) -> dict:
+    """Most-contested wishlist drops + per-raider BiS completion."""
+    contention = [
+        {
+            **c,
+            "avg_upgrade": (
+                round(c["avg_upgrade"], 1) if c["avg_upgrade"] is not None else None
+            ),
+            "open": c["wishlisters"] - c["obtained"],
+        }
+        for c in await db.wishlist_contention(limit=40)
+    ]
+    coverage = []
+    for r in await db.wishlist_coverage():
+        pct = round(100.0 * r["obtained"] / r["total"], 1) if r["total"] else None
+        coverage.append({**r, "pct": pct})
+    coverage.sort(key=lambda c: (c["pct"] if c["pct"] is not None else -1.0))
+    return {"contention": contention, "coverage": coverage}
+
+
+async def recruitment_funnel(db: Database, config: Config) -> dict:
+    """Lead pipeline as a funnel: stage counts, close rate, source/class quality."""
+    from .recruit import LEAD_STATES
+
+    funnel = await db.lead_funnel()
+    by_state = funnel["by_state"]
+    joined = by_state.get("joined", 0)
+    passed = by_state.get("passed", 0)
+    active = sum(by_state.get(s, 0) for s in ("new", "contacted", "trialing"))
+    return {
+        "stages": [{"state": s, "count": by_state.get(s, 0)} for s in LEAD_STATES],
+        "total": sum(by_state.values()),
+        "active": active,
+        "joined": joined,
+        "passed": passed,
+        # Of the leads that reached a decision, how many we landed.
+        "close_rate": (
+            round(100.0 * joined / (joined + passed), 1) if (joined + passed) else None
+        ),
+        "by_source": funnel["by_source"],
+        "by_class": funnel["by_class"],
+    }

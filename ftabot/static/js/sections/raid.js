@@ -8,7 +8,12 @@ const TABS = [
   ['readiness', 'Readiness'],
   ['signups', 'Sign-ups'],
   ['composition', 'Composition'],
+  ['attendance', 'Attendance'],
 ];
+
+const TREND = { down: '<span class="bad">▼ slipping</span>',
+                up: '<span class="ok">▲ improving</span>',
+                steady: '<span class="muted">steady</span>' };
 
 function fmt(v) { return (v == null || v === '') ? '—' : v; }
 function pct(v) { return v == null ? '—' : `${Math.round(v)}%`; }
@@ -104,11 +109,35 @@ async function renderComposition(main) {
         + `<tbody>${rows}</tbody></table><div style="margin-top:.6rem">${missing}</div>`);
 }
 
+async function renderAttendance(main) {
+  const d = await api('/api/analytics/attendance');
+  if (!d) return;
+  if (!d.event_count) {
+    main.innerHTML = panel('Attendance',
+      '<p class="muted">No raid events recorded yet (attendance comes from WoW Audit).</p>');
+    return;
+  }
+  const raids = panel('Recent raids', table([
+    { label: 'Date', html: e => esc((e.started_at || '').slice(0, 10)) },
+    { label: 'Instance', html: e => esc([e.instance, e.difficulty].filter(Boolean).join(' · ')) },
+    { label: 'Present', num: true, html: e => `${e.present}/${e.roster}` },
+  ], d.raids));
+  const people = panel('Reliability (worst first)', table([
+    { label: 'Raider', html: c => `<a href="#roster/${encodeURIComponent(c.name)}">${esc(c.name)}</a>` },
+    { label: 'Attendance', num: true, html: c => pct(c.pct) },
+    { label: 'Present', num: true, html: c => `${c.present}/${c.scheduled}` },
+    { label: 'Recent', num: true, html: c => pct(c.recent_pct) },
+    { label: 'Trend', html: c => c.trend ? TREND[c.trend] : '<span class="muted">—</span>' },
+  ], d.characters));
+  main.innerHTML = raids + people;
+}
+
 export async function render(main, sub) {
   const active = TABS.some(([k]) => k === sub) ? sub : 'readiness';
   main.innerHTML = tabs('raid', TABS, active) + '<div id="raid-body" class="muted">Loading…</div>';
   const body = document.getElementById('raid-body');
   if (active === 'signups') await renderSignups(body);
   else if (active === 'composition') await renderComposition(body);
+  else if (active === 'attendance') await renderAttendance(body);
   else await renderReadiness(body);
 }

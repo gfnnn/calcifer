@@ -218,3 +218,73 @@ async def test_home_surfaces_raider_signals(db):
     assert "inactive_raiders" in kinds   # last_login is ancient
     assert "unprepped_raiders" in kinds  # missing_enchants=2
     assert "low_readiness" in kinds      # weak gear/parse/inactive
+
+
+# --- Deeper analytics view-models -------------------------------------------
+
+async def test_attendance_report_trend_and_order(db):
+    e1 = await db.add_raid_event(started_at="2026-05-01", instance="X", difficulty="Mythic")
+    e2 = await db.add_raid_event(started_at="2026-05-08", instance="X", difficulty="Mythic")
+    await db.add_attendance(e1, "Gm", status="present")
+    await db.add_attendance(e2, "Gm", status="present")
+    await db.add_attendance(e1, "Slacker", status="present")
+    await db.add_attendance(e2, "Slacker", status="absent")
+    r = await views.attendance_report(db, CFG, recent_window=1)
+    assert r["event_count"] == 2
+    chars = {c["name"]: c for c in r["characters"]}
+    assert chars["Gm"]["pct"] == 100.0
+    assert chars["Slacker"]["pct"] == 50.0
+    assert r["characters"][0]["name"] == "Slacker"          # worst first
+    assert chars["Slacker"]["trend"] == "down"              # recent (e2 absent) < overall
+    assert chars["Gm"]["trend"] == "steady"
+    assert [t["present"] for t in r["turnout"]] == [2, 1]   # oldest -> newest
+
+
+async def test_loot_analytics_breakdown_and_avg(db):
+    await db.upsert_synced(Member("Gm", role="TANK", class_name="Warrior"))
+    await db.upsert_synced(Member("Slacker", role="DPS", class_name="Mage"))
+    await db.add_loot([
+        LootEntry(character_name="Gm", item_id=1, item_name="A", slot="head",
+                  difficulty="Mythic", response="BiS", awarded_at="2026-05-01T00:00:00"),
+        LootEntry(character_name="Gm", item_id=2, item_name="B", slot="hands",
+                  difficulty="Heroic", response="Upgrade", awarded_at="2026-05-02T00:00:00"),
+    ])
+    r = await views.loot_analytics(db, CFG, now=NOW)
+    assert r["total_awards"] == 2
+    assert r["avg_per_player"] == 1.0                       # (2 + 0) / 2
+    by_slot = {x["key"]: x["count"] for x in r["breakdown"]["slot"]}
+    assert by_slot["head"] == 1 and by_slot["hands"] == 1
+    assert any(d["name"] == "Gm" for d in r["drought"])     # only one with loot
+
+
+async def test_wishlist_analytics_contention_and_coverage(db):
+    await db.replace_wishlist("Gm", [
+        WishlistItem(character_name="Gm", item_id=10, item_name="Sword", slot="weapon",
+                     difficulty="Mythic", upgrade_pct=12.0, is_bis=True, obtained=False),
+    ])
+    await db.replace_wishlist("Slacker", [
+        WishlistItem(character_name="Slacker", item_id=10, item_name="Sword", slot="weapon",
+                     difficulty="Mythic", upgrade_pct=8.0, is_bis=False, obtained=True),
+    ])
+    r = await views.wishlist_analytics(db, CFG)
+    c = {x["item_id"]: x for x in r["contention"]}[10]
+    assert c["wishlisters"] == 2 and c["bis"] == 1 and c["obtained"] == 1 and c["open"] == 1
+    assert c["avg_upgrade"] == 10.0
+    cov = {x["name"]: x for x in r["coverage"]}
+    assert cov["Gm"]["pct"] == 0.0 and cov["Slacker"]["pct"] == 100.0
+    assert r["coverage"][0]["name"] == "Gm"                 # worst coverage first
+
+
+async def test_recruitment_funnel_counts_and_close_rate(db):
+    for i, st in enumerate(["new", "contacted", "trialing", "joined", "passed", "passed"]):
+        lid = await db.upsert_lead({"name": f"L{i}", "realm": "r", "region": "eu",
+                                    "class_name": "Mage", "source": "wcl"})
+        if st != "new":
+            await db.set_lead_state(lid, st)
+    r = await views.recruitment_funnel(db, CFG)
+    counts = {s["state"]: s["count"] for s in r["stages"]}
+    assert counts == {"new": 1, "contacted": 1, "trialing": 1, "joined": 1, "passed": 2}
+    assert r["total"] == 6 and r["active"] == 3
+    assert r["joined"] == 1 and r["passed"] == 2
+    assert r["close_rate"] == 33.3                          # 1 / (1 + 2)
+    assert r["by_class"]["Mage"] == 6 and r["by_source"]["wcl"] == 6

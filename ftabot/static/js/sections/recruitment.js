@@ -2,7 +2,9 @@
 // from the inline _render_recruiting; all endpoints already exist and are gated.
 
 import { api, send } from '../api.js';
-import { panel, table, esc, tag, toast } from '../components.js';
+import { card, panel, table, bar, esc, tag, pill, toast, tabs } from '../components.js';
+
+const TABS = [['pipeline', 'Pipeline'], ['insights', 'Insights']];
 
 let DATA = {};
 let pollTimer = null;
@@ -79,7 +81,7 @@ async function poll() {
   const st = document.getElementById('capst');
   if (st) st.textContent = c.running ? 'Scouting…' : (c.last_summary || c.last_error || 'idle');
   if (c.running) pollTimer = setTimeout(poll, 2500);
-  else load(document.getElementById('app'));
+  else load(document.getElementById('rec-body'));
 }
 
 function wire(main) {
@@ -136,6 +138,40 @@ async function load(main) {
   wire(main);
 }
 
-export function render(main) {
-  load(main);
+function pillMap(obj) {
+  const entries = Object.entries(obj || {});
+  if (!entries.length) return '<span class="muted">—</span>';
+  return entries.sort((a, b) => b[1] - a[1]).map(([k, n]) => pill(`${esc(k)} ${n}`)).join(' ');
+}
+
+async function renderInsights(main) {
+  const d = await api('/api/analytics/funnel');
+  if (!d) return;
+  if (!d.total) {
+    main.innerHTML = panel('Funnel', '<p class="muted">No leads captured yet.</p>');
+    return;
+  }
+  const cards = '<div class="cards">'
+    + card('Total leads', d.total)
+    + card('Active', d.active)
+    + card('Joined', d.joined)
+    + card('Close rate', d.close_rate == null ? '—' : d.close_rate + '%')
+    + '</div>';
+  const max = Math.max(1, ...d.stages.map(s => s.count));
+  const rows = d.stages.map(s =>
+    `<tr><td>${esc(s.state)}</td><td>${bar(100 * s.count / max)}</td>`
+    + `<td class="num">${s.count}</td></tr>`).join('');
+  const funnel = panel('Pipeline stages', `<table>${rows}</table>`
+    + '<p class="muted">Close rate = joined / (joined + passed).</p>');
+  main.innerHTML = cards + funnel
+    + panel('By class', pillMap(d.by_class))
+    + panel('By source', pillMap(d.by_source));
+}
+
+export async function render(main, sub) {
+  const active = TABS.some(([k]) => k === sub) ? sub : 'pipeline';
+  main.innerHTML = tabs('recruitment', TABS, active) + '<div id="rec-body" class="muted">Loading…</div>';
+  const body = document.getElementById('rec-body');
+  if (active === 'insights') await renderInsights(body);
+  else load(body);
 }
