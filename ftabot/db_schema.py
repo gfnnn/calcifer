@@ -69,7 +69,10 @@ CREATE INDEX IF NOT EXISTS idx_members_discord  ON members (discord_id);
 CREATE INDEX IF NOT EXISTS idx_members_class     ON members (class_name);
 CREATE INDEX IF NOT EXISTS idx_members_mainid    ON members (main_character_id);
 CREATE INDEX IF NOT EXISTS idx_members_team       ON members (raid_team);
-CREATE INDEX IF NOT EXISTS idx_members_wa_team    ON members (wowaudit_team);
+-- NOTE: the index on the newer wowaudit_team column lives in migrations.py, not
+-- here. SCHEMA runs on every connect *before* migrations, so an index here on a
+-- column a migration only adds later would crash an existing DB ("no such
+-- column"). Index newly-migrated columns from a migration, never from SCHEMA.
 
 -- RCLootCouncil loot awards (via WoW Audit). De-duplicated on import.
 CREATE TABLE IF NOT EXISTS loot_history (
