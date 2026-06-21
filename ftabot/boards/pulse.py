@@ -31,7 +31,7 @@ def _fmt(value: float | None) -> str:
 class RosterPulseBoard(Board):
     board_type = PULSE_TYPE
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         members = await db.all_members()
         if not members:
             return None

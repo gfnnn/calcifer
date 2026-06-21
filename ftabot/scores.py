@@ -93,10 +93,11 @@ async def refresh_boards(
     real change). Returns how many boards were rendered. Safe to call after a
     score change so the board reflects it immediately. ``only_type`` narrows
     the nudge to one board type (the feed loop uses it for the News board)."""
-    from .boards import REGISTRY, BotBoardMessenger, refresh_board
+    from .boards import REGISTRY, BotBoardMessenger, guild_emoji_map, refresh_board
 
     gate = await effective_post_gate(db, config)
     messenger = BotBoardMessenger(bot)
+    emoji = guild_emoji_map(bot)
     rendered = 0
     for row in await db.boards(enabled_only=True):
         if only_type is not None and row["board_type"] != only_type:
@@ -105,7 +106,7 @@ async def refresh_boards(
         if board is None:
             continue
         try:
-            await refresh_board(db, config, board, row, messenger, gate)
+            await refresh_board(db, config, board, row, messenger, gate, emoji)
             rendered += 1
         except Exception as exc:  # noqa: BLE001 - one board never stops the rest
             log.warning("board refresh failed (%s): %s", row["board_type"], exc)

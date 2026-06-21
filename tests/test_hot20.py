@@ -41,6 +41,55 @@ async def test_renders_only_the_top_20_by_score(db):
     assert "Char05" not in desc and "Char01" not in desc
 
 
+async def test_custom_role_and_class_emoji_are_used_when_supplied(db):
+    # A healer + a tank so the (previously missing) role emoji both resolve.
+    await db.upsert_synced(
+        Member("Healy", class_name="Death Knight", role="HEALER", mythic_plus_score=3000.0)
+    )
+    await db.upsert_synced(
+        Member("Tanky", class_name="Mage", role="TANK", mythic_plus_score=2000.0)
+    )
+    emoji = {
+        "roleheal": "<:roleheal:1>",
+        "roletank": "<:roletank:2>",
+        "class_dk": "<:class_dk:3>",
+    }
+    payload = await Hot20Board().render(db, Config(), {}, emoji)
+    desc = payload.embed.description
+    assert "<:roleheal:1>" in desc and "<:roletank:2>" in desc  # healer no longer missing
+    assert "<:class_dk:3> Death Knight" in desc  # class crest carries the colour
+    # Mage has no uploaded crest -> bare name, no stray token.
+    assert "· Mage ·" in desc and ":class_mage:" not in desc
+
+
+async def test_movement_arrows_are_colour_coded(db):
+    await db.upsert_synced(Member("A", class_name="Mage", role="DPS", mythic_plus_score=3000.0))
+    await db.upsert_synced(Member("B", class_name="Mage", role="DPS", mythic_plus_score=2000.0))
+    board = Hot20Board()
+    await board.render(db, Config(), {})  # seed baseline: A #1, B #2
+
+    await db.upsert_synced(Member("B", class_name="Mage", role="DPS", mythic_plus_score=4000.0))
+    rows = [
+        ln for ln in (await board.render(db, Config(), {})).embed.description.splitlines()
+        if ln.startswith("`")
+    ]
+    assert "🟢▲" in next(ln for ln in rows if "**B**" in ln)  # climbed: green
+    assert "🔴▼" in next(ln for ln in rows if "**A**" in ln)  # slipped: red
+
+
+async def test_score_is_tagged_with_its_raiderio_colour_band(db):
+    await db.upsert_synced(  # legendary-tier score -> orange square
+        Member("Topscore", class_name="Mage", role="DPS", mythic_plus_score=4300.0)
+    )
+    await db.upsert_synced(  # modest score -> green square
+        Member("Lowscore", class_name="Mage", role="DPS", mythic_plus_score=1500.0)
+    )
+    desc = (await Hot20Board().render(db, Config(), {})).embed.description
+    rows = [ln for ln in desc.splitlines() if ln.startswith("`")]
+    assert "🟧 `4300`" in next(ln for ln in rows if "Topscore" in ln)
+    assert "🟩 `1500`" in next(ln for ln in rows if "Lowscore" in ln)
+
+
 async def test_no_scored_members_posts_nothing(db):
     await db.upsert_synced(Member("Unranked", mythic_plus_score=None))
     assert await Hot20Board().render(db, Config(), {}) is None

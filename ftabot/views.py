@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from . import metrics
+from . import brand, metrics
 from .config import Config
 from .db import Database
-from .models import Member
+from .models import Member, class_color
 from .wow_data import buff_coverage, missing_buffs
 
 
@@ -32,6 +32,31 @@ def _days_since(iso: str | None, now: datetime) -> float | None:
     return max(0.0, (now - dt).total_seconds() / 86400)
 
 
+def _hex(value: int | None) -> str | None:
+    """Format a colour int as a CSS ``#rrggbb`` string (the web can show real hex)."""
+    return f"#{value:06x}" if value is not None else None
+
+
+def member_colors(m: Member) -> dict:
+    """The class + M+ score colours (exact hex) for a member, for the dashboard.
+
+    The web can show real colour, so it paints the class name in its class colour
+    and the M+ score in its Raider.IO scale colour (Discord rows settle for the
+    bucketed emoji squares). ``None`` where the value is missing.
+    """
+    return {
+        "class_color": _hex(class_color(m.class_name)) if m.class_name else None,
+        "mythic_plus_color": (
+            _hex(brand.score_color(m.mythic_plus_score)) if m.mythic_plus_score else None
+        ),
+    }
+
+
+def member_row(m: Member) -> dict:
+    """A roster-list row: the full member dict plus its display colours."""
+    return {**m.to_dict(), **member_colors(m)}
+
+
 def _member_brief(m: Member) -> dict:
     return {
         "name": m.character_name,
@@ -45,6 +70,7 @@ def _member_brief(m: Member) -> dict:
         "wishlist_pct": m.wishlist_pct,
         "guild_rank": m.guild_rank,
         "raid_team": m.raid_team,
+        **member_colors(m),
     }
 
 
@@ -82,7 +108,7 @@ async def member_detail(
     alts = await db.alts_of(m.id) if m.id is not None else []
 
     return {
-        "member": m.to_dict(include_details=True),
+        "member": {**m.to_dict(include_details=True), **member_colors(m)},
         "active": metrics.is_active(m, window_days=config.activity_window_days, now=now),
         "readiness": {
             "score": readiness.score,

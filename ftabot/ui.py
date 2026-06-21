@@ -81,6 +81,7 @@ def member_embed(
     include_private: bool = False,
     rank_name: str | None = None,
     max_level: int = MAX_LEVEL,
+    emoji: dict[str, str] | None = None,
 ) -> discord.Embed:
     """A detailed card for a single character.
 
@@ -92,17 +93,21 @@ def member_embed(
     spec_class = " ".join(
         p for p in (member.active_spec, member.class_name) if p
     ) or "Unknown class"
+    # The class crest carries the class colour into the description (the accent
+    # bar already uses class_color); it's "" when no crest art is supplied.
+    crest = brand.class_icon(member.class_name, emoji)
     embed = discord.Embed(
         title=clip(member.display(), TITLE_LIMIT),
-        description=clip(spec_class, DESC_LIMIT),
+        description=clip(f"{crest} {spec_class}".strip(), DESC_LIMIT),
         color=class_color(member.class_name),
         url=member.profile_url or None,
     )
     if member.thumbnail_url:
         embed.set_thumbnail(url=member.thumbnail_url)
 
-    # Role as a glyph rather than the word (falls back to the word if no icon).
-    role_glyph = brand.icon((member.role or "").lower()) or member.role
+    # Role as a glyph rather than the word (custom :role*: emoji when uploaded,
+    # else the unicode shield/heart/swords; falls back to the word if neither).
+    role_glyph = brand.role_icon(member.role, emoji) or member.role
     _field(embed, "Role", role_glyph or "–")
     _field(embed, "Item Level", _fmt(member.item_level))
     # Level and M+ score share one slot: a sub-cap character is still levelling
@@ -142,18 +147,23 @@ def member_embed(
     return embed
 
 
-def member_line(member: Member, *, index: int | None = None) -> str:
+def member_line(
+    member: Member, *, index: int | None = None, emoji: dict[str, str] | None = None
+) -> str:
     """A compact one-line summary for roster/search listings."""
     prefix = f"`{index:>2}.` " if index is not None else ""
     score = _fmt(member.mythic_plus_score)
     ilvl = _fmt(member.item_level)
     spec = member.active_spec or ""
-    klass = member.class_name or "?"
-    descriptor = f"{spec} {klass}".strip()
+    # class_label prefixes the class with its colour crest when art is supplied,
+    # else the bare name ("?" when unknown).
+    descriptor = f"{spec} {brand.class_label(member.class_name, emoji)}".strip()
     return f"{prefix}**{member.character_name}** · {descriptor} · ilvl {ilvl} · M+ {score}"
 
 
-def me_card(members: list[Member], *, display_name: str) -> discord.Embed:
+def me_card(
+    members: list[Member], *, display_name: str, emoji: dict[str, str] | None = None
+) -> discord.Embed:
     """A personal card: a member's linked characters' ilvl / M+ / vault / wishlist.
 
     Mains lead, then alts by Mythic+ score. Pure and offline-testable; the cog
@@ -168,7 +178,8 @@ def me_card(members: list[Member], *, display_name: str) -> discord.Embed:
         color=class_color(lead.class_name) or brand.GUILD_EMBER,
     )
     for m in ordered[:10]:  # Discord caps fields; nobody needs more on a card
-        spec_class = " ".join(p for p in (m.active_spec, m.class_name) if p) or "Unknown"
+        klass = brand.class_label(m.class_name, emoji) if m.class_name else None
+        spec_class = " ".join(p for p in (m.active_spec, klass) if p) or "Unknown"
         bits = [spec_class, f"ilvl {_fmt(m.item_level)}", f"M+ {_fmt(m.mythic_plus_score)}"]
         vault = f"{m.vault_slots_filled}/9" if m.vault_slots_filled is not None else "–"
         bits.append(f"vault {vault}")
@@ -181,7 +192,12 @@ def me_card(members: list[Member], *, display_name: str) -> discord.Embed:
 
 
 def roster_embed(
-    members: list[Member], *, title: str, color: int, per_page: int = 25
+    members: list[Member],
+    *,
+    title: str,
+    color: int,
+    per_page: int = 25,
+    emoji: dict[str, str] | None = None,
 ) -> discord.Embed:
     """A listing embed; truncates to ``per_page`` with a count footer."""
     embed = discord.Embed(title=clip(title, TITLE_LIMIT), color=color)
@@ -189,7 +205,7 @@ def roster_embed(
     if not shown:
         embed.description = "No matching members."
         return embed
-    lines = [member_line(m, index=i + 1) for i, m in enumerate(shown)]
+    lines = [member_line(m, index=i + 1, emoji=emoji) for i, m in enumerate(shown)]
     embed.description = clip("\n".join(lines), DESC_LIMIT)
     if len(members) > per_page:
         embed.set_footer(text=f"Showing {per_page} of {len(members)} members.")

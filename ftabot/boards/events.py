@@ -45,7 +45,7 @@ def _event_line(event: dict) -> str:
 class WeeklyEventsBoard(Board):
     board_type = EVENTS_TYPE
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         within = float(board_config.get("within_days", _DEFAULT_WITHIN_DAYS))
         limit = int(board_config.get("limit", _DEFAULT_LIMIT))
         now_epoch = int(datetime.now(timezone.utc).timestamp())

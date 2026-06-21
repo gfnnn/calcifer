@@ -121,6 +121,110 @@ def class_emoji_name(class_name: str | None) -> str | None:
     return CLASS_EMOJI.get(class_name.title())
 
 
+# --- emoji rendering (the reusable bot-wide layer) --------------------------
+# A render takes an optional ``emoji`` map (custom-emoji ``name`` -> its
+# ``<:name:id>`` markup, built from the guild at the bot/board layer). When the
+# uploaded art is present these helpers return the custom emoji; otherwise they
+# fall back to the unicode glyph (roles) or to nothing (class crests, which have
+# no unicode equivalent). Pure: the map is injected, never looked up here.
+EmojiMap = dict[str, str]
+
+
+def _custom(name: str | None, emoji: EmojiMap | None) -> str | None:
+    return emoji.get(name) if (name and emoji) else None
+
+
+def role_icon(role: str | None, emoji: EmojiMap | None = None) -> str:
+    """The role glyph (``:roletank:``/``:roleheal:``/``:roledps:`` when uploaded,
+    else the unicode shield/heart/swords). ``role`` is matched case-insensitively."""
+    key = (role or "").lower()
+    return _custom(EMOJI_NAMES.get(key), emoji) or ICONS.get(key, "")
+
+
+def class_icon(class_name: str | None, emoji: EmojiMap | None = None) -> str:
+    """The class crest (``:class_*:``) markup, or ``""`` when none is uploaded.
+
+    The crest *is* the class colour made visible (Discord can't colour embed
+    text), so it carries the per-class identity on rows and cards.
+    """
+    return _custom(class_emoji_name(class_name), emoji) or ""
+
+
+def class_label(class_name: str | None, emoji: EmojiMap | None = None) -> str:
+    """A class name prefixed with its colour crest when available: the canonical
+    way to *post a class* so it always carries its colour. Falls back to the bare
+    name (no crest) when the art isn't uploaded or the class is unknown."""
+    name = class_name or "?"
+    crest = class_icon(class_name, emoji)
+    return f"{crest} {name}" if crest else name
+
+
+# Rank movement, emoji-first: a green dot for a climb, red for a slip (embed text
+# can't be coloured, so the colour rides on the dot beside the ▲/▼ and amount).
+RANK_UP = "🟢"
+RANK_DOWN = "🔴"
+
+
+def rank_move(delta: int) -> str:
+    """A coloured rank-change marker: ``🟢▲n`` up, ``🔴▼n`` down, ``""`` unchanged."""
+    if delta > 0:
+        return f"{RANK_UP}▲{delta}"
+    if delta < 0:
+        return f"{RANK_DOWN}▼{-delta}"
+    return ""
+
+
+# --- Mythic+ score colour scale (Raider.IO) ---------------------------------
+# Raider.IO's score ramp as (min_score, hex) bands, highest first. ``score_color``
+# returns the *exact* hex (use it where real colour is possible: the web
+# dashboard, an embed accent). Discord embed *text* can't be coloured, so
+# ``score_glyph`` buckets the same ramp into the nearest colour-square emoji for
+# leaderboard rows.
+SCORE_TIERS: tuple[tuple[int, int], ...] = (
+    (4275, 0xFF8000), (4120, 0xF9753F), (4000, 0xF16961), (3880, 0xE75E7F),
+    (3760, 0xDB529C), (3640, 0xCC47B9), (3520, 0xB83DD6), (3385, 0x9C3DED),
+    (3265, 0x7659E6), (3145, 0x3E6AE0), (3000, 0x3A7FCE), (2880, 0x5597B3),
+    (2760, 0x5FB198), (2640, 0x5DCA79), (2520, 0x4EE554), (2400, 0x1EFF00),
+    (2275, 0x43FF2A), (2150, 0x5AFF3F), (2025, 0x6CFF50), (1900, 0x7BFF5E),
+    (1775, 0x88FF6C), (1650, 0x94FF79), (1525, 0xA0FF85), (1400, 0xABFF91),
+    (1275, 0xB5FF9D), (1150, 0xBFFFA9), (1025, 0xC8FFB4), (900, 0xD1FFBF),
+    (775, 0xDAFFCB), (650, 0xE2FFD6), (525, 0xEAFFE2), (400, 0xF3FFED),
+    (275, 0xFAFFF8), (200, 0xFFFFFF),
+)
+
+
+def score_color(score: float | None) -> int:
+    """The Raider.IO scale colour (exact hex) for a Mythic+ score; white at the floor."""
+    value = score or 0
+    for threshold, hex_value in SCORE_TIERS:
+        if value >= threshold:
+            return hex_value
+    return 0xFFFFFF
+
+
+# The colour-square emoji per hue zone of the ramp (highest first). Discord
+# offers only a handful of square hues, so the continuous scale buckets to the
+# nearest: orange (legendary), purple (epic/pink), blue (rare), green
+# (uncommon); anything below lands on the white square.
+_SCORE_GLYPHS: tuple[tuple[int, str], ...] = (
+    (3880, "🟧"),
+    (3265, "🟪"),
+    (2900, "🟦"),
+    (1000, "🟩"),
+)
+
+
+def score_glyph(score: float | None) -> str:
+    """A colour-square emoji approximating the Raider.IO score colour, for embed
+    text (which can't be coloured per character)."""
+    value = score or 0
+    for threshold, glyph in _SCORE_GLYPHS:
+        if value >= threshold:
+            return glyph
+    return "⬜"
+
+
+
 # --- moods ------------------------------------------------------------------
 class Mood(str, Enum):
     """How Calcifer is feeling, expressed per-message via author icon + emoji."""

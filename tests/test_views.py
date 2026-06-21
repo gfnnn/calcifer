@@ -288,3 +288,20 @@ async def test_recruitment_funnel_counts_and_close_rate(db):
     assert r["joined"] == 1 and r["passed"] == 2
     assert r["close_rate"] == 33.3                          # 1 / (1 + 2)
     assert r["by_class"]["Mage"] == 6 and r["by_source"]["wcl"] == 6
+
+
+async def test_member_row_carries_class_and_score_colours(db):
+    from ftabot import brand
+    from ftabot.models import Member
+
+    await db.upsert_synced(
+        Member("Colourful", class_name="Druid", role="DPS", mythic_plus_score=4300.0)
+    )
+    m = await db.get_member("Colourful", "hellfire", "eu")
+    row = views.member_row(m)
+    assert row["class_color"] == "#ff7c0a"  # Druid orange
+    assert row["mythic_plus_color"] == f"#{brand.score_color(4300):06x}"
+    # a member with no score/class gets no colour (the JS then shows the default)
+    await db.upsert_synced(Member("Blank"))
+    blank = views.member_row(await db.get_member("Blank", "hellfire", "eu"))
+    assert blank["class_color"] is None and blank["mythic_plus_color"] is None

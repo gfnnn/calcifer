@@ -57,17 +57,13 @@ def weekly_reset_before(now: datetime, tz: tzinfo) -> datetime:
 
 
 def _movement(prev_rank: int | None, cur_rank: int) -> str:
-    """A rank-change marker with magnitude (▲7 / ▼3); NEW for entrants, blank
-    when unchanged. Naturally bounded: anyone outside last week's board is NEW,
-    not a giant number, so a re-entry never shows an absurd jump."""
+    """A rank-change marker with magnitude (🟢▲7 / 🔴▼3); NEW for entrants, blank
+    when unchanged. The colour dot reads green for a climb, red for a slip.
+    Naturally bounded: anyone outside last week's board is NEW, not a giant
+    number, so a re-entry never shows an absurd jump."""
     if prev_rank is None:
         return "NEW"
-    delta = prev_rank - cur_rank
-    if delta > 0:
-        return f"▲{delta}"
-    if delta < 0:
-        return f"▼{-delta}"
-    return ""
+    return brand.rank_move(prev_rank - cur_rank)
 
 
 def _score(value) -> str:
@@ -77,7 +73,7 @@ def _score(value) -> str:
 class Hot20Board(Board):
     board_type = HOT20_TYPE
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         members = await db.all_members(order_by="mythic_plus_score")
         ranked = [m for m in members if (m.mythic_plus_score or 0) > 0][:_TOP_N]
         if not ranked:
@@ -98,12 +94,13 @@ class Hot20Board(Board):
         lines: list[str] = []
         for i, member in enumerate(ranked, 1):
             move = _movement(baseline.get(_entity_key(member)), i)
-            glyph = brand.icon((member.role or "").lower()) or "•"
-            klass = member.class_name or "?"
+            glyph = brand.role_icon(member.role, emoji) or "•"
+            klass = brand.class_label(member.class_name, emoji)
+            tier = brand.score_glyph(member.mythic_plus_score)  # Raider.IO colour band
             suffix = f" {move}" if move else ""
             lines.append(
                 f"`{i:>2}` {glyph} **{member.character_name}** "
-                f"· {klass} · `{_score(member.mythic_plus_score)}`{suffix}"
+                f"· {klass} · {tier} `{_score(member.mythic_plus_score)}`{suffix}"
             )
 
         leader = ranked[0]
@@ -125,7 +122,7 @@ class Hot20Board(Board):
             header.append(
                 brand.sanitize(
                     f"📈 Flying up the ranks: **{mover.character_name}** "
-                    f"(▲{delta} this week)."
+                    f"({brand.rank_move(delta)} this week)."
                 )
             )
         signoff = brand.Voice(tone=config.persona_tone).line("board_signoff") or "Kept warm by Calcifer."

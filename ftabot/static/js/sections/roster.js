@@ -51,10 +51,15 @@ async function loadRows() {
   rows.innerHTML = table([
     { label: 'Name', html: m =>
       `<a href="#roster/${encodeURIComponent(m.character_name)}">${esc(m.character_name)}</a>` },
-    { label: 'Class / spec', html: m => esc([m.spec, m.class].filter(Boolean).join(' ')) },
+    { label: 'Class / spec', html: m => {
+      const label = esc([m.spec, m.class].filter(Boolean).join(' '));
+      return m.class_color ? `<span style="color:${esc(m.class_color)}">${label}</span>` : label;
+    } },
     { label: 'Role', key: 'role' },
     { label: 'ilvl', num: true, html: m => fmt(m.item_level) },
-    { label: 'M+', num: true, html: m => fmt(m.mythic_plus_score) },
+    { label: 'M+', num: true, html: m => m.mythic_plus_color
+      ? `<span style="color:${esc(m.mythic_plus_color)};font-weight:600">${fmt(m.mythic_plus_score)}</span>`
+      : fmt(m.mythic_plus_score) },
     { label: 'Parse', num: true, html: m => fmt(m.best_parse_avg) },
     { label: 'Team', html: m => m.raid_team ? pill(m.raid_team) : '<span class="muted">—</span>' },
   ], members);
@@ -112,7 +117,9 @@ function identityHeader(d) {
 function vitals(m) {
   return '<div class="cards">'
     + card('Item level', fmt(m.item_level))
-    + card('M+ score', fmt(m.mythic_plus_score))
+    + card('M+ score', m.mythic_plus_color
+      ? `<span style="color:${esc(m.mythic_plus_color)}">${fmt(m.mythic_plus_score)}</span>`
+      : fmt(m.mythic_plus_score))
     + card('Parse', fmt(m.best_parse_avg))
     + card('Vault', m.vault_slots_filled == null ? '—' : `${m.vault_slots_filled}/9`)
     + '</div>';

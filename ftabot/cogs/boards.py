@@ -13,7 +13,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ..boards import BOARD_NAMES, REGISTRY, BotBoardMessenger, refresh_board
+from ..boards import (
+    BOARD_NAMES,
+    REGISTRY,
+    BotBoardMessenger,
+    guild_emoji_map,
+    refresh_board,
+)
 from ..posting import PostingMode
 from ..runtime_settings import effective_post_gate
 from ._guards import require_gm_or_discord_admin
@@ -115,7 +121,8 @@ class BoardsCog(commands.Cog):
         gate = await effective_post_gate(self.bot.db, self.bot.config)
         await interaction.response.defer(ephemeral=True)
         action = await refresh_board(
-            self.bot.db, self.bot.config, board, row, BotBoardMessenger(self.bot), gate
+            self.bot.db, self.bot.config, board, row,
+            BotBoardMessenger(self.bot), gate, guild_emoji_map(self.bot),
         )
 
         if action == "blocked":

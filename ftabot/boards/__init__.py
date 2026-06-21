@@ -23,7 +23,7 @@ from .base import (
     register,
 )
 from .engine import BoardMessenger, refresh_board
-from .messenger import BotBoardMessenger
+from .messenger import BotBoardMessenger, guild_emoji_map
 
 __all__ = [
     "REGISTRY",
@@ -34,5 +34,6 @@ __all__ = [
     "register",
     "BoardMessenger",
     "BotBoardMessenger",
+    "guild_emoji_map",
     "refresh_board",
 ]

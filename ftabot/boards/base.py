@@ -36,9 +36,18 @@ class Board(abc.ABC):
 
     @abc.abstractmethod
     async def render(
-        self, db: "Database", config: "Config", board_config: dict
+        self,
+        db: "Database",
+        config: "Config",
+        board_config: dict,
+        emoji: dict[str, str] | None = None,
     ) -> "BoardPayload | None":
-        """Build the payload from current data, or ``None`` to post nothing."""
+        """Build the payload from current data, or ``None`` to post nothing.
+
+        ``emoji`` is the guild's custom-emoji ``name`` -> markup map (see
+        ``boards.guild_emoji_map``); ``None`` (the default, e.g. in tests) makes
+        a renderer fall back to its unicode glyphs.
+        """
         raise NotImplementedError
 
 

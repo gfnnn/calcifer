@@ -10,7 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import recruit, scout
-from ..boards import REGISTRY
+from ..boards import REGISTRY, guild_emoji_map
 from ..boards.recruitment import RECRUITMENT_TYPE, ROLE_ORDER
 from ..models import class_color
 from ..scout import ScoutUnavailable
@@ -229,7 +229,9 @@ class RecruitCog(commands.Cog):
         # slow DB can't blow the 3-second interaction deadline.
         await interaction.response.defer(ephemeral=True)
         board = REGISTRY[RECRUITMENT_TYPE]
-        payload = await board.render(self.bot.db, self.cfg, {})
+        payload = await board.render(
+            self.bot.db, self.cfg, {}, guild_emoji_map(self.bot)
+        )
         if payload is None or payload.embed is None:
             await interaction.followup.send("Nothing to preview yet.", ephemeral=True)
             return
