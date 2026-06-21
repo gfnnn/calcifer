@@ -85,6 +85,22 @@ async def _m5_settings_table(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _m6_wowaudit_team(conn: aiosqlite.Connection) -> None:
+    """Add the wowaudit_team column and its index to existing databases.
+
+    ``_m1`` adds the ``migrate=True`` members columns, but it runs only once and
+    on an established prod DB it already ran *before* wowaudit_team existed — so a
+    new migrate-column needs its own migration to reach that DB. Add the column
+    here (idempotent) and its index. The index lives here, not in SCHEMA, because
+    SCHEMA runs before migrations: an index in SCHEMA on a not-yet-migrated column
+    crashes startup with "no such column".
+    """
+    await _add_column_if_missing(conn, "members", "wowaudit_team", "TEXT")
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_members_wa_team ON members (wowaudit_team)"
+    )
+
+
 # Ordered, append-only. Never renumber or reuse a version.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "members: forward-only API columns", _m1_member_columns),
@@ -92,6 +108,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "boards: posted_channel_id + backfill", _m3_boards_posted_channel),
     Migration(4, "feed_outbox: visibility-timeout columns", _m4_outbox_visibility),
     Migration(5, "settings: runtime override table", _m5_settings_table),
+    Migration(6, "members: wowaudit_team column + index", _m6_wowaudit_team),
 )
 
 
