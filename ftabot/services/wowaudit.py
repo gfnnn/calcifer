@@ -399,14 +399,43 @@ def _iter_encounter_items(wishlist: Any):
                         yield boss, item
 
 
+# WoW Audit reports the upgrade as either a numeric Droptimizer percentage or,
+# when no sim numbers exist, an ordinal word grade. Map the words onto a 0-100
+# scale so the wishlist/loot views can sort by upgrade either way.
+_GRADE_SCALE = {"huge": 100.0, "big": 60.0, "small": 30.0, "tiny": 10.0}
+
+
+def _grade_value(value: Any) -> float | None:
+    """Coerce a numeric percentage or a word grade ("huge"/"big"/…) to a float."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        return _GRADE_SCALE.get(value.strip().lower())
+    return None
+
+
 def _wishlist_upgrade(item: dict[str, Any]) -> float | None:
-    """Best numeric upgrade % for an item (score_by_spec / wishes), if any."""
+    """Best upgrade value for an item (score_by_spec / wishes), if any.
+
+    Prefers a real numeric percentage, then falls back to the word grade so an
+    item still gets a sortable priority when WoW Audit ships grades not numbers.
+    """
     for sc in (item.get("score_by_spec") or {}).values():
-        if isinstance(sc, dict) and isinstance(sc.get("percentage"), (int, float)):
-            return float(sc["percentage"])
+        if isinstance(sc, dict):
+            val = _grade_value(sc.get("percentage"))
+            if val is None:
+                val = _grade_value(sc.get("score"))
+            if val is not None:
+                return val
     for wish in item.get("wishes") or []:
-        if isinstance(wish, dict) and isinstance(wish.get("percentage"), (int, float)):
-            return float(wish["percentage"])
+        if isinstance(wish, dict):
+            val = _grade_value(wish.get("percentage"))
+            if val is None:
+                val = _grade_value(wish.get("upgrade"))
+            if val is not None:
+                return val
     return None
 
 

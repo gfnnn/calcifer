@@ -99,7 +99,7 @@ class MembersCog(commands.Cog):
     @app_commands.command(name="me", description="Your linked characters at a glance.")
     async def me(self, interaction: discord.Interaction) -> None:
         members = await self.bot.db.search_members(discord_id=str(interaction.user.id))
-        team = [m for m in members if m.raid_team]
+        team = [m for m in members if m.effective_team]
         if not team:
             await interaction.response.send_message(
                 "No team characters are linked to you yet. `/me` is for the raid "

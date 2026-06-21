@@ -171,6 +171,68 @@ def test_parse_wishlists_real_shape():
     assert w.is_bis is True  # "huge" score -> flagged
 
 
+def test_parse_wishlists_word_grade_scores():
+    # WoW Audit often ships an ordinal word grade ("huge"/"big"/…) instead of a
+    # numeric percentage; the parser must still produce a sortable upgrade_pct.
+    data = {
+        "characters": [
+            {
+                "name": "Gradey",
+                "realm": "Hellfire",
+                "instances": [
+                    {
+                        "name": "The Voidspire",
+                        "difficulties": [
+                            {
+                                "difficulty": "mythic",
+                                "wishlist": {
+                                    "encounters": [
+                                        {
+                                            "name": "Vorasius",
+                                            "items": [
+                                                {
+                                                    "name": "Heart of Ancient Hunger",
+                                                    "id": 249342,
+                                                    "slot": "trinket",
+                                                    "score_by_spec": {
+                                                        "Fury": {
+                                                            "score": "huge",
+                                                            "percentage": "huge",
+                                                        }
+                                                    },
+                                                    "wishes": [],
+                                                },
+                                                {
+                                                    "name": "Light Company Guidon",
+                                                    "id": 249344,
+                                                    "slot": "trinket",
+                                                    "score_by_spec": {
+                                                        "Fury": {
+                                                            "score": "small",
+                                                            "percentage": "small",
+                                                        }
+                                                    },
+                                                    "wishes": [],
+                                                },
+                                            ],
+                                        }
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    items = parse_wishlists(data, "hellfire", "eu")
+    by_name = {w.item_name: w for w in items}
+    assert by_name["Heart of Ancient Hunger"].upgrade_pct == 100.0
+    assert by_name["Heart of Ancient Hunger"].is_bis is True
+    assert by_name["Light Company Guidon"].upgrade_pct == 30.0
+    assert by_name["Light Company Guidon"].is_bis is False
+
+
 def test_parse_wishlists_empty():
     assert parse_wishlists({"characters": []}, "hellfire", "eu") == []
     assert parse_wishlists({}, "hellfire", "eu") == []

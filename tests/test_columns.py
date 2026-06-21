@@ -50,7 +50,7 @@ def test_sync_columns_derived_exactly():
         "guild_rank", "item_level", "average_item_level", "mythic_plus_score",
         "raid_progression", "best_parse_avg", "last_login", "missing_enchants",
         "missing_gems", "vault_slots_filled", "wishlist_pct", "thumbnail_url",
-        "profile_url", "source", "blizzard_id",
+        "profile_url", "source", "blizzard_id", "wowaudit_team",
     )
 
 
@@ -67,6 +67,7 @@ def test_migration_columns_derived_exactly():
         "details_json": "TEXT", "last_login": "TEXT", "missing_enchants": "INTEGER",
         "missing_gems": "INTEGER", "vault_slots_filled": "INTEGER",
         "wishlist_pct": "REAL", "raid_team": "TEXT", "officer_role": "TEXT",
+        "wowaudit_team": "TEXT",
     }
 
 

@@ -121,7 +121,7 @@ class ReportsCog(commands.Cog):
             target = await self.bot.db.get_member(
                 player, self.cfg.guild_realm, self.cfg.guild_region
             )
-            if target is None or not target.raid_team:
+            if target is None or not target.effective_team:
                 await interaction.followup.send(
                     f"**{player}** isn't on the team roster.", ephemeral=True
                 )
