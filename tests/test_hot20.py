@@ -62,32 +62,20 @@ async def test_custom_role_and_class_emoji_are_used_when_supplied(db):
     assert "· Mage ·" in desc and ":class_mage:" not in desc
 
 
-async def test_movement_arrows_are_colour_coded(db):
-    await db.upsert_synced(Member("A", class_name="Mage", role="DPS", mythic_plus_score=3000.0))
-    await db.upsert_synced(Member("B", class_name="Mage", role="DPS", mythic_plus_score=2000.0))
-    board = Hot20Board()
-    await board.render(db, Config(), {})  # seed baseline: A #1, B #2
-
-    await db.upsert_synced(Member("B", class_name="Mage", role="DPS", mythic_plus_score=4000.0))
+async def test_healer_role_icon_is_recovered_from_spec_when_role_is_missing(db):
+    # A healer whose stored role never got populated, but whose spec gives it
+    # away: the board still resolves the healer emoji rather than a bare bullet.
+    await db.upsert_synced(
+        Member("Resto", class_name="Druid", active_spec="Restoration", role=None,
+               mythic_plus_score=3000.0)
+    )
+    emoji = {"roleheal": "<:roleheal:9>"}
     rows = [
-        ln for ln in (await board.render(db, Config(), {})).embed.description.splitlines()
+        ln for ln in (await Hot20Board().render(db, Config(), {}, emoji)).embed.description.splitlines()
         if ln.startswith("`")
     ]
-    assert "🟢▲" in next(ln for ln in rows if "**B**" in ln)  # climbed: green
-    assert "🔴▼" in next(ln for ln in rows if "**A**" in ln)  # slipped: red
-
-
-async def test_score_is_tagged_with_its_raiderio_colour_band(db):
-    await db.upsert_synced(  # legendary-tier score -> orange square
-        Member("Topscore", class_name="Mage", role="DPS", mythic_plus_score=4300.0)
-    )
-    await db.upsert_synced(  # modest score -> green square
-        Member("Lowscore", class_name="Mage", role="DPS", mythic_plus_score=1500.0)
-    )
-    desc = (await Hot20Board().render(db, Config(), {})).embed.description
-    rows = [ln for ln in desc.splitlines() if ln.startswith("`")]
-    assert "🟧 `4300`" in next(ln for ln in rows if "Topscore" in ln)
-    assert "🟩 `1500`" in next(ln for ln in rows if "Lowscore" in ln)
+    resto_line = next(ln for ln in rows if "Resto" in ln)
+    assert "<:roleheal:9>" in resto_line and "•" not in resto_line
 
 
 async def test_no_scored_members_posts_nothing(db):

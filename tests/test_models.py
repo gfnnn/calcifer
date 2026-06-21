@@ -65,3 +65,29 @@ def test_wishlist_dedup_key_lowercases_name_with_id_and_difficulty():
     assert item.dedup_key == ("emberlyn", 212396, "Mythic")
     bare = WishlistItem("Emberlyn")  # no id/difficulty supplied
     assert bare.dedup_key == ("emberlyn", None, None)
+
+
+# --- role inference (recovers a missing/garbled role for the icon) ----------
+
+
+def test_role_from_spec_classifies_healer_tank_dps():
+    from ftabot.models import role_from_spec
+
+    assert role_from_spec("Restoration") == "HEALER"  # Druid/Shaman
+    assert role_from_spec("mistweaver") == "HEALER"   # case-insensitive
+    assert role_from_spec("Protection") == "TANK"     # Pal/Warrior
+    assert role_from_spec("Blood") == "TANK"
+    assert role_from_spec("Frost") == "DPS"           # anything else is DPS
+    assert role_from_spec(None) is None
+    assert role_from_spec("") is None
+
+
+def test_effective_role_prefers_a_known_role_then_aliases_then_spec():
+    from ftabot.models import effective_role
+
+    assert effective_role("HEALER", "Frost") == "HEALER"   # explicit wins
+    assert effective_role("Heal", None) == "HEALER"        # WoW Audit spelling
+    assert effective_role("Melee", None) == "DPS"          # WoW Audit DPS bucket
+    assert effective_role(None, "Holy") == "HEALER"        # inferred from spec
+    assert effective_role("", "Guardian") == "TANK"
+    assert effective_role(None, None) is None
