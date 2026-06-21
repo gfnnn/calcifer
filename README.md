@@ -247,13 +247,8 @@ ever sees it, and a deploy can never surprise the server. Full workflow in
 
 | Route | Description |
 | --- | --- |
-| `GET /` | Roster/search HTML page. |
-| `GET /member/{name}` | **Character profile** — readiness, prep, wishlist, loot, attendance. |
-| `GET /gm` | **GM dashboard** — health score, officer corps, composition, buffs. |
-| `GET /raid` | **Raid Leader** — readiness board (`?team=` to filter). |
-| `GET /loot` | **Loot** — fairness table + recent awards. |
-| `GET /content` | **Content** — edit the sticky pages' Discord markdown (one box per message); unlock with `SYNC_TOKEN`. |
-| `GET /admin` | **Sync** — a "Sync now" button; unlock with `SYNC_TOKEN` (stored in an http-only cookie). |
+| `GET /` | Redirects to `/app`. |
+| `GET /app` | **The dashboard** — a single-page app with Home, Roster (incl. character profiles), Raid, Loot, Recruitment, Comms (boards/feeds/sticky-page copy), and Settings (incl. **Sync now**) sections. Every JSON API it calls is gated by `SYNC_TOKEN`; the first locked call shows an unlock overlay that stores the token in an http-only cookie. |
 | `POST /api/sync` | Trigger a sync (`X-Sync-Token` header, unlock cookie, or `?token=`). |
 | `GET /api/sync/status` | Whether a sync is running + the last result. |
 | `GET /api/trends` | Snapshot history series + deltas JSON (`?limit=`). |
