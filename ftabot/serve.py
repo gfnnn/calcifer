@@ -124,7 +124,7 @@ async def _feed_loop(config: Config, bot, sources) -> None:
 
 async def _board_loop(config: Config, bot) -> None:
     """Re-render the living boards (and placed sticky pages) on an interval."""
-    from .boards import REGISTRY, BotBoardMessenger, refresh_board
+    from .boards import REGISTRY, BotBoardMessenger, guild_emoji_map, refresh_board
     from .pages import PAGES, refresh_page
 
     await bot.wait_until_ready()
@@ -137,12 +137,13 @@ async def _board_loop(config: Config, bot) -> None:
             async with Database(config.database_path) as db:
                 # Resolved each tick so a dashboard posting-mode change is honoured.
                 gate = await effective_post_gate(db, config)
+                emoji = guild_emoji_map(bot)  # re-read so new uploads are picked up
                 for row in await db.boards(enabled_only=True):
                     board = REGISTRY.get(row["board_type"])
                     if board is None:
                         continue
                     try:
-                        await refresh_board(db, config, board, row, messenger, gate)
+                        await refresh_board(db, config, board, row, messenger, gate, emoji)
                     except Exception as exc:  # noqa: BLE001 - one board never kills the loop
                         log.warning("board %s failed: %s", row["board_type"], exc)
                     await asyncio.sleep(1)  # stagger edits across channels

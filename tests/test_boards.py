@@ -47,7 +47,7 @@ class _FakeBoard(Board):
     def __init__(self, payload: BoardPayload | None):
         self.payload = payload
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         return self.payload
 
 
@@ -301,8 +301,8 @@ async def test_board_render_is_abstract():
     class _Bare(Board):
         board_type = "bare"
 
-        async def render(self, db, config, board_config):
-            return await super().render(db, config, board_config)
+        async def render(self, db, config, board_config, emoji=None):
+            return await super().render(db, config, board_config, emoji)
 
     with pytest.raises(NotImplementedError):
         await _Bare().render(None, None, {})

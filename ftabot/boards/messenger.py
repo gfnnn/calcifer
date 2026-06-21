@@ -10,6 +10,17 @@ from __future__ import annotations
 import discord
 
 
+def guild_emoji_map(bot) -> dict[str, str]:
+    """Map custom-emoji ``name`` -> its ``<:name:id>`` markup from the bot's guilds.
+
+    Renderers reference emoji by brand key and resolve through this so they can
+    prefer the uploaded ``:roleheal:``/``:class_*:`` art (with a unicode fallback
+    when a name isn't uploaded). Defensive: returns ``{}`` before the cache warms
+    or off a bot with no emoji, so a render never depends on it being present.
+    """
+    return {emoji.name: str(emoji) for emoji in getattr(bot, "emojis", None) or []}
+
+
 class BotBoardMessenger:
     """Implements the engine's ``BoardMessenger`` protocol over a live bot."""
 

@@ -371,7 +371,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         q: str | None = None,
     ) -> JSONResponse:
         members = await _query_members(db, sort=sort, wow_class=wow_class, role=role, q=q)
-        return JSONResponse([m.to_dict() for m in members])
+        return JSONResponse([views.member_row(m) for m in members])
 
     @app.get("/api/members/{name}/detail", dependencies=gated)
     async def api_member_detail(name: str, realm: str | None = None) -> JSONResponse:
@@ -600,7 +600,12 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     async def _refresh_board_now(board_id: int) -> str:
         """Render one board now via the in-process bot; 'queued' when standalone."""
-        from .boards import REGISTRY, BotBoardMessenger, refresh_board
+        from .boards import (
+            REGISTRY,
+            BotBoardMessenger,
+            guild_emoji_map,
+            refresh_board,
+        )
 
         row = await db.get_board(board_id)
         if row is None:
@@ -611,7 +616,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             return "queued"
         gate = await runtime_settings.effective_post_gate(db, config)
         return await refresh_board(
-            db, config, board, row, BotBoardMessenger(bot), gate
+            db, config, board, row, BotBoardMessenger(bot), gate, guild_emoji_map(bot)
         )
 
     @app.get("/api/boards", dependencies=gated)

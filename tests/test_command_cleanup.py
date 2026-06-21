@@ -183,3 +183,29 @@ async def test_upcoming_raid_signups_none_when_nothing_scheduled():
     wa = _FakeWA({"raids": {"raids": [{"id": 1, "date": "2026-06-01"}]}})
     now = datetime(2026, 6, 10, tzinfo=timezone.utc)
     assert await wa.upcoming_raid_signups(now=now) is None
+
+
+# --- emoji-first class/role rendering on the member card --------------------
+
+_EMOJI = {"roleheal": "<:roleheal:1>", "class_mage": "<:class_mage:2>"}
+
+
+def test_member_embed_uses_custom_role_and_class_emoji():
+    m = Member("Healz", class_name="Mage", active_spec="Holy", role="HEALER",
+               mythic_plus_score=3000.0)
+    embed = member_embed(m, emoji=_EMOJI)
+    # the (previously missing) healer emoji + the class crest both render
+    assert "<:class_mage:2>" in embed.description
+    role_field = next(f for f in embed.fields if f.name == "Role")
+    assert role_field.value == "<:roleheal:1>"
+    # the accent bar stays the class colour
+    from ftabot.models import class_color
+
+    assert embed.color.value == class_color("Mage")
+
+
+def test_member_embed_without_emoji_is_unchanged():
+    m = Member("Plain", class_name="Mage", active_spec="Frost", role="DPS")
+    embed = member_embed(m)  # no map -> unicode fallback, no stray crest token
+    assert embed.description == "Frost Mage"
+    assert ":class_mage:" not in embed.description

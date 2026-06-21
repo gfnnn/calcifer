@@ -186,6 +186,23 @@ never rainbow ([vision §6](vision.md#6-the-design-system--look--voice)):
 Pick the colour with `brand.color_for(severity)` or a named style key (see
 [`publisher._STYLE_COLORS`](../ftabot/publisher.py)).
 
+**Posting a class or role.** Embed *text* can't be coloured (only ANSI code
+blocks can, and those can't render emoji), so a class carries its colour as its
+crest emoji, not as tinted text. Render through `brand.class_label(name, emoji)`
+(crest + name, e.g. `:class_dk: Death Knight`) and `brand.role_icon(role, emoji)`
+(`:roletank:`/`:roleheal:`/`:roledps:`) so every surface posts a class/role the
+same way; both fall back to the bare name / unicode glyph when the `emoji` map is
+absent. The `emoji` map is the guild's `name -> markup` lookup from
+`boards.guild_emoji_map(bot)`, threaded into `Board.render`. Rank movement uses
+`brand.rank_move(delta)` (`🟢▲n` up, `🔴▼n` down) for the same reason.
+
+**Mythic+ score colour (Raider.IO scale).** `brand.score_color(score)` returns
+the *exact* hex from Raider.IO's ramp (`brand.SCORE_TIERS`) for surfaces that can
+show real colour (the web dashboard, an embed accent). In embed text, use
+`brand.score_glyph(score)`, which buckets the same ramp to the nearest
+colour-square emoji (🟧 legendary, 🟪 epic, 🟦 rare, 🟩 uncommon, ⬜ low) — that's
+what the Hot 20 rows tag the score with.
+
 **Embed anatomy** (and the limit on each — see [§7](#7-message-limits)): title,
 url, description, colour, author (name + icon + url), up to 25 fields (each name
 + value, optionally `inline`), thumbnail, image, footer (text + icon),

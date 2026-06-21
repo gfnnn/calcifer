@@ -26,7 +26,7 @@ RECRUITMENT_TYPE = "recruitment"
 ROLE_ORDER = ("tank", "healer", "dps")
 
 
-def _slot_line(role: str, slot: dict) -> str | None:
+def _slot_line(role: str, slot: dict, emoji: dict[str, str] | None = None) -> str | None:
     """One open-slot row, or ``None`` when the role has no openings."""
     try:
         open_n = int(slot.get("open") or 0)
@@ -44,13 +44,13 @@ def _slot_line(role: str, slot: dict) -> str | None:
     note = brand.sanitize(str(slot.get("note") or "")).strip()
     if note:
         bits.append(note)
-    return f"{brand.icon(role)} **{role.upper()}**: {' · '.join(bits)}"
+    return f"{brand.role_icon(role, emoji)} **{role.upper()}**: {' · '.join(bits)}"
 
 
 class RecruitmentBoard(Board):
     board_type = RECRUITMENT_TYPE
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         data = board_config.get("content") or content.load("recruitment")
         state = await db.recruitment_state()
         tokens = SafeDict(await live_tokens(db, config))
@@ -58,7 +58,9 @@ class RecruitmentBoard(Board):
 
         slots = state.get("slots") or {}
         slot_lines = [
-            line for role in ROLE_ORDER if (line := _slot_line(role, slots.get(role) or {}))
+            line
+            for role in ROLE_ORDER
+            if (line := _slot_line(role, slots.get(role) or {}, emoji))
         ]
 
         about = brand.sanitize(

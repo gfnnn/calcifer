@@ -44,6 +44,7 @@ async def refresh_board(
     row: dict,
     messenger: BoardMessenger,
     gate: "PostGate",
+    emoji: dict[str, str] | None = None,
 ) -> str:
     """Render and reconcile one board. Returns the action taken (for logging).
 
@@ -56,7 +57,7 @@ async def refresh_board(
     if channel_id is None:
         return "blocked"  # guardrail: no confirmed destination, so post nothing
 
-    payload = await board.render(db, config, row.get("config") or {})
+    payload = await board.render(db, config, row.get("config") or {}, emoji)
     if payload is None:
         return "skip"
 

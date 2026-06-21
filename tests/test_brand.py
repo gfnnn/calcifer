@@ -116,3 +116,56 @@ def test_class_crest_emoji_cover_every_class_but_evoker():
     # every class except Evoker has a crest, and every key is a real class
     expected = {c for c in models.CLASSES if c != "Evoker"}
     assert set(brand.CLASS_EMOJI) == expected
+
+
+# --- emoji-first rendering helpers ------------------------------------------
+
+_EMOJI = {  # a fake guild map: name -> rendered markup
+    "roleheal": "<:roleheal:1>",
+    "roletank": "<:roletank:2>",
+    "roledps": "<:roledps:3>",
+    "class_dk": "<:class_dk:4>",
+}
+
+
+def test_role_icon_prefers_custom_emoji_then_unicode():
+    # the healer icon the board was missing now resolves to the uploaded emoji
+    assert brand.role_icon("HEALER", _EMOJI) == "<:roleheal:1>"
+    assert brand.role_icon("Tank", _EMOJI) == "<:roletank:2>"
+    # no map -> unicode fallback (keeps offline renders + tests working)
+    assert brand.role_icon("HEALER") == brand.ICONS["healer"]
+    assert brand.role_icon("dps", {}) == brand.ICONS["dps"]
+    assert brand.role_icon(None) == ""
+
+
+def test_class_label_carries_the_colour_crest_then_falls_back():
+    # crest present -> name is prefixed with the class-colour emoji
+    assert brand.class_label("Death Knight", _EMOJI) == "<:class_dk:4> Death Knight"
+    # crest not uploaded -> bare name (no unicode crest exists)
+    assert brand.class_label("Mage", _EMOJI) == "Mage"
+    assert brand.class_icon("Mage", _EMOJI) == ""
+    assert brand.class_label(None) == "?"
+
+
+def test_rank_move_colours_climbs_green_and_slips_red():
+    assert brand.rank_move(7) == "🟢▲7"
+    assert brand.rank_move(-3) == "🔴▼3"
+    assert brand.rank_move(0) == ""
+
+
+def test_score_color_maps_the_raiderio_scale_exactly():
+    assert brand.score_color(4300) == 0xFF8000  # top legendary orange
+    assert brand.score_color(4275) == 0xFF8000  # band is inclusive at its floor
+    assert brand.score_color(2400) == 0x1EFF00  # the uncommon-green anchor
+    assert brand.score_color(200) == 0xFFFFFF
+    assert brand.score_color(150) == 0xFFFFFF   # below the floor stays white
+    assert brand.score_color(None) == 0xFFFFFF
+
+
+def test_score_glyph_buckets_into_colour_squares():
+    assert brand.score_glyph(4300) == "🟧"  # legendary
+    assert brand.score_glyph(3400) == "🟪"  # epic/pink
+    assert brand.score_glyph(3000) == "🟦"  # rare blue
+    assert brand.score_glyph(2400) == "🟩"  # uncommon green
+    assert brand.score_glyph(500) == "⬜"   # low / common
+    assert brand.score_glyph(None) == "⬜"

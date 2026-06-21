@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import brand, views
+from ..boards import guild_emoji_map
 from ..models import DEFAULT_EMBED_COLOR
 from ..ui import clip, me_card, member_embed, roster_embed
 from ._guards import _is_admin, require_team_member
@@ -53,7 +54,10 @@ class MembersCog(commands.Cog):
         rank_name = identity.get("rank_name") if identity else None
         officer = _is_admin(interaction, self.cfg.admin_role_name)
         await interaction.response.send_message(
-            embed=member_embed(m, include_private=officer, rank_name=rank_name)
+            embed=member_embed(
+                m, include_private=officer, rank_name=rank_name,
+                emoji=guild_emoji_map(self.bot),
+            )
         )
 
     @app_commands.command(
@@ -104,7 +108,10 @@ class MembersCog(commands.Cog):
             )
             return
         await interaction.response.send_message(
-            embed=me_card(team, display_name=interaction.user.display_name),
+            embed=me_card(
+                team, display_name=interaction.user.display_name,
+                emoji=guild_emoji_map(self.bot),
+            ),
             ephemeral=True,
         )
 
@@ -125,6 +132,7 @@ class MembersCog(commands.Cog):
             members,
             title=f"Characters linked to {user.display_name}",
             color=DEFAULT_EMBED_COLOR,
+            emoji=guild_emoji_map(self.bot),
         )
         await interaction.response.send_message(embed=embed)
 

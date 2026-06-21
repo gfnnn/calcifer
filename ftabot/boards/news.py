@@ -80,7 +80,7 @@ def _dated_line(item: dict, *, glyph: str = "") -> str:
 class NewsHighlightsBoard(Board):
     board_type = NEWS_TYPE
 
-    async def render(self, db, config, board_config) -> BoardPayload | None:
+    async def render(self, db, config, board_config, emoji=None) -> BoardPayload | None:
         n_high = int(board_config.get("highlights", _DEFAULT_HIGHLIGHTS))
         n_low = int(board_config.get("latest", _DEFAULT_LATEST))
 

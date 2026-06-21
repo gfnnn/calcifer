@@ -78,7 +78,7 @@ async def test_refresh_boards_renders_known_skips_unknown(db, monkeypatch):
 
     rendered_rows = []
 
-    async def _fake_refresh(database, config, board, row, messenger, gate):
+    async def _fake_refresh(database, config, board, row, messenger, gate, emoji=None):
         rendered_rows.append(row["board_type"])
         return "unchanged"
 
@@ -96,7 +96,7 @@ async def test_refresh_boards_only_type_narrows_the_nudge(db, monkeypatch):
 
     rendered_rows = []
 
-    async def _fake_refresh(database, config, board, row, messenger, gate):
+    async def _fake_refresh(database, config, board, row, messenger, gate, emoji=None):
         rendered_rows.append(row["board_type"])
         return "unchanged"
 
@@ -111,7 +111,7 @@ async def test_refresh_boards_swallows_a_per_board_error(db, monkeypatch, caplog
 
     await db.add_board("hot20", "100")
 
-    async def _boom(database, config, board, row, messenger, gate):
+    async def _boom(database, config, board, row, messenger, gate, emoji=None):
         raise RuntimeError("discord edit failed")
 
     monkeypatch.setattr("ftabot.boards.refresh_board", _boom)
