@@ -122,6 +122,21 @@ def test_healthz(tmp_path):
         assert resp.json() == {"status": "ok", "members": 2}
 
 
+def test_static_and_shell_revalidate_so_deploys_are_visible(tmp_path):
+    # A redeploy must be picked up without a manual hard refresh: the shell and
+    # its assets carry Cache-Control: no-cache (revalidate), while StaticFiles
+    # still sends an ETag so an unchanged asset is a cheap 304, not a re-download.
+    with TestClient(_app(tmp_path)) as client:
+        css = client.get("/static/css/app.css")
+        assert css.status_code == 200
+        assert css.headers["cache-control"] == "no-cache"
+        assert css.headers.get("etag")
+
+        shell = client.get("/app")
+        assert shell.status_code == 200
+        assert shell.headers["cache-control"] == "no-cache"
+
+
 class _FakeBot:
     def __init__(self, *, ready: bool, latency: float):
         self._ready = ready

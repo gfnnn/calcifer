@@ -51,6 +51,19 @@ _SYNC_COOKIE = "fta_sync_token"
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
+class _NoCacheStatic(StaticFiles):
+    """Serve static assets with ``Cache-Control: no-cache`` so a browser always
+    revalidates instead of heuristically serving a stale build. Paired with the
+    ETag StaticFiles already sends, an unchanged asset still returns a cheap
+    304 — so this keeps deploys visible without a manual hard refresh, not
+    uncached. Without it the CSS/JS modules go stale after every deploy."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 class SyncManager:
     """Runs roster syncs on demand, one at a time, with status tracking.
 
@@ -985,11 +998,15 @@ def create_app(config: Config | None = None) -> FastAPI:
     # One static shell, hash-routed and hydrated from the JSON APIs above. It is
     # served unconditionally; the unlock overlay appears on the first 401 and
     # posts to /api/sync/unlock (reusing the existing cookie flow).
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    app.mount("/static", _NoCacheStatic(directory=_STATIC_DIR), name="static")
 
     @app.get("/app", response_class=HTMLResponse)
     async def dashboard_shell() -> HTMLResponse:
-        return HTMLResponse((_STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+        # no-cache so a redeploy of the shell is picked up on the next load.
+        return HTMLResponse(
+            (_STATIC_DIR / "index.html").read_text(encoding="utf-8"),
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return app
 
