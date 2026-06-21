@@ -319,10 +319,11 @@ async def test_sync_full_overlay_persists_everything(db, monkeypatch):
     assert result.attendance_events == 1
 
     alpha = await db.get_member("Alpha", "hellfire", "eu")
-    # raid_team is a *manual* column, so the WoW Audit team tag is applied to
-    # the in-memory member but intentionally NOT written by upsert_synced — only
-    # the sync-owned fields below get persisted.
+    # raid_team is a *manual* column, so the sync never writes it; the WoW Audit
+    # team lands in the sync-owned wowaudit_team and drives the effective team.
     assert alpha.raid_team is None
+    assert alpha.wowaudit_team == "Team Cinder"
+    assert alpha.effective_team == "Team Cinder"
     assert alpha.vault_slots_filled == 5       # WoW Audit vault overlay
     assert alpha.race == "Human"               # Blizzard enrichment
     assert alpha.best_parse_avg == 95.0        # Warcraft Logs enrichment
@@ -362,3 +363,232 @@ async def test_sync_wowaudit_overlay_failure_is_non_fatal(db, monkeypatch):
     assert result.error is None
     assert result.sources == ("Raider.IO",)
     assert await db.count() == 2
+
+
+async def test_sync_wowaudit_partial_failure_keeps_working_endpoints(db, monkeypatch):
+    """One failing WoW Audit endpoint must not drop the others (no cascade)."""
+    roster = [Member("Alpha", realm_slug="hellfire", region="eu")]
+    monkeypatch.setattr(sync, "RaiderIOClient", _make_fake_rio(roster))
+
+    class _PartialWA:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def team_name(self):
+            return "Team Cinder"
+
+        async def characters(self):
+            return [Member("Alpha", realm_slug="hellfire", region="eu")]
+
+        async def vault_slots(self):
+            return {"alpha": 3}
+
+        async def wishlists(self):
+            raise RuntimeError("subscription tier has no wishlists")
+
+        async def recent_attendance(self):
+            return [{"date": "2026-06-01", "instance": "Palace",
+                     "difficulty": "Mythic", "signups": [("Alpha", "present")]}]
+
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return None
+
+    monkeypatch.setattr(sync, "WowAuditClient", _PartialWA)
+    result = await sync_guild(db, Config(wowaudit_api_key="k", enrich_max_age_hours=0))
+
+    assert result.error is None
+    assert "WoW Audit" in result.sources       # it still answered
+    assert result.raiders == 1                  # characters survived
+    assert result.attendance_events == 1        # attendance survived
+    assert result.wishlist_items == 0           # only wishlists dropped
+    assert any("wishlists" in w for w in result.warnings)
+    alpha = await db.get_member("Alpha", "hellfire", "eu")
+    assert alpha.vault_slots_filled == 3        # vault survived
+
+
+async def test_sync_wowaudit_empty_roster_is_flagged(db, monkeypatch):
+    """A connected key that returns no characters is warned about, not silent —
+    and crucially must NOT wipe existing tags (the wrong-key scenario)."""
+    await db.upsert_synced(Member("Alpha", realm_slug="hellfire", region="eu",
+                                  wowaudit_team="Progression"))
+    roster = [Member("Alpha", realm_slug="hellfire", region="eu")]
+    monkeypatch.setattr(sync, "RaiderIOClient", _make_fake_rio(roster))
+
+    class _EmptyWA:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def team_name(self):
+            return "Wrong Team"
+
+        async def characters(self):
+            return []
+
+        async def vault_slots(self):
+            return {}
+
+        async def wishlists(self):
+            return []
+
+        async def recent_attendance(self):
+            return []
+
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return None
+
+    monkeypatch.setattr(sync, "WowAuditClient", _EmptyWA)
+    result = await sync_guild(db, Config(wowaudit_api_key="k"))
+
+    assert result.raiders == 0
+    assert "WoW Audit" in result.sources        # it answered, just empty
+    assert any("0 characters" in w for w in result.warnings)
+    # An empty roster must not nuke existing team tags.
+    alpha = await db.get_member("Alpha", "hellfire", "eu")
+    assert alpha.wowaudit_team == "Progression"
+
+
+async def test_sync_wowaudit_characters_failure_not_mislabeled_empty(db, monkeypatch):
+    """If /characters itself errors, warn about that — not a misleading '0 characters'."""
+    roster = [Member("Alpha", realm_slug="hellfire", region="eu")]
+    monkeypatch.setattr(sync, "RaiderIOClient", _make_fake_rio(roster))
+
+    class _CharsBrokenWA:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def team_name(self):
+            return "Team Cinder"
+
+        async def characters(self):
+            raise RuntimeError("characters endpoint 500")
+
+        async def vault_slots(self):
+            return {}
+
+        async def wishlists(self):
+            return []
+
+        async def recent_attendance(self):
+            return []
+
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return None
+
+    monkeypatch.setattr(sync, "WowAuditClient", _CharsBrokenWA)
+    result = await sync_guild(db, Config(wowaudit_api_key="k"))
+
+    assert result.raiders == 0
+    assert "WoW Audit" in result.sources                 # team_name answered
+    assert any("characters unavailable" in w for w in result.warnings)
+    assert not any("0 characters" in w for w in result.warnings)
+
+
+def _wa_roster(names):
+    """A fake WoW Audit client whose /characters returns the given names."""
+    class _WA:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def team_name(self):
+            return "Progression"
+
+        async def characters(self):
+            return [Member(n, realm_slug="hellfire", region="eu") for n in names]
+
+        async def vault_slots(self):
+            return {}
+
+        async def wishlists(self):
+            return []
+
+        async def recent_attendance(self):
+            return []
+
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return None
+
+    return _WA
+
+
+async def test_sync_wowaudit_clears_dropped_team_member(db, monkeypatch):
+    """A character dropped from the WoW Audit roster loses its stale team tag."""
+    # Former raider already tagged in the DB, still in the guild roster.
+    await db.upsert_synced(Member("Exraider", realm_slug="hellfire", region="eu",
+                                  wowaudit_team="Progression"))
+    roster = [Member("Exraider", realm_slug="hellfire", region="eu"),
+              Member("Current", realm_slug="hellfire", region="eu")]
+    monkeypatch.setattr(sync, "RaiderIOClient", _make_fake_rio(roster))
+    monkeypatch.setattr(sync, "WowAuditClient", _wa_roster(["Current"]))
+
+    await sync_guild(db, Config(wowaudit_api_key="k"))
+
+    ex = await db.get_member("Exraider", "hellfire", "eu")
+    cur = await db.get_member("Current", "hellfire", "eu")
+    assert ex.wowaudit_team is None             # stale tag reconciled away
+    assert cur.wowaudit_team == "Progression"   # current raider keeps it
+
+
+async def test_sync_wowaudit_keeps_tags_when_characters_fails(db, monkeypatch):
+    """A failed /characters fetch must never wipe existing team tags."""
+    await db.upsert_synced(Member("Exraider", realm_slug="hellfire", region="eu",
+                                  wowaudit_team="Progression"))
+    roster = [Member("Exraider", realm_slug="hellfire", region="eu")]
+    monkeypatch.setattr(sync, "RaiderIOClient", _make_fake_rio(roster))
+
+    class _CharsBrokenWA:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def team_name(self):
+            return "Progression"
+
+        async def characters(self):
+            raise RuntimeError("characters endpoint 500")
+
+        async def vault_slots(self):
+            return {}
+
+        async def wishlists(self):
+            return []
+
+        async def recent_attendance(self):
+            return []
+
+        async def upcoming_raid_signups(self, *, tz=None, now=None):
+            return None
+
+    monkeypatch.setattr(sync, "WowAuditClient", _CharsBrokenWA)
+    await sync_guild(db, Config(wowaudit_api_key="k"))
+
+    ex = await db.get_member("Exraider", "hellfire", "eu")
+    assert ex.wowaudit_team == "Progression"   # not cleared on a failed fetch

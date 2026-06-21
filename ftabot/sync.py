@@ -37,6 +37,7 @@ class SyncResult:
     attendance_events: int = 0
     health_score: float | None = None
     sources: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
     error: str | None = None
 
     def summary(self) -> str:
@@ -55,10 +56,11 @@ class SyncResult:
             if self.health_score is not None
             else ""
         )
+        warn = f" ⚠ {'; '.join(self.warnings)}." if self.warnings else ""
         return (
             f"Synced {self.upserted} member(s) from {self.fetched} on the roster "
             f"(enriched {self.enriched}, pruned {self.pruned}). "
-            f"Sources: {src}.{extras}{health}"
+            f"Sources: {src}.{extras}{health}{warn}"
         )
 
 
@@ -89,13 +91,35 @@ async def sync_guild(
     by_name: dict[str, Member] = {m.character_name.lower(): m for m in members}
 
     # 2: WoW Audit overlay — team tag, Great Vault, wishlists, attendance. Also
-    #    identifies the raiders so we can prioritise their enrichment.
+    #    identifies the raiders so we can prioritise their enrichment. Each fetch
+    #    is independently best-effort: one failing endpoint (e.g. a subscription
+    #    tier without /wishlists) must not drop the others, and any failure is
+    #    surfaced as a warning instead of silently leaving a green source.
     wishlists: list = []
     attendance: list = []
     roster_state: dict | None = None
     raiders = 0
     raider_names: set[str] = set()
+    warnings: list[str] = []
+    wa_roster_synced = False  # True once /characters fetched OK (gates reconcile)
     if config.wowaudit_enabled:
+        team: str | None = None
+        wa_members: list[Member] = []
+        vault: dict[str, int] = {}
+        ok: set[str] = set()
+
+        async def _fetch(label, coro, default):
+            """Await one WoW Audit call, recording (not raising) any failure."""
+            try:
+                value = await coro
+            except Exception as exc:  # noqa: BLE001 - each fetch is best-effort
+                msg = f"WoW Audit {label} unavailable: {exc}"
+                log.warning("%s", msg)
+                warnings.append(msg)
+                return default
+            ok.add(label)
+            return value
+
         try:
             async with WowAuditClient(
                 config.wowaudit_api_key,  # type: ignore[arg-type]
@@ -103,33 +127,50 @@ async def sync_guild(
                 default_region=region,
                 default_realm=realm,
             ) as wa:
-                team = await wa.team_name()
-                wa_members = await wa.characters()
-                vault = await wa.vault_slots()
-                wishlists = await wa.wishlists()
-                attendance = await wa.recent_attendance()
-                roster_state = await wa.upcoming_raid_signups(
-                    tz=config.raid_timezone
+                team = await _fetch("team", wa.team_name(), None)
+                wa_members = await _fetch("characters", wa.characters(), [])
+                vault = await _fetch("vault", wa.vault_slots(), {})
+                wishlists = await _fetch("wishlists", wa.wishlists(), [])
+                attendance = await _fetch("attendance", wa.recent_attendance(), [])
+                roster_state = await _fetch(
+                    "raid sign-ups",
+                    wa.upcoming_raid_signups(tz=config.raid_timezone),
+                    None,
                 )
+        except Exception as exc:  # noqa: BLE001 - connection-level failure
+            msg = f"WoW Audit connection failed: {exc}"
+            log.warning("%s", msg)
+            warnings.append(msg)
 
-            raiders = len(wa_members)
-            for wm in wa_members:
-                raider_names.add(wm.character_name.lower())
-                existing = by_name.get(wm.character_name.lower())
-                if existing is not None:
-                    existing.raid_team = team
-                else:
-                    # A raider not in the Raider.IO guild roster (e.g. cross-realm).
-                    wm.raid_team = team
-                    members.append(wm)
-                    by_name[wm.character_name.lower()] = wm
-            for lname, slots in vault.items():
-                m = by_name.get(lname)
-                if m is not None:
-                    m.vault_slots_filled = slots
+        # Only credit WoW Audit as a source if it actually answered. A *successful*
+        # characters call that comes back empty is almost always a key pointed at
+        # the wrong (or empty) team, so call that out explicitly — but don't if
+        # the call itself failed (its own warning already covers that).
+        if ok:
             sources.append("WoW Audit")
-        except Exception as exc:  # noqa: BLE001 - overlay is best-effort
-            log.warning("WoW Audit overlay skipped: %s", exc)
+        wa_roster_synced = "characters" in ok
+        if wa_roster_synced and not wa_members:
+            msg = "WoW Audit returned 0 characters — check the API key's team"
+            log.warning("%s", msg)
+            warnings.append(msg)
+
+        raiders = len(wa_members)
+        for wm in wa_members:
+            raider_names.add(wm.character_name.lower())
+            existing = by_name.get(wm.character_name.lower())
+            if existing is not None:
+                # wowaudit_team is sync-owned, so upsert_synced persists it; a
+                # manual raid_team (if any) still wins via Member.effective_team.
+                existing.wowaudit_team = team
+            else:
+                # A raider not in the Raider.IO guild roster (e.g. cross-realm).
+                wm.wowaudit_team = team
+                members.append(wm)
+                by_name[wm.character_name.lower()] = wm
+        for lname, slots in vault.items():
+            m = by_name.get(lname)
+            if m is not None:
+                m.vault_slots_filled = slots
 
     # 2.5: incremental + prioritised enrichment. Skip members whose stored stats
     #      are still fresh (so repeat syncs are fast), always enrich raiders, and
@@ -198,6 +239,14 @@ async def sync_guild(
         m.role = effective_role(m.role, m.active_spec)
         m.id = await db.upsert_synced(m)
         present_ids.append(m.id)
+
+    # 4b: reconcile the WoW Audit team tag. upsert_synced skips None on update,
+    #     so a character dropped from the team would keep a stale wowaudit_team;
+    #     clear it for anyone no longer on the roster. Requires a *non-empty*
+    #     successful /characters fetch: a failed or empty roster (e.g. a key
+    #     pointed at the wrong team) must never wipe every good tag.
+    if wa_roster_synced and raider_names:
+        await db.clear_wowaudit_team_except(raider_names)
 
     # Protect the core invariant: never let a successful-but-empty roster fetch
     # wipe the table. An empty `members` means the upstream returned nothing
@@ -277,6 +326,7 @@ async def sync_guild(
         attendance_events=attendance_events,
         health_score=snapshot.get("health_score"),
         sources=tuple(sources),
+        warnings=tuple(warnings),
     )
 
 

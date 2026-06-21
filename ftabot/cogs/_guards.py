@@ -104,10 +104,11 @@ async def require_team_member(
     """True if the caller has a character on the team-chemistry roster.
 
     A caller "is on the team" when any character linked to their Discord id has
-    a populated ``raid_team``. Otherwise replies (ephemeral) and returns False.
+    an effective team (a manual ``raid_team`` or the synced WoW Audit team).
+    Otherwise replies (ephemeral) and returns False.
     """
     linked = await db.search_members(discord_id=str(interaction.user.id))
-    if any(m.raid_team for m in linked):
+    if any(m.effective_team for m in linked):
         return True
     await interaction.response.send_message(
         f"Only members of the team roster can {action}. "

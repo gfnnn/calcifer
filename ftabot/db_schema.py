@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS members (
     profile_url       TEXT,
     source            TEXT,
     blizzard_id       INTEGER,
+    wowaudit_team     TEXT,
     details_json      TEXT,
 
     discord_id        TEXT,
@@ -68,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_members_discord  ON members (discord_id);
 CREATE INDEX IF NOT EXISTS idx_members_class     ON members (class_name);
 CREATE INDEX IF NOT EXISTS idx_members_mainid    ON members (main_character_id);
 CREATE INDEX IF NOT EXISTS idx_members_team       ON members (raid_team);
+CREATE INDEX IF NOT EXISTS idx_members_wa_team    ON members (wowaudit_team);
 
 -- RCLootCouncil loot awards (via WoW Audit). De-duplicated on import.
 CREATE TABLE IF NOT EXISTS loot_history (
@@ -495,6 +497,8 @@ MEMBER_COLUMNS: tuple[MemberColumn, ...] = (
     MemberColumn("source", "TEXT", ColumnOwner.SYNC, "source",
                  in_sync_upsert=True, migrate=True),
     MemberColumn("blizzard_id", "INTEGER", ColumnOwner.SYNC, "blizzard_id",
+                 in_sync_upsert=True, migrate=True),
+    MemberColumn("wowaudit_team", "TEXT", ColumnOwner.SYNC, "wowaudit_team",
                  in_sync_upsert=True, migrate=True),
     MemberColumn("details_json", "TEXT", ColumnOwner.SYNC, "details", migrate=True),
     # human-entered (manual owns; a sync must never overwrite)

@@ -118,6 +118,7 @@ class Database:
             profile_url=row["profile_url"],
             source=row["source"],
             blizzard_id=row["blizzard_id"],
+            wowaudit_team=row["wowaudit_team"],
             details=json.loads(row["details_json"]) if row["details_json"] else {},
             discord_id=row["discord_id"],
             is_main=bool(row["is_main"]),
@@ -229,8 +230,12 @@ class Database:
         return [self._row_to_member(r) for r in rows]
 
     async def team_members(self, team: str) -> list[Member]:
+        # Match on the *effective* team: a manual raid_team override wins, else
+        # the team the sync tagged from WoW Audit (mirrors Member.effective_team).
         cur = await self.conn.execute(
-            "SELECT * FROM members WHERE lower(raid_team) = lower(?) "
+            "SELECT * FROM members "
+            "WHERE lower(COALESCE(NULLIF(TRIM(raid_team), ''), wowaudit_team)) "
+            "    = lower(?) "
             "ORDER BY character_name COLLATE NOCASE ASC",
             (team,),
         )
@@ -238,15 +243,17 @@ class Database:
         return [self._row_to_member(r) for r in rows]
 
     async def team_roster(self) -> list[Member]:
-        """Every character assigned to a raid team (the team-chemistry roster).
+        """Every character on a raid team (the team-chemistry roster).
 
-        A populated ``raid_team`` is what marks a character as "on the team" (the
-        sync tags WoW Audit roster characters with the team name), so this is the
-        single definition the team-gated commands filter against.
+        "On the team" is the *effective* team: a manual ``raid_team`` override if
+        set, otherwise the team the sync tagged from WoW Audit (``wowaudit_team``)
+        — the same rule as ``Member.effective_team``. This is the single
+        definition the team-gated commands filter against.
         """
         cur = await self.conn.execute(
             "SELECT * FROM members "
-            "WHERE raid_team IS NOT NULL AND trim(raid_team) != '' "
+            "WHERE COALESCE(NULLIF(TRIM(raid_team), ''), "
+            "              NULLIF(TRIM(wowaudit_team), '')) IS NOT NULL "
             "ORDER BY character_name COLLATE NOCASE ASC"
         )
         rows = await cur.fetchall()
@@ -500,6 +507,35 @@ class Database:
 
     async def set_raid_team(self, member_id: int, team: str | None) -> None:
         await self._write_manual(member_id, raid_team=team)
+
+    async def clear_wowaudit_team_except(self, names: Iterable[str]) -> int:
+        """Clear the sync-owned ``wowaudit_team`` for anyone no longer on the
+        WoW Audit roster (matched by lowercased character name).
+
+        ``upsert_synced`` skips ``None`` on update so a roster sync can't null a
+        good value, which means a character dropped from the WoW Audit team would
+        otherwise keep a stale tag forever. This reconcile runs after a sync that
+        successfully fetched ``/characters`` and removes tags for everyone not in
+        the current roster. Returns the number of rows cleared.
+        """
+        keep = {n.lower() for n in names}
+        cur = await self.conn.execute(
+            "SELECT id, character_name FROM members WHERE wowaudit_team IS NOT NULL"
+        )
+        stale = [
+            row["id"]
+            for row in await cur.fetchall()
+            if row["character_name"].lower() not in keep
+        ]
+        if not stale:
+            return 0
+        ts = now_iso()
+        await self.conn.executemany(
+            "UPDATE members SET wowaudit_team = NULL, updated_at = ? WHERE id = ?",
+            [(ts, i) for i in stale],
+        )
+        await self.conn.commit()
+        return len(stale)
 
     async def set_officer_role(self, member_id: int, role: str | None) -> None:
         await self._write_manual(member_id, officer_role=role)

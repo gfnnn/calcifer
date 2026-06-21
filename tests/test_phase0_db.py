@@ -88,6 +88,27 @@ async def test_officers_by_rank_and_role(db):
     assert names == {"Gm", "Officer", "Helper"}  # Raider excluded
 
 
+async def test_wowaudit_team_drives_effective_team(db):
+    # A sync-tagged wowaudit_team makes a character "on the team" without any
+    # manual assignment, and a manual raid_team override wins for grouping.
+    await db.upsert_synced(Member("Autotagged", wowaudit_team="Progression"))
+    manual = await db.upsert_synced(Member("Overridden", wowaudit_team="Progression"))
+    await db.set_raid_team(manual, "Bench")
+
+    # team_roster (effective team) includes the auto-tagged character.
+    assert {m.character_name for m in await db.team_roster()} == {
+        "Autotagged", "Overridden"
+    }
+    # Grouping uses the effective team: auto under its WoW Audit team, the
+    # overridden one under the manual team instead.
+    assert [m.character_name for m in await db.team_members("Progression")] == [
+        "Autotagged"
+    ]
+    assert [m.character_name for m in await db.team_members("Bench")] == ["Overridden"]
+    m = await db.get_member("Overridden", "hellfire", "eu")
+    assert m.effective_team == "Bench" and m.wowaudit_team == "Progression"
+
+
 async def test_set_raid_team_and_snapshot(db):
     mid = await db.upsert_synced(Member("Ashbringer"))
     await db.set_raid_team(mid, "Progression")

@@ -171,6 +171,10 @@ class Member:
     thumbnail_url: str | None = None
     profile_url: str | None = None
 
+    # The raid team tagged by the sync from WoW Audit (sync-owned). The manual
+    # ``raid_team`` below overrides it for grouping; see ``effective_team``.
+    wowaudit_team: str | None = None
+
     # Provenance + a flexible blob for rich nested data (gear, Great Vault,
     # wishlist, per-boss parses). Persisted as the ``details_json`` column.
     source: str | None = None
@@ -189,6 +193,12 @@ class Member:
     last_synced: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+    @property
+    def effective_team(self) -> str | None:
+        """Team to group by: a manual ``raid_team`` wins, else the WoW Audit tag."""
+        manual = (self.raid_team or "").strip()
+        return manual or self.wowaudit_team
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -231,6 +241,8 @@ class Member:
             "is_main": self.is_main,
             "main_character_id": self.main_character_id,
             "raid_team": self.raid_team,
+            "wowaudit_team": self.wowaudit_team,
+            "effective_team": self.effective_team,
             "officer_role": self.officer_role,
             "notes": self.notes,
             "last_synced": self.last_synced,

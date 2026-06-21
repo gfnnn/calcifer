@@ -69,7 +69,7 @@ def _member_brief(m: Member) -> dict:
         "vault_slots_filled": m.vault_slots_filled,
         "wishlist_pct": m.wishlist_pct,
         "guild_rank": m.guild_rank,
-        "raid_team": m.raid_team,
+        "raid_team": m.effective_team,
         **member_colors(m),
     }
 
@@ -845,6 +845,8 @@ async def members_admin(db: Database, config: Config, *, q: str | None = None) -
                 "discord_id": m.discord_id,
                 "notes": m.notes,
                 "raid_team": m.raid_team,
+                "wowaudit_team": m.wowaudit_team,
+                "effective_team": m.effective_team,
                 "officer_role": m.officer_role,
                 "is_main": m.is_main,
                 "main_character_id": m.main_character_id,
