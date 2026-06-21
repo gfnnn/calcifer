@@ -28,6 +28,54 @@ CLASSES: tuple[str, ...] = (
 # The three combat roles. Raider.IO reports specs as one of these.
 ROLES: tuple[str, ...] = ("TANK", "HEALER", "DPS")
 
+# Map the many ways a source spells a role onto our canonical TANK/HEALER/DPS.
+# WoW Audit in particular uses "Heal"/"Melee"/"Ranged"; Raider.IO uses
+# "tank"/"healer"/"dps". Anything unrecognised falls through to spec inference.
+_ROLE_ALIASES: dict[str, str] = {
+    "tank": "TANK",
+    "healer": "HEALER",
+    "heal": "HEALER",
+    "heals": "HEALER",
+    "healing": "HEALER",
+    "dps": "DPS",
+    "damage": "DPS",
+    "melee": "DPS",
+    "ranged": "DPS",
+    "mdps": "DPS",
+    "rdps": "DPS",
+}
+
+# Healer and tank specs are a small fixed set (everything else is DPS), so a
+# missing/garbled role can be recovered from the spec name alone. Spec names are
+# unambiguous across classes (e.g. "Restoration" is always a healer), so this
+# needs only the spec, not the class.
+_HEALER_SPECS = frozenset(
+    {"discipline", "holy", "restoration", "mistweaver", "preservation"}
+)
+_TANK_SPECS = frozenset(
+    {"blood", "vengeance", "guardian", "brewmaster", "protection"}
+)
+
+
+def role_from_spec(spec: str | None) -> str | None:
+    """Infer TANK/HEALER/DPS from a spec name, or ``None`` when there's no spec."""
+    if not spec:
+        return None
+    key = spec.strip().lower()
+    if key in _HEALER_SPECS:
+        return "HEALER"
+    if key in _TANK_SPECS:
+        return "TANK"
+    return "DPS"
+
+
+def effective_role(role: str | None, spec: str | None = None) -> str | None:
+    """The canonical role for a character: a recognised ``role`` value wins,
+    otherwise it's inferred from the spec. This recovers the role icon for
+    members whose stored role is missing or in a source-specific spelling."""
+    canon = _ROLE_ALIASES.get((role or "").strip().lower())
+    return canon or role_from_spec(spec)
+
 # The current character level cap (Midnight). A character below this is still
 # levelling, so surfaces show their level; at the cap the level is hidden and
 # the slot is reused for their Mythic+ score (a sub-cap character has none yet).

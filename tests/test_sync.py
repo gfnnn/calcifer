@@ -188,6 +188,27 @@ async def test_sync_guild_adds_cross_realm_raider_and_survives_failures(db, monk
     assert await db.get_member("Crossrealm", "hellfire", "eu") is not None
 
 
+async def test_sync_guild_canonicalises_role_from_spec(db, monkeypatch):
+    # A source leaves a healer's role empty and spells a tank's role its own way;
+    # the persist step stores both canonically, so the web filter, raid grouping
+    # and role counts (which read the stored column) all agree.
+    roster = [
+        Member("Resto", class_name="Druid", active_spec="Restoration", role=None),
+        Member("Tanky", class_name="Warrior", active_spec="Protection", role="Tank"),
+    ]
+    monkeypatch.setattr(
+        sync_mod, "RaiderIOClient", lambda *a, **kw: _CM(_FakeRaiderIO(roster))
+    )
+    cfg = _sync_cfg(
+        wowaudit_api_key=None, blizzard_client_id=None, warcraftlogs_client_id=None
+    )
+    result = await sync_guild(db, cfg)
+
+    assert result.error is None
+    assert (await db.get_member("Resto", "hellfire", "eu")).role == "HEALER"
+    assert (await db.get_member("Tanky", "hellfire", "eu")).role == "TANK"
+
+
 async def test_sync_guild_skips_prune_on_empty_roster(db, monkeypatch):
     # An existing member must survive a fetch that returns nothing (the empty
     # roster guard skips the prune so manual data is not wiped).

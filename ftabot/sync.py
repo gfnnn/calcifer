@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from . import metrics
 from .config import Config
 from .db import Database
-from .models import Member
+from .models import Member, effective_role
 from .services.blizzard import BlizzardClient
 from .services.raiderio import RaiderIOClient, RaiderIOError
 from .services.warcraftlogs import WarcraftLogsClient
@@ -191,6 +191,11 @@ async def sync_guild(
     # 4: persist members.
     present_ids: list[int] = []
     for m in members:
+        # Canonicalise the role at the single write chokepoint (after every
+        # source + enrichment has had its say), recovering it from the spec when
+        # a source left it empty or in its own spelling. Stored canonical, so the
+        # web role filter, raid-board grouping and role counts all agree.
+        m.role = effective_role(m.role, m.active_spec)
         m.id = await db.upsert_synced(m)
         present_ids.append(m.id)
 

@@ -193,15 +193,18 @@ crest emoji, not as tinted text. Render through `brand.class_label(name, emoji)`
 (`:roletank:`/`:roleheal:`/`:roledps:`) so every surface posts a class/role the
 same way; both fall back to the bare name / unicode glyph when the `emoji` map is
 absent. The `emoji` map is the guild's `name -> markup` lookup from
-`boards.guild_emoji_map(bot)`, threaded into `Board.render`. Rank movement uses
-`brand.rank_move(delta)` (`🟢▲n` up, `🔴▼n` down) for the same reason.
+`boards.guild_emoji_map(bot)`, threaded into `Board.render`. A character's role
+glyph resolves through `models.effective_role(role, spec)` first, so a missing or
+source-specific role spelling (e.g. WoW Audit's "Heal") still gets the right icon.
+The sync also canonicalises the stored role through the same helper, so the
+server-side surfaces that read the column (the web role filter, raid grouping,
+role counts) agree without re-inferring.
 
 **Mythic+ score colour (Raider.IO scale).** `brand.score_color(score)` returns
 the *exact* hex from Raider.IO's ramp (`brand.SCORE_TIERS`) for surfaces that can
-show real colour (the web dashboard, an embed accent). In embed text, use
-`brand.score_glyph(score)`, which buckets the same ramp to the nearest
-colour-square emoji (🟧 legendary, 🟪 epic, 🟦 rare, 🟩 uncommon, ⬜ low) — that's
-what the Hot 20 rows tag the score with.
+show real colour (the web dashboard, an embed accent). Discord embed text can't be
+coloured per character, so boards leave the score plain rather than approximating
+the ramp with emoji.
 
 **Embed anatomy** (and the limit on each — see [§7](#7-message-limits)): title,
 url, description, colour, author (name + icon + url), up to 25 fields (each name

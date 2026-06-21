@@ -147,12 +147,6 @@ def test_class_label_carries_the_colour_crest_then_falls_back():
     assert brand.class_label(None) == "?"
 
 
-def test_rank_move_colours_climbs_green_and_slips_red():
-    assert brand.rank_move(7) == "🟢▲7"
-    assert brand.rank_move(-3) == "🔴▼3"
-    assert brand.rank_move(0) == ""
-
-
 def test_score_color_maps_the_raiderio_scale_exactly():
     assert brand.score_color(4300) == 0xFF8000  # top legendary orange
     assert brand.score_color(4275) == 0xFF8000  # band is inclusive at its floor
@@ -160,12 +154,3 @@ def test_score_color_maps_the_raiderio_scale_exactly():
     assert brand.score_color(200) == 0xFFFFFF
     assert brand.score_color(150) == 0xFFFFFF   # below the floor stays white
     assert brand.score_color(None) == 0xFFFFFF
-
-
-def test_score_glyph_buckets_into_colour_squares():
-    assert brand.score_glyph(4300) == "🟧"  # legendary
-    assert brand.score_glyph(3400) == "🟪"  # epic/pink
-    assert brand.score_glyph(3000) == "🟦"  # rare blue
-    assert brand.score_glyph(2400) == "🟩"  # uncommon green
-    assert brand.score_glyph(500) == "⬜"   # low / common
-    assert brand.score_glyph(None) == "⬜"

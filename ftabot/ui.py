@@ -5,7 +5,7 @@ from __future__ import annotations
 import discord
 
 from . import brand
-from .models import MAX_LEVEL, Member, class_color
+from .models import MAX_LEVEL, Member, class_color, effective_role
 
 # Pretty names for the current tier's raid slugs (Raider.IO keys raid_progression
 # by slug). Anything not listed falls back to a title-cased slug, so a new raid
@@ -107,7 +107,9 @@ def member_embed(
 
     # Role as a glyph rather than the word (custom :role*: emoji when uploaded,
     # else the unicode shield/heart/swords; falls back to the word if neither).
-    role_glyph = brand.role_icon(member.role, emoji) or member.role
+    # effective_role recovers the icon when the stored role is missing/garbled.
+    role = effective_role(member.role, member.active_spec)
+    role_glyph = brand.role_icon(role, emoji) or role
     _field(embed, "Role", role_glyph or "–")
     _field(embed, "Item Level", _fmt(member.item_level))
     # Level and M+ score share one slot: a sub-cap character is still levelling

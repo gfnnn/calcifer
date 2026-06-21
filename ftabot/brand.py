@@ -159,27 +159,11 @@ def class_label(class_name: str | None, emoji: EmojiMap | None = None) -> str:
     return f"{crest} {name}" if crest else name
 
 
-# Rank movement, emoji-first: a green dot for a climb, red for a slip (embed text
-# can't be coloured, so the colour rides on the dot beside the ▲/▼ and amount).
-RANK_UP = "🟢"
-RANK_DOWN = "🔴"
-
-
-def rank_move(delta: int) -> str:
-    """A coloured rank-change marker: ``🟢▲n`` up, ``🔴▼n`` down, ``""`` unchanged."""
-    if delta > 0:
-        return f"{RANK_UP}▲{delta}"
-    if delta < 0:
-        return f"{RANK_DOWN}▼{-delta}"
-    return ""
-
-
 # --- Mythic+ score colour scale (Raider.IO) ---------------------------------
 # Raider.IO's score ramp as (min_score, hex) bands, highest first. ``score_color``
-# returns the *exact* hex (use it where real colour is possible: the web
-# dashboard, an embed accent). Discord embed *text* can't be coloured, so
-# ``score_glyph`` buckets the same ramp into the nearest colour-square emoji for
-# leaderboard rows.
+# returns the *exact* hex for surfaces where real colour is possible (the web
+# dashboard, an embed accent). Discord embed *text* can't be coloured, so the
+# board leaves the score plain rather than approximating the ramp with emoji.
 SCORE_TIERS: tuple[tuple[int, int], ...] = (
     (4275, 0xFF8000), (4120, 0xF9753F), (4000, 0xF16961), (3880, 0xE75E7F),
     (3760, 0xDB529C), (3640, 0xCC47B9), (3520, 0xB83DD6), (3385, 0x9C3DED),
@@ -200,29 +184,6 @@ def score_color(score: float | None) -> int:
         if value >= threshold:
             return hex_value
     return 0xFFFFFF
-
-
-# The colour-square emoji per hue zone of the ramp (highest first). Discord
-# offers only a handful of square hues, so the continuous scale buckets to the
-# nearest: orange (legendary), purple (epic/pink), blue (rare), green
-# (uncommon); anything below lands on the white square.
-_SCORE_GLYPHS: tuple[tuple[int, str], ...] = (
-    (3880, "🟧"),
-    (3265, "🟪"),
-    (2900, "🟦"),
-    (1000, "🟩"),
-)
-
-
-def score_glyph(score: float | None) -> str:
-    """A colour-square emoji approximating the Raider.IO score colour, for embed
-    text (which can't be coloured per character)."""
-    value = score or 0
-    for threshold, glyph in _SCORE_GLYPHS:
-        if value >= threshold:
-            return glyph
-    return "⬜"
-
 
 
 # --- moods ------------------------------------------------------------------
