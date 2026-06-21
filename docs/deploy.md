@@ -9,7 +9,7 @@ host can run it.
 After it's deployed you operate it entirely from mobile:
 
 - **Discord app** → slash commands (`/sync`, `/gmreport`, `/raidcheck`, …).
-- **Phone browser** → the web views (`/`, `/gm`, `/raid`, `/loot`).
+- **Phone browser** → the dashboard at `/app` (`/` redirects there).
 - **Host dashboard** (browser) → logs, secrets, restarts.
 
 ---
@@ -36,7 +36,7 @@ The repo includes [`railway.json`](../railway.json) (Dockerfile build,
      `DISCORD_GUILD_ID` for instant slash-command registration
 5. **Settings → Networking → Generate Domain** for the public URL.
 6. Open `https://<your-domain>/healthz` (should be `{"status":"ok",...}`), then
-   `https://<your-domain>/admin`, enter your `SYNC_TOKEN` to unlock (it is stored
+   `https://<your-domain>/app`, enter your `SYNC_TOKEN` to unlock (it is stored
    in a secure http-only cookie, so it stays out of the URL), and tap **Sync
    now**. First sync takes a few minutes (full guild); afterwards the site shows
    the roster, and re-syncs the same day are fast (incremental).
@@ -99,7 +99,7 @@ Auto-sync is off by default (`SYNC_INTERVAL_MINUTES=0`). Refresh the roster
 whenever you want, three ways — all phone-friendly:
 
 - **Browser button.** Set a `SYNC_TOKEN` env var, then open
-  `https://your-app/admin`, enter the token once to unlock (it is kept in a
+  `https://your-app/app`, enter the token once to unlock (it is kept in a
   secure http-only cookie, never in the URL), and tap **Sync now**. The page
   shows live status and the last result.
 - **Discord.** Run `/sync` (officers only) from the Discord mobile app.
@@ -173,7 +173,7 @@ hosted deploy:
 | `SYNC_INTERVAL_MINUTES` | Auto-refresh interval for the all-in-one runner. |
 | `DATABASE_PATH` | Point at the mounted volume, e.g. `/data/ftabot.db`. |
 | `PORT` | Set automatically by most hosts; the app binds to it. |
-| `SYNC_TOKEN` | Unlocks the browser **Sync now** button at `/admin`. |
+| `SYNC_TOKEN` | Unlocks the browser **Sync now** button at `/app`. |
 
 The first roster appears after the first sync — either wait for the interval,
 or run `/sync` from Discord once the bot is up.

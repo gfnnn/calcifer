@@ -24,6 +24,12 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute is the SPA's show/hide toggle (overlay, inline
+   errors). It is only a user-agent `display:none`, so any author `display`
+   rule (e.g. `.overlay { display:flex }`) would override it and leave the
+   element stuck visible — force it to win. */
+[hidden] { display: none !important; }
+
 body {
   font-family: system-ui, sans-serif;
   margin: 0;

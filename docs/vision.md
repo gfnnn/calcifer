@@ -293,7 +293,8 @@ surfaces, not ambient spam, gated to the right tier (§5d).
 
 ### 5a. The views *(shipped)*
 
-Three role-specific views render in the browser (`/gm`, `/raid`, `/loot`) and in
+Three role-specific views render in the browser (the Raid and Loot sections of
+the `/app` dashboard, plus the GM health pulse on Home) and in
 Discord (`/gmreport`, `/raidcheck`, `/loot`, `/wishlist`, `/lootpriority`,
 `/trends`), reading the same DB the sync populates. The scoring is pure
 (`metrics.py`):
@@ -576,7 +577,7 @@ majors); the *empty-fetch prune guard* (a 0-member roster fetch no longer wipes
 the table); *case-insensitive boolean config*; the *constant-time admin token*
 + `http(s)`-only link allowlist; the *GM health delta* (the stored snapshot now
 carries the retention component the live view uses); *date-portion attendance
-ordering*; the *sync token cookie* (the `/admin` unlock posts the token as JSON
+ordering*; the *sync token cookie* (the `/app` unlock posts the token as JSON
 into an http-only cookie, so it stays out of the URL); and the *real server
 timezone* (raid/event times now resolve through `Config.raid_timezone` —
 Europe/Paris as an IANA `zoneinfo` zone, DST-correct — instead of the static
