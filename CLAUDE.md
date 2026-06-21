@@ -90,6 +90,11 @@ Key flow and layering:
   *idempotent* (check-before-alter) `apply`; a `schema_migrations` table records what
   has run. SQLite can't drop/alter columns, so migrations only add columns or
   backfill — never remove. Append new migrations; never renumber or reuse a version.
+  **`SCHEMA` is executed on every `connect` *before* the migrations run**, so never
+  put an index (or anything) in `SCHEMA` that references a column a migration only
+  adds later — on an existing DB it runs before the column exists and crashes
+  startup with "no such column". Create such an index *in the migration that adds
+  the column* (see migration 6 / `wowaudit_team`).
 - **`services/`** — one async client per API (`wowaudit`, `raiderio`, `blizzard`,
   `warcraftlogs`, `raidhelper`), all built on **`services/_http.py`**: `BaseHTTPClient`
   centralises the aiohttp session lifecycle (own-or-share a session) and the
@@ -277,8 +282,15 @@ preserved); `settings` (the dashboard's live config overlay — see
   `ColumnOwner` (and `in_sync_upsert`/`migrate` flags). The `SYNC_COLUMNS` /
   `MANUAL_COLUMNS` / `MIGRATION_COLUMNS` partitions derive from it automatically.
   If the change needs a schema migration on existing DBs, append a `Migration` to
-  `migrations.py` (`migrate=True` columns are picked up by the members-columns
-  migration; new tables/columns elsewhere need their own ordered migration).
+  `migrations.py`. **Caveat that has bitten us:** the members-columns migration
+  (`_m1`, `migrate=True`) runs **once** and is then recorded, so it only adds
+  columns to a DB that hasn't run it yet (fresh installs). It will **not**
+  back-fill a column onto an *established* DB that already ran `_m1` before the
+  column existed. So any members column added *after* `_m1` is in place — i.e.
+  essentially every new one now — needs **its own ordered `Migration`** that ADDs
+  the column (`_add_column_if_missing`), plus its index if any. Keep `migrate=True`
+  too (it still serves fresh DBs), but don't rely on it alone for prod. New
+  tables/columns elsewhere likewise need their own ordered migration.
 - **Keep `metrics.py` and `router.py` pure** (no I/O) — that is what makes them
   testable. Board renderers and feed sources follow the same pure-core pattern.
 - Background loops (`serve.py`, feed loop) deliberately swallow exceptions with
