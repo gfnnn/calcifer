@@ -29,8 +29,12 @@ class ReportsCog(commands.Cog):
     def cfg(self):
         return self.bot.config
 
-    @app_commands.command(name="gmreport", description="Guild health overview for the GM.")
+    @app_commands.command(name="gmreport", description="Guild health overview (GM only).")
     async def gmreport(self, interaction: discord.Interaction) -> None:
+        if not await require_gm(
+            interaction, self.cfg.gm_discord_id, action="view guild health"
+        ):
+            return
         await interaction.response.defer(thinking=True)
         r = await views.gm_report(self.bot.db, self.cfg)
         h = r["health"]

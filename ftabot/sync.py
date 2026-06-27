@@ -190,7 +190,10 @@ async def sync_guild(
         try:
             async with RaiderIOClient() as rio:
                 await rio.enrich_all(to_enrich, concurrency=config.enrich_concurrency)
-        except RaiderIOError as exc:
+        except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
+            # A transient network error (aiohttp.ClientError / TimeoutError) is
+            # not wrapped as RaiderIOError, so catch broadly like the Blizzard
+            # and Warcraft Logs blocks below — a blip must not abort the sync.
             log.warning("Raider.IO enrichment skipped: %s", exc)
     enriched = len(to_enrich)
 

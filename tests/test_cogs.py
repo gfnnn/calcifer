@@ -378,12 +378,21 @@ async def test_me_card_empty_then_linked(db):
 
 async def test_gmreport_renders(db):
     await _seed(db)
-    cog = ReportsCog(_Bot(db, _cfg()))
-    it = _Interaction()
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=42)))
+    it = _Interaction()  # default user id 42 == GM
     await ReportsCog.gmreport.callback(cog, it)
     assert it.response.deferred is True
     assert it.followup.sent is True
     assert isinstance(it.followup.embed, discord.Embed)
+
+
+async def test_gmreport_denied_for_non_gm(db):
+    await _seed(db)
+    cog = ReportsCog(_Bot(db, _cfg(gm_discord_id=7)))
+    it = _Interaction()  # default user id 42, not the GM
+    await ReportsCog.gmreport.callback(cog, it)
+    assert it.response.ephemeral is True
+    assert "Guild Master" in it.response.content
 
 
 async def test_trends_denied_for_non_gm(db):

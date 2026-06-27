@@ -427,6 +427,9 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.get("/api/trends", dependencies=gated)
     async def api_trends(limit: int = 30) -> JSONResponse:
+        # Clamp: a negative LIMIT is "unlimited" in SQLite, and a huge value
+        # would scan the whole snapshot history — bound it to a sane window.
+        limit = max(1, min(limit, 365))
         return JSONResponse(await views.trends(db, config, limit=limit))
 
     # -- manual sync trigger -------------------------------------------------
@@ -1005,13 +1008,14 @@ def create_app(config: Config | None = None) -> FastAPI:
     # posts to /api/sync/unlock (reusing the existing cookie flow).
     app.mount("/static", _NoCacheStatic(directory=_STATIC_DIR), name="static")
 
+    # Read the shell once at startup rather than on every request (the file
+    # only changes on redeploy, which restarts the process). The no-cache
+    # header still lets the browser pick up a redeployed shell on next load.
+    _shell_html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
     @app.get("/app", response_class=HTMLResponse)
     async def dashboard_shell() -> HTMLResponse:
-        # no-cache so a redeploy of the shell is picked up on the next load.
-        return HTMLResponse(
-            (_STATIC_DIR / "index.html").read_text(encoding="utf-8"),
-            headers={"Cache-Control": "no-cache"},
-        )
+        return HTMLResponse(_shell_html, headers={"Cache-Control": "no-cache"})
 
     return app
 
