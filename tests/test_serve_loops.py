@@ -35,8 +35,9 @@ class _Channel:
     def __init__(self):
         self.sent: list[tuple] = []
 
-    async def send(self, *, content=None, embed=None):
+    async def send(self, *, content=None, embed=None, allowed_mentions=None):
         self.sent.append((content, embed))
+        self.allowed_mentions = allowed_mentions
 
 
 class _Bot:
@@ -164,6 +165,8 @@ async def test_make_sender_posts_through_a_cached_channel(tmp_path):
     await send("123", embed="EMBED", content="hi")
     assert channel.sent == [("hi", "EMBED")]
     assert bot.fetched == []  # cache hit -> no fetch
+    # Subscriber/role pings are allowed, but @everyone/@here is never.
+    assert channel.allowed_mentions.everyone is False
 
 
 async def test_make_sender_falls_back_to_fetch_channel(tmp_path):

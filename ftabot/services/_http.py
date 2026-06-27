@@ -10,6 +10,7 @@ each one.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from collections.abc import Mapping
@@ -102,27 +103,37 @@ class OAuthClientCredentials(BaseHTTPClient):
         super().__init__(session=session)
         self._token: str | None = None
         self._token_expiry: float = 0.0
+        self._token_lock = asyncio.Lock()
+
+    def _token_fresh(self) -> bool:
+        return bool(self._token) and time.time() < self._token_expiry - 60
 
     async def _ensure_token(self) -> str:
-        if self._token and time.time() < self._token_expiry - 60:
+        if self._token_fresh():
+            return self._token  # type: ignore[return-value]
+        # Serialise minting so concurrent callers that all see a stale token
+        # issue a single token POST, not one each; re-check inside the lock in
+        # case another coroutine refreshed it while we waited.
+        async with self._token_lock:
+            if self._token_fresh():
+                return self._token  # type: ignore[return-value]
+            basic = base64.b64encode(
+                f"{self.client_id}:{self.client_secret}".encode()
+            ).decode()
+            async with self.session.post(
+                self._token_url,
+                data={"grant_type": "client_credentials"},
+                headers={"Authorization": f"Basic {basic}"},
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise self._token_error(
+                        f"OAuth token failed: HTTP {resp.status} {body[:200]}"
+                    )
+                payload = await resp.json()
+            self._token = payload["access_token"]
+            self._token_expiry = time.time() + int(payload.get("expires_in", 0))
             return self._token
-        basic = base64.b64encode(
-            f"{self.client_id}:{self.client_secret}".encode()
-        ).decode()
-        async with self.session.post(
-            self._token_url,
-            data={"grant_type": "client_credentials"},
-            headers={"Authorization": f"Basic {basic}"},
-        ) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise self._token_error(
-                    f"OAuth token failed: HTTP {resp.status} {body[:200]}"
-                )
-            payload = await resp.json()
-        self._token = payload["access_token"]
-        self._token_expiry = time.time() + int(payload.get("expires_in", 0))
-        return self._token
 
     def _invalidate_token(self) -> None:
         """Drop the cached token so the next call re-mints (used after a 401)."""

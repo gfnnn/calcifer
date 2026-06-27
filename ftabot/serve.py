@@ -17,6 +17,7 @@ import asyncio
 import logging
 
 import aiohttp
+import discord
 import uvicorn
 
 from .config import Config
@@ -67,7 +68,16 @@ def _make_sender(bot, config: Config):
         channel = bot.get_channel(int(destination))
         if channel is None:
             channel = await bot.fetch_channel(int(destination))
-        await channel.send(content=content, embed=embed)
+        # Feed alerts intentionally ping opted-in /alerts subscribers and the
+        # officer-configured role, but must never @everyone/@here — guard so a
+        # mistyped `ping: "@everyone"` rule can't blast the server.
+        await channel.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, users=True, roles=True
+            ),
+        )
 
     return _send
 
