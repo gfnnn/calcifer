@@ -12,11 +12,17 @@ from ftabot.models import Member
 from ftabot.services.blizzard import BlizzardClient, BlizzardError, _api_host
 
 
+async def _noop_sleep(_seconds):
+    """Skip real backoff delays in retry tests."""
+    return None
+
+
 class _FakeResp:
-    def __init__(self, status=200, payload=None, text="error body"):
+    def __init__(self, status=200, payload=None, text="error body", headers=None):
         self.status = status
         self._payload = payload or {}
         self._text = text
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -105,6 +111,18 @@ async def test_enrich_character_fills_fields():
     assert member.item_level == 632.0
 
 
+async def test_enrich_character_fails_fast_on_persistent_5xx(monkeypatch):
+    # The per-member enrich path must NOT pay the full roster-sized backoff: it
+    # runs once per character in a sequential loop, so it caps retries low.
+    monkeypatch.setattr("ftabot.services.blizzard.asyncio.sleep", _noop_sleep)
+    session = _FakeSession([_FakeResp(500)])
+    member = Member("Ghost", realm_slug="hellfire", region="eu", item_level=600.0)
+    async with BlizzardClient("id", "secret", session=session) as bz:
+        result = await bz.enrich_character(member)
+    assert result.item_level == 600.0  # swallowed, member kept
+    assert session.get_calls == 2  # initial try + 1 retry only (retries=1)
+
+
 async def test_enrich_character_returns_member_unchanged_on_404():
     session = _FakeSession([_FakeResp(404)])
     member = Member("Ghost", realm_slug="hellfire", region="eu", item_level=600.0)
@@ -133,11 +151,29 @@ async def test_token_failure_raises():
             await bz.guild_roster("G", "Hellfire")
 
 
-async def test_non_200_data_response_raises():
+async def test_retries_on_429_then_succeeds(monkeypatch):
+    # Blizzard rate-limits bursts; a 429 should back off (honouring Retry-After)
+    # and retry rather than failing the whole enrichment.
+    monkeypatch.setattr("ftabot.services.blizzard.asyncio.sleep", _noop_sleep)
+    session = _FakeSession(
+        [
+            _FakeResp(429, headers={"Retry-After": "0"}),
+            _FakeResp(200, {"members": []}),
+        ]
+    )
+    async with BlizzardClient("id", "secret", session=session) as bz:
+        out = await bz.guild_roster("G", "Hellfire")
+    assert out == []
+    assert session.get_calls == 2  # one 429, then success
+
+
+async def test_persistent_5xx_retries_then_raises(monkeypatch):
+    monkeypatch.setattr("ftabot.services.blizzard.asyncio.sleep", _noop_sleep)
     session = _FakeSession([_FakeResp(500)])
     async with BlizzardClient("id", "secret", session=session) as bz:
         with pytest.raises(BlizzardError):
             await bz.guild_roster("G", "Hellfire")
+    assert session.get_calls == 5  # initial try + 4 retries, then gives up
 
 
 def test_session_property_requires_context_manager():

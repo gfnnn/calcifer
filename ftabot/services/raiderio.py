@@ -10,10 +10,13 @@ Docs: https://raider.io/api
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from ..models import Member, normalize_realm
 from ._http import BaseHTTPClient, retry_after_seconds
+
+log = logging.getLogger("ftabot.raiderio")
 
 BASE_URL = "https://raider.io/api/v1"
 
@@ -327,7 +330,25 @@ class RaiderIOClient(BaseHTTPClient):
         enriched: list[Member] = []
         for start in range(0, len(members), max(1, chunk_size)):
             batch = members[start : start + chunk_size]
-            enriched.extend(await asyncio.gather(*(_one(m) for m in batch)))
+            # return_exceptions so one member's unexpected error (e.g. an
+            # aiohttp timeout that enrich_character doesn't wrap) doesn't cancel
+            # the rest of the batch; keep the un-enriched member in that case.
+            results = await asyncio.gather(
+                *(_one(m) for m in batch), return_exceptions=True
+            )
+            for m, res in zip(batch, results):
+                if isinstance(res, Member):
+                    enriched.append(res)
+                elif isinstance(res, Exception):
+                    log.warning(
+                        "Raider.IO enrich failed for %s-%s: %s",
+                        m.character_name,
+                        m.realm_slug,
+                        res,
+                    )
+                    enriched.append(m)
+                else:  # a BaseException (e.g. CancelledError) — never swallow it
+                    raise res
         return enriched
 
 

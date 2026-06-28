@@ -10,12 +10,13 @@ Docs: https://develop.battle.net/documentation/world-of-warcraft
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import aiohttp
 
 from ..models import Member, normalize_realm
-from ._http import OAuthClientCredentials
+from ._http import OAuthClientCredentials, retry_after_seconds
 
 OAUTH_TOKEN_URL = "https://oauth.battle.net/token"
 
@@ -51,25 +52,45 @@ class BlizzardClient(OAuthClientCredentials):
         self.region = region.lower()
         self.locale = locale
 
-    async def _get(self, path: str, *, namespace: str) -> dict[str, Any]:
+    async def _get(
+        self, path: str, *, namespace: str, retries: int = 4
+    ) -> dict[str, Any]:
+        """GET with a one-shot 401 token re-mint and 429/5xx backoff.
+
+        Blizzard rate-limits under load (a full guild roster + per-character
+        enrichment is bursty), so we retry on 429 — honouring ``Retry-After`` —
+        and on transient 5xx with exponential backoff, mirroring the Raider.IO
+        client. A 401 re-mints the token once (it may have been revoked early).
+        """
         url = f"{_api_host(self.region)}{path}"
         params = {"namespace": namespace, "locale": self.locale}
-        # Retry once on 401 with a freshly minted token (the cached one may have
-        # been revoked before its nominal expiry).
-        for attempt in range(2):
+        delay = 1.0
+        tried_refresh = False
+        for attempt in range(retries + 1):
             token = await self._ensure_token()
             headers = {"Authorization": f"Bearer {token}"}
             async with self.session.get(url, params=params, headers=headers) as resp:
-                if resp.status == 401 and attempt == 0:
+                if resp.status == 200:
+                    return await resp.json()
+                if resp.status == 401 and not tried_refresh:
+                    tried_refresh = True
                     self._invalidate_token()
                     continue
                 if resp.status == 404:
                     raise BlizzardError("not found")
-                if resp.status != 200:
-                    body = await resp.text()
-                    raise BlizzardError(f"HTTP {resp.status}: {body[:200]}")
-                return await resp.json()
-        raise BlizzardError("unreachable")  # pragma: no cover
+                retryable = resp.status == 429 or 500 <= resp.status < 600
+                if retryable and attempt < retries:
+                    wait = (
+                        retry_after_seconds(resp.headers, fallback=delay)
+                        if resp.status == 429
+                        else delay
+                    )
+                    await asyncio.sleep(min(wait, 10.0))
+                    delay *= 2
+                    continue
+                body = await resp.text()
+                raise BlizzardError(f"HTTP {resp.status}: {body[:200]}")
+        raise BlizzardError("retries exhausted")  # pragma: no cover
 
     # -- endpoints -----------------------------------------------------------
 
@@ -103,10 +124,16 @@ class BlizzardClient(OAuthClientCredentials):
     async def enrich_character(self, member: Member) -> Member:
         """Fill race, faction, level and equipped item level from Blizzard."""
         try:
+            # Fail fast on the per-member hot path: this runs once per character
+            # in a sequential loop, so a sustained Blizzard outage must not pay
+            # the full backoff per member (that would stall the whole sync).
+            # retries=1 still rides out a brief 429 (honouring Retry-After); the
+            # critical single guild_roster call keeps the generous default.
             summary = await self._get(
                 f"/profile/wow/character/{member.realm_slug}/"
                 f"{member.character_name.lower()}",
                 namespace=f"profile-{self.region}",
+                retries=1,
             )
         except BlizzardError:
             return member
