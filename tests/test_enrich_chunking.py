@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from ftabot.models import Member
 from ftabot.services.raiderio import RaiderIOClient
 
@@ -51,3 +53,40 @@ async def test_enrich_all_respects_the_concurrency_cap():
 async def test_enrich_all_empty_is_safe():
     client = RaiderIOClient()
     assert await client.enrich_all([], concurrency=2) == []
+
+
+async def test_enrich_all_keeps_going_when_one_member_errors():
+    # A single member raising an unwrapped error (e.g. an aiohttp timeout that
+    # enrich_character doesn't catch) must not cancel the rest of the batch;
+    # that member is kept un-enriched and the others still enrich.
+    client = RaiderIOClient()
+
+    async def fake_enrich(member):
+        if member.character_name == "Boom":
+            raise TimeoutError("network blip")
+        member.item_level = 600.0
+        return member
+
+    client.enrich_character = fake_enrich
+
+    members = [Member("A"), Member("Boom"), Member("B")]
+    result = await client.enrich_all(members, concurrency=2, chunk_size=25)
+
+    assert len(result) == 3  # nobody dropped
+    by_name = {m.character_name: m for m in result}
+    assert by_name["A"].item_level == 600.0
+    assert by_name["B"].item_level == 600.0
+    assert by_name["Boom"].item_level is None  # kept, just un-enriched
+
+
+async def test_enrich_all_propagates_cancellation():
+    # Cancellation is a BaseException, not a per-member error to swallow.
+    client = RaiderIOClient()
+
+    async def fake_enrich(member):
+        raise asyncio.CancelledError
+
+    client.enrich_character = fake_enrich
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.enrich_all([Member("A")], concurrency=2)
