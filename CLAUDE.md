@@ -50,8 +50,9 @@ python -m scripts.upload_savedvars dump.lua         # POST a dump to /api/upload
 
 Python 3.12. CI (`.github/workflows/ci.yml`) runs **ruff lint + `pytest` with 88%
 coverage** on every PR and on pushes to `main`; formatting (`ruff format`) is
-available but not enforced. `.github/workflows/sync.yml` runs the sync on a
-schedule, and `.github/workflows/release.yml` cuts a GitHub Release on `v*` tags.
+available but not enforced. `.github/workflows/release.yml` cuts a GitHub Release
+on `v*` tags. (There is deliberately no scheduled sync workflow: public Actions
+logs and artifacts would publish the guild roster. The host runs the sync.)
 Contribution workflow and the GitHub-Flow branching/release model live in
 `CONTRIBUTING.md` and `docs/branching.md`.
 
