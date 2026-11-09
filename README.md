@@ -1,4 +1,40 @@
-# Calcifer — the hearth of From the Ashes
+# Calcifer: the hearth of From the Ashes
+
+## At a glance
+
+**What it is:** a Discord bot that runs the community for an online gaming guild
+(about 300 members, the size of the guild rather than a count of bot users). It
+pulls member and activity data from several public game APIs into one database,
+then uses it to keep the guild's Discord tidy: self-updating information boards,
+one news feed in place of several noisy bots, and officer tools for recruitment,
+attendance and loot.
+
+**The problem it solves:** the guild's information was scattered across
+spreadsheets, websites and half a dozen third-party bots, each posting in its own
+style. Calcifer collects the data once, stores it in one place and presents it
+consistently, so officers spend less time chasing information by hand.
+
+**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite), Docker, hosted on
+Railway. Tested with pytest (965 offline tests, 88% coverage gate in CI) and
+linted with ruff.
+
+**Status:** in development. It is my own unpaid hobby project for a guild I run.
+
+**How it was built:** with AI assistance. I designed and directed the project and
+reviewed the changes; much of the code was written with Claude (Anthropic's AI
+assistant), and most commits are co-authored with it.
+
+**Try it locally:** the test suite needs no accounts, keys or network access.
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+To run the bot itself you need your own Discord bot token; see
+[Quick start](#quick-start) below.
+
+---
 
 > The little fire demon who keeps the **From the Ashes** guild (Hellfire EU)
 > warm, tidy, and alive. He runs the castle in the GM's name: pulling the
