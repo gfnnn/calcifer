@@ -67,28 +67,13 @@ The repo includes [`render.yaml`](../render.yaml), so it's close to one-tap.
 
 ---
 
-## Option C — GitHub Actions for the sync (free, no server)
-
-If you only want the **data kept fresh** (and to add a host later), the included workflow [`.github/workflows/sync.yml`](../.github/workflows/sync.yml)
-runs the sync on a schedule or on demand — entirely free, no server.
-
-- Trigger from the **GitHub mobile app**: *Actions → Sync roster → Run workflow*.
-- It builds `ftabot.db` and uploads it as a downloadable **artifact**.
-- Raider.IO needs no key, so it works with zero secrets; add
-  `WOWAUDIT_API_KEY` / `BLIZZARD_*` as **repo secrets** for richer data.
-
-This does **not** run the Discord bot (Actions jobs are short-lived). Pair it
-with Option A/B when you want that.
-
----
-
-## Option D — Termux, directly on an Android phone (free)
+## Option C — Termux, directly on an Android phone (free)
 
 Truly on-device, but the phone must stay awake and online.
 
 ```bash
 pkg install python git
-git clone https://github.com/gfnnn/fta && cd fta
+git clone https://github.com/gfnnn/calcifer && cd calcifer
 pip install -r requirements.txt
 export DISCORD_TOKEN=...  WOWAUDIT_API_KEY=...  SYNC_INTERVAL_MINUTES=360
 python -m ftabot.serve
@@ -101,10 +86,10 @@ Fine for testing; not recommended for a guild that relies on uptime.
 ## Triggering a sync (no auto-sync)
 
 Auto-sync is off by default (`SYNC_INTERVAL_MINUTES=0`). Refresh the roster
-whenever you want, both phone-friendly:
+whenever you want:
 
 - **Discord.** Run `/sync` (officers only) from the Discord mobile app.
-- **GitHub Actions.** *Actions → Sync roster → Run workflow* (Option C above).
+- **On a schedule.** Set `SYNC_INTERVAL_MINUTES` (e.g. `360`) on the host.
 
 A sync pulls each character's data **and** details
 (gear, vault, wishlist, loot) from the configured sources.

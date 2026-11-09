@@ -56,15 +56,6 @@ These make the squash-merge + linear-history model in `branching.md` the default
 only works if that account has **write** access to the repo (it's the owner here,
 so this should already be satisfied — confirm if more reviewers are added later).
 
-## ☐ Actions secrets for richer sync (Settings → Secrets and variables → Actions)
-
-`ci.yml` needs none. The scheduled `sync.yml` works with zero secrets (Raider.IO
-is keyless); add these only for richer data:
-
-- `WOWAUDIT_API_KEY`
-- `BLIZZARD_CLIENT_ID`
-- `BLIZZARD_CLIENT_SECRET`
-
 ## ☑ Already in the repo (no action needed)
 
 - CI lint + test + 88% coverage gate (`.github/workflows/ci.yml`)
