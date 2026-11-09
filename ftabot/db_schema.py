@@ -385,7 +385,7 @@ CREATE TABLE IF NOT EXISTS sticky_pages (
     updated_at        TEXT
 );
 
--- Dashboard-edited copy: overrides for the bundled ftabot/content/*.json
+-- Sticky-page copy overrides (/page import) for the bundled ftabot/content/*.json
 -- documents, one JSON body per document name.  A row here beats the bundled
 -- file; deleting the row reverts to the shipped copy.
 CREATE TABLE IF NOT EXISTS content_docs (
@@ -420,7 +420,7 @@ CREATE TABLE IF NOT EXISTS scout_leads (
     UNIQUE (name, realm, region)
 );
 
--- Runtime settings: a small key/value overlay that lets the dashboard change a
+-- Runtime settings: a small key/value overlay that lets /posting change a
 -- handful of operational values (the posting guardrail and its channels) live,
 -- without a redeploy. A row here beats the env-built Config; deleting it reverts
 -- to the environment default. Only values the loops re-read each tick belong

@@ -1,10 +1,11 @@
 """All-in-one entry point for cloud hosting.
 
-Runs the browser/API web app, the Discord bot, and a periodic roster sync in a
-single process, so a host only needs one service. Each piece turns itself on
-based on configuration:
+Runs the Discord bot, its posting loops, a periodic roster sync, and the small
+inbound ingest listener in a single process, so a host only needs one service.
+Each piece turns itself on based on configuration:
 
-  * web app        — always (binds $PORT / WEB_PORT)
+  * ingest listener — always (binds $PORT / WEB_PORT): /healthz for the host,
+                      plus the Raid-Helper webhook and the SavedVariables upload
   * Discord bot    — only if DISCORD_TOKEN is set
   * periodic sync  — only if SYNC_INTERVAL_MINUTES > 0
 
@@ -18,14 +19,13 @@ import logging
 
 import aiohttp
 import discord
-import uvicorn
 
 from .config import Config
 from .db import Database
+from .ingest import Ingest
 from .posting import PostBlocked
 from .runtime_settings import effective_post_gate
 from .sync import sync_guild
-from .web import create_app
 
 log = logging.getLogger("ftabot.serve")
 
@@ -52,8 +52,8 @@ def _make_sender(bot, config: Config):
     Every feed alert passes through the posting gate first: it is dropped while
     the guardrail is off, redirected to the confirmed test channel in test mode,
     and only reaches its real channel when posting is live. The gate is resolved
-    *per send* from the live settings overlay, so a dashboard change to the
-    posting mode takes effect immediately (no loop restart).
+    *per send* from the live settings overlay, so a `/posting mode` change
+    takes effect immediately (no loop restart).
     """
 
     async def _send(channel_id: str, embed, content: str | None = None) -> None:
@@ -82,8 +82,8 @@ def _make_sender(bot, config: Config):
     return _send
 
 
-async def _wire_webhook_sender(app, config: Config, bot) -> None:
-    """Once the bot is ready, let the web app's webhook receiver post instantly.
+async def _wire_webhook_sender(ingest: Ingest, config: Config, bot) -> None:
+    """Once the bot is ready, let the ingest webhook receiver post instantly.
 
     Also drains anything that queued in feed_outbox before the bot came up.
     """
@@ -91,7 +91,7 @@ async def _wire_webhook_sender(app, config: Config, bot) -> None:
 
     await bot.wait_until_ready()
     send = _make_sender(bot, config)
-    app.state.feed_sender = send
+    ingest.feed_sender = send
     try:
         async with Database(config.database_path) as db:
             await drain_outbox(db, config, send)
@@ -145,7 +145,7 @@ async def _board_loop(config: Config, bot) -> None:
     while True:
         try:
             async with Database(config.database_path) as db:
-                # Resolved each tick so a dashboard posting-mode change is honoured.
+                # Resolved each tick so a `/posting mode` change is honoured.
                 gate = await effective_post_gate(db, config)
                 emoji = guild_emoji_map(bot)  # re-read so new uploads are picked up
                 for row in await db.boards(enabled_only=True):
@@ -157,8 +157,8 @@ async def _board_loop(config: Config, bot) -> None:
                     except Exception as exc:  # noqa: BLE001 - one board never kills the loop
                         log.warning("board %s failed: %s", row["board_type"], exc)
                     await asyncio.sleep(1)  # stagger edits across channels
-                # Sticky pages ride the same tick, so a dashboard copy edit goes
-                # live within one refresh interval without an officer command.
+                # Sticky pages ride the same tick, so their live {tokens} stay
+                # current without an officer command.
                 for row in await db.sticky_pages():
                     page = PAGES.get(row["page_name"])
                     if page is None:
@@ -278,35 +278,28 @@ async def _run(config: Config) -> None:
     tasks: list[asyncio.Task] = []
     background: list[asyncio.Task] = []
 
-    # Web app (uvicorn run programmatically so it shares this event loop).
-    app = create_app(config)
-    uconfig = uvicorn.Config(
-        app,
-        host=config.web_host,
-        port=config.web_port,
-        log_level="info",
-    )
-    server = uvicorn.Server(uconfig)
-    tasks.append(asyncio.create_task(server.serve(), name="web"))
-    log.info("web app on %s:%s", config.web_host, config.web_port)
+    # Inbound ingest listener (healthz + Raid-Helper webhook + addon upload).
+    ingest = Ingest(config)
+    tasks.append(asyncio.create_task(ingest.serve(), name="ingest"))
+    log.info("ingest listener on %s:%s", config.web_host, config.web_port)
 
     # Discord bot (optional).
     if config.discord_token:
         from .bot import FtaBot
 
         bot = FtaBot(config)
-        # Expose the bot to the web app so /healthz can report gateway liveness.
-        app.state.bot = bot
+        # Expose the bot to the listener so /healthz can report gateway liveness.
+        ingest.bot = bot
         tasks.append(asyncio.create_task(bot.start(config.discord_token), name="bot"))
         log.info("Discord bot starting")
 
-        # Let the web app's webhook receiver (Raid-Helper) post through the bot.
+        # Let the ingest webhook receiver (Raid-Helper) post through the bot.
         # This is a ONE-SHOT setup task (wires the sender, drains the outbox, then
         # returns), so it must not count toward the shutdown trigger below — else
         # the whole process tears down the moment the bot becomes ready.
         background.append(
             asyncio.create_task(
-                _wire_webhook_sender(app, config, bot), name="webhook-sender"
+                _wire_webhook_sender(ingest, config, bot), name="webhook-sender"
             )
         )
 
@@ -340,7 +333,7 @@ async def _run(config: Config) -> None:
             tasks.append(asyncio.create_task(_score_loop(config, bot), name="scores"))
             log.info("score refresh every %d min", config.score_refresh_minutes)
     else:
-        log.info("DISCORD_TOKEN not set — running web only")
+        log.info("DISCORD_TOKEN not set — running ingest (+ sync) only")
 
     # Periodic sync (optional).
     if config.sync_interval_minutes > 0:

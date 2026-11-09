@@ -1,22 +1,26 @@
 # Running it from your phone (no dev environment)
 
 You don't run this *on* your phone — you deploy it to a cloud host once, then
-manage everything from your phone's browser and the Discord app. The repo ships
-an all-in-one process (`python -m ftabot.serve`) that runs the **web app +
-Discord bot + scheduled sync** together, plus a `Dockerfile` so any container
-host can run it.
+run everything from the Discord app. The repo ships an all-in-one process
+(`python -m ftabot.serve`) that runs the **Discord bot + its feed/board loops +
+scheduled sync** together, plus a `Dockerfile` so any container host can run it.
+
+There is no dashboard to host. The process binds one port only so the host can
+health-check `/healthz` and so two sources can push data in (the Raid-Helper
+webhook and the SavedVariables upload).
 
 After it's deployed you operate it entirely from mobile:
 
-- **Discord app** → slash commands (`/sync`, `/gmreport`, `/raidcheck`, …).
-- **Phone browser** → the dashboard at `/app` (`/` redirects there).
-- **Host dashboard** (browser) → logs, secrets, restarts.
+- **Discord app** → slash commands (`/sync`, `/posting`, `/board`, `/feed`,
+  `/gmreport`, `/raidcheck`, …). Every runtime control lives here.
+- **Host console** (browser) → logs, secrets, restarts.
+- **GitHub** → anything that isn't a command is a change request to the repo.
 
 ---
 
 ## Option A — Railway (recommended, ~$5/mo)
 
-Best balance of always-on + persistent storage + fully browser-managed.
+Best balance of always-on + persistent storage, set up entirely from a browser.
 
 The repo includes [`railway.json`](../railway.json) (Dockerfile build,
 `/healthz` health check, restart-on-failure), so Railway is close to turnkey.
@@ -30,19 +34,20 @@ The repo includes [`railway.json`](../railway.json) (Dockerfile build,
 4. Service → **Variables**, add:
    - `DATABASE_PATH` = `/data/ftabot.db`
    - `WOWAUDIT_API_KEY` = *your team key*
-   - `SYNC_TOKEN` = *a secret you pick* (unlocks the browser "Sync now" button)
-   - leave `SYNC_INTERVAL_MINUTES` unset (auto-sync stays off — sync on demand)
-   - **(optional, add after first boot is healthy)** `DISCORD_TOKEN`, and
+   - `SYNC_INTERVAL_MINUTES` = `360` for a 6-hourly auto-sync (or leave it
+     unset and sync on demand with `/sync`)
+   - **(add after first boot is healthy)** `DISCORD_TOKEN`, and
      `DISCORD_GUILD_ID` for instant slash-command registration
-5. **Settings → Networking → Generate Domain** for the public URL.
-6. Open `https://<your-domain>/healthz` (should be `{"status":"ok",...}`), then
-   `https://<your-domain>/app`, enter your `SYNC_TOKEN` to unlock (it is stored
-   in a secure http-only cookie, so it stays out of the URL), and tap **Sync
-   now**. First sync takes a few minutes (full guild); afterwards the site shows
-   the roster, and re-syncs the same day are fast (incremental).
+5. **Settings → Networking → Generate Domain**. You only need the public URL
+   for the Raid-Helper webhook and the SavedVariables upload; skip it if you
+   use neither.
+6. Check the deploy is healthy (the host's health check hits `/healthz`, which
+   answers `{"status":"ok",...}`), then run `/sync` in Discord. First sync
+   takes a few minutes (full guild); re-syncs the same day are fast
+   (incremental).
 
-> Tip: deploy **web-only first** (no `DISCORD_TOKEN`) to confirm it's healthy,
-> then add the Discord token — an invalid bot token would crash-loop the process.
+> Tip: deploy **without `DISCORD_TOKEN` first** to confirm it's healthy, then
+> add the token — an invalid bot token would crash-loop the process.
 
 ---
 
@@ -51,20 +56,20 @@ The repo includes [`railway.json`](../railway.json) (Dockerfile build,
 The repo includes [`render.yaml`](../render.yaml), so it's close to one-tap.
 
 1. On **render.com** (mobile browser): **New → Blueprint** → select this repo.
-2. Render reads `render.yaml` (web service + 1 GB disk at `/data`).
+2. Render reads `render.yaml` (one service + 1 GB disk at `/data`; it is typed
+   `web` only so Render health-checks it and routes the inbound webhook).
 3. Enter the secret env vars when prompted (`DISCORD_TOKEN`,
    `WOWAUDIT_API_KEY`, …) → **Apply**.
 
 > Render's free web services spin down when idle, which disconnects a Discord
 > bot — use the paid `starter` instance (already set in the blueprint) for an
-> always-on bot, or use Render only for the web app and sync via Option C.
+> always-on bot.
 
 ---
 
 ## Option C — GitHub Actions for the sync (free, no server)
 
-If you only want the **data kept fresh** (and to browse it / build a host
-later), the included workflow [`.github/workflows/sync.yml`](../.github/workflows/sync.yml)
+If you only want the **data kept fresh** (and to add a host later), the included workflow [`.github/workflows/sync.yml`](../.github/workflows/sync.yml)
 runs the sync on a schedule or on demand — entirely free, no server.
 
 - Trigger from the **GitHub mobile app**: *Actions → Sync roster → Run workflow*.
@@ -72,8 +77,8 @@ runs the sync on a schedule or on demand — entirely free, no server.
 - Raider.IO needs no key, so it works with zero secrets; add
   `WOWAUDIT_API_KEY` / `BLIZZARD_*` as **repo secrets** for richer data.
 
-This does **not** run the Discord bot or host the website (Actions jobs are
-short-lived). Pair it with Option A/B when you want those.
+This does **not** run the Discord bot (Actions jobs are short-lived). Pair it
+with Option A/B when you want that.
 
 ---
 
@@ -96,29 +101,27 @@ Fine for testing; not recommended for a guild that relies on uptime.
 ## Triggering a sync (no auto-sync)
 
 Auto-sync is off by default (`SYNC_INTERVAL_MINUTES=0`). Refresh the roster
-whenever you want, three ways — all phone-friendly:
+whenever you want, both phone-friendly:
 
-- **Browser button.** Set a `SYNC_TOKEN` env var, then open
-  `https://your-app/app`, enter the token once to unlock (it is kept in a
-  secure http-only cookie, never in the URL), and tap **Sync now**. The page
-  shows live status and the last result.
 - **Discord.** Run `/sync` (officers only) from the Discord mobile app.
 - **GitHub Actions.** *Actions → Sync roster → Run workflow* (Option C above).
 
-Scripts/automation can `POST /api/sync` with an `X-Sync-Token` header, and poll
-`GET /api/sync/status`. A sync pulls each character's data **and** details
+A sync pulls each character's data **and** details
 (gear, vault, wishlist, loot) from the configured sources.
 
 ## The posting guardrail (deny-by-default)
 
 Before *any* message reaches Discord it passes through one choke point, so
-posting is off until you deliberately open it. `POSTING_MODE` has three stages
-that map to how you roll a surface out:
+posting is off until you deliberately open it. The mode has three stages that
+map to how you roll a surface out. Switch it live from Discord with
+`/posting mode` (GM or Discord admin); `POSTING_MODE` / `TEST_CHANNEL_ID` in the
+environment are only the boot defaults, and `/posting status` shows what is in
+effect.
 
-| `POSTING_MODE` | What posts, and where |
+| Mode | What posts, and where |
 | --- | --- |
 | `off` *(default)* | **Nothing, anywhere.** Boards and feed alerts are both muted. A deploy can never surprise the server. |
-| `test` | **Every post is redirected to `TEST_CHANNEL_ID`** — your private channel. Production channels receive nothing. Posts only start once that channel is confirmed (set). |
+| `test` | **Every post is redirected to the test channel** (`/posting test-channel`) — your private channel. Production channels receive nothing. Posts only start once that channel is confirmed (set). |
 | `live` | Boards you have **promoted** reach their real channel; everything not yet promoted still lands in the test channel. |
 
 This is what enforces the rule "*seen by members only once confirmed*": a board
@@ -131,14 +134,14 @@ drop in `off`, redirect in `test`).
 You can trial new surfaces in the live server without the community seeing a
 thing. The workflow:
 
-1. **Make a private channel** (e.g. `#calcifer-lab`), officer-only, and set its
-   ID as `TEST_CHANNEL_ID`.
-2. **Confirm the location, then send test posts.** Set `POSTING_MODE=test`. Now
+1. **Make a private channel** (e.g. `#calcifer-lab`), officer-only, and run
+   `/posting test-channel channel:#calcifer-lab`.
+2. **Confirm the location, then send test posts.** Run `/posting mode test`. Now
    *all* boards/alerts render into `#calcifer-lab` and nowhere else — point a
    board at its eventual production channel with `/board create` and it still
    shows up only in the test channel.
 3. **Review it in full** — every state and variant of the post.
-4. **Promote to production.** Set `POSTING_MODE=live` and run `/board promote`
+4. **Promote to production.** Run `/posting mode live` and `/board promote`
    on the board: only now is it re-posted in its real channel and seen by
    members. Un-promoted surfaces stay sandboxed.
 
@@ -168,12 +171,12 @@ hosted deploy:
 
 | Variable | Why |
 | --- | --- |
-| `DISCORD_TOKEN` | Runs the bot (omit to run web-only). |
+| `DISCORD_TOKEN` | Runs the bot (omit it and only the sync + ingest listener run). |
 | `WOWAUDIT_API_KEY` | Primary data source (gear/vault/wishlist/loot). |
 | `SYNC_INTERVAL_MINUTES` | Auto-refresh interval for the all-in-one runner. |
 | `DATABASE_PATH` | Point at the mounted volume, e.g. `/data/ftabot.db`. |
-| `PORT` | Set automatically by most hosts; the app binds to it. |
-| `SYNC_TOKEN` | Unlocks the browser **Sync now** button at `/app`. |
+| `PORT` | Set automatically by most hosts; the ingest listener binds to it. |
+| `RAIDHELPER_WEBHOOK_SECRET` / `SAVEDVARS_UPLOAD_SECRET` | Enable the two inbound routes; each answers 503 until its secret is set. |
 
 The first roster appears after the first sync — either wait for the interval,
 or run `/sync` from Discord once the bot is up.

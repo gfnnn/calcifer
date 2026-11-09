@@ -220,6 +220,25 @@ async def test_board_remove(db):
     assert "to remove" in miss_it.response.content
 
 
+async def test_board_disable_and_enable(db):
+    board_id = await db.add_board("hot20", "123")
+    cog = BoardsCog(_Bot(db, _cfg()))
+
+    off = _Interaction(perms=_Perms(manage_guild=True))
+    await BoardsCog.disable.callback(cog, off, board_id)
+    assert "paused" in off.response.content
+    assert await db.boards(enabled_only=True) == []  # the board loop skips it
+
+    on = _Interaction(perms=_Perms(manage_guild=True))
+    await BoardsCog.enable.callback(cog, on, board_id)
+    assert "enabled" in on.response.content
+    assert len(await db.boards(enabled_only=True)) == 1
+
+    miss = _Interaction(perms=_Perms(manage_guild=True))
+    await BoardsCog.enable.callback(cog, miss, 9999)
+    assert "No board" in miss.response.content
+
+
 async def test_board_commands_gated(db):
     """Every board command bounces a non-(GM/Discord-admin) before doing work."""
     cog = BoardsCog(_Bot(db, _cfg()))
@@ -229,6 +248,8 @@ async def test_board_commands_gated(db):
         lambda it: BoardsCog.refresh.callback(cog, it, board_id),
         lambda it: BoardsCog.promote.callback(cog, it, board_id),
         lambda it: BoardsCog.demote.callback(cog, it, board_id),
+        lambda it: BoardsCog.disable.callback(cog, it, board_id),
+        lambda it: BoardsCog.enable.callback(cog, it, board_id),
         lambda it: BoardsCog.remove.callback(cog, it, board_id),
     ):
         it = _Interaction(perms=_Perms())
@@ -237,6 +258,7 @@ async def test_board_commands_gated(db):
         assert "Guild Master" in it.response.content
     # The denied refresh/promote/etc left the board untouched.
     assert (await db.get_board(board_id))["promoted"] is False
+    assert (await db.get_board(board_id))["enabled"] is True
 
 
 # --- alerts cog -------------------------------------------------------------

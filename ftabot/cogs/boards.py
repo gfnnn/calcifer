@@ -127,9 +127,9 @@ class BoardsCog(commands.Cog):
 
         if action == "blocked":
             reason = (
-                "posting is **off** (`POSTING_MODE=off`)"
+                "posting is **off** (`/posting mode`)"
                 if gate.mode is PostingMode.OFF
-                else "no test channel is confirmed (`TEST_CHANNEL_ID`)"
+                else "no test channel is set (`/posting test-channel`)"
             )
             await interaction.followup.send(
                 f"Guardrail held: nothing posted because {reason}.", ephemeral=True
@@ -165,7 +165,7 @@ class BoardsCog(commands.Cog):
         await interaction.response.send_message(
             f"Promoted board `#{board_id}` -> <#{row['channel_id']}>. "
             f"On the next refresh (or `/board refresh {board_id}`) it posts there, "
-            "and members will see it. Needs `POSTING_MODE=live`.",
+            "and members will see it. Needs `/posting mode live`.",
             ephemeral=True,
         )
 
@@ -183,6 +183,35 @@ class BoardsCog(commands.Cog):
             f"Board `#{board_id}` is sandboxed again; it renders to the test channel.",
             ephemeral=True,
         )
+
+    async def _set_enabled(
+        self, interaction: discord.Interaction, board_id: int, enabled: bool
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        if not await self.bot.db.set_board_enabled(board_id, enabled):
+            await interaction.response.send_message(
+                f"No board `#{board_id}`. See `/board list`.", ephemeral=True
+            )
+            return
+        state = (
+            "enabled; it refreshes again on the next tick"
+            if enabled
+            else "paused; its message stays put but stops updating"
+        )
+        await interaction.response.send_message(
+            f"Board `#{board_id}` is {state}.", ephemeral=True
+        )
+
+    @board.command(name="disable", description="Pause a board's refreshes without removing it.")
+    @app_commands.describe(board_id="The board number from /board list")
+    async def disable(self, interaction: discord.Interaction, board_id: int) -> None:
+        await self._set_enabled(interaction, board_id, False)
+
+    @board.command(name="enable", description="Resume a paused board.")
+    @app_commands.describe(board_id="The board number from /board list")
+    async def enable(self, interaction: discord.Interaction, board_id: int) -> None:
+        await self._set_enabled(interaction, board_id, True)
 
     @board.command(name="remove", description="Unregister a board (does not delete its message).")
     @app_commands.describe(board_id="The board number from /board list")

@@ -2,7 +2,7 @@
 
 Covers the lifecycle the feature promises: first ``/page post`` creates the
 messages, a different channel deletes the old copy and re-posts, the same
-channel with unchanged copy does nothing, and a dashboard copy edit is applied
+channel with unchanged copy does nothing, and a copy change is applied
 by editing each message in place. Plus the guardrail (off/test/live) and the
 self-heal paths (vanished message, post-count change).
 """
@@ -109,7 +109,7 @@ async def test_render_uses_bundled_copy_by_default(db):
     assert payload.posts[0].startswith("# 🔥 Welcome to From the Ashes")
 
 
-async def test_render_prefers_dashboard_override(db):
+async def test_render_prefers_imported_override(db):
     await db.set_content_doc(RULES.content_doc, {"posts": ["# Custom rules"]})
     payload = await render_page(db, Config(), RULES)
     assert payload.posts == ["# Custom rules"]
@@ -338,10 +338,8 @@ async def test_content_doc_roundtrip_and_revert(db):
     assert await db.get_content_doc("page_rules_info") is None
     await db.set_content_doc("page_rules_info", {"posts": ["a"]})
     assert (await db.get_content_doc("page_rules_info"))["posts"] == ["a"]
-    assert await db.content_doc_updated_at("page_rules_info") is not None
     assert await db.delete_content_doc("page_rules_info") is True
     assert await db.get_content_doc("page_rules_info") is None
-    assert await db.content_doc_updated_at("page_rules_info") is None
 
 
 async def test_content_doc_corrupt_json_reads_as_missing(db):

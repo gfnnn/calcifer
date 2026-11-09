@@ -161,8 +161,8 @@ def class_label(class_name: str | None, emoji: EmojiMap | None = None) -> str:
 
 # --- Mythic+ score colour scale (Raider.IO) ---------------------------------
 # Raider.IO's score ramp as (min_score, hex) bands, highest first. ``score_color``
-# returns the *exact* hex for surfaces where real colour is possible (the web
-# dashboard, an embed accent). Discord embed *text* can't be coloured, so the
+# returns the *exact* hex for surfaces where real colour is possible (an embed
+# accent). Discord embed *text* can't be coloured, so the
 # board leaves the score plain rather than approximating the ramp with emoji.
 SCORE_TIERS: tuple[tuple[int, int], ...] = (
     (4275, 0xFF8000), (4120, 0xF9753F), (4000, 0xF16961), (3880, 0xE75E7F),

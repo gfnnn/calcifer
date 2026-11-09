@@ -62,23 +62,16 @@ class Config:
 
     database_path: str = "ftabot.db"
 
-    # Web server (browser query layer)
+    # Inbound ingest listener (healthz + Raid-Helper webhook + addon upload).
     web_host: str = "0.0.0.0"
     web_port: int = 8080
 
     # All-in-one runner: refresh the roster every N minutes (0 = never).
     sync_interval_minutes: int = 0
 
-    # Shared secret that protects the web "Sync now" trigger (unset = disabled).
-    sync_token: str | None = None
-
-    # Send the sync-token cookie only over HTTPS (Secure flag). On by default;
-    # set COOKIE_SECURE=0 for local http:// development.
-    cookie_secure: bool = True
-
     # Shared secret for the desktop-addon upload endpoint that feeds the data
     # spine (RCLootCouncil loot + GRM identity SavedVariables). Unset = the
-    # upload route is disabled, exactly like the sync trigger.
+    # upload route is disabled.
     savedvars_upload_secret: str | None = None
 
     # WoW Audit API (primary source of truth when set)
@@ -327,8 +320,6 @@ class Config:
             # Most hosts inject the port to bind via $PORT.
             web_port=_int("PORT") or _int("WEB_PORT") or 8080,
             sync_interval_minutes=_int("SYNC_INTERVAL_MINUTES") or 0,
-            sync_token=_clean(os.environ.get("SYNC_TOKEN")),
-            cookie_secure=_bool("COOKIE_SECURE", True),
             savedvars_upload_secret=_clean(os.environ.get("SAVEDVARS_UPLOAD_SECRET")),
             wowaudit_api_key=_clean(os.environ.get("WOWAUDIT_API_KEY")),
             wowaudit_base_url=(

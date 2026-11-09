@@ -4,9 +4,10 @@ A *page* is hand-written Discord markdown (headers, ``-#`` subtext, lists,
 emoji) posted as a short run of plain-content messages that stack into one
 continuous wall post — the Rules & Info welcome page is the first. Unlike the
 living boards (data-driven embeds in ``boards/``), a page's copy is the GM's
-words verbatim: it lives in ``ftabot/content/page_<name>.json``, a dashboard
-edit saves an override into the ``content_docs`` table, and the bundled file is
-only the shipped default.
+words verbatim. The source of truth is ``ftabot/content/page_<name>.json``
+(edit it with a change request). For a copy fix that can't wait for a deploy an
+officer can ``/page import`` a JSON file, which saves an override into the
+``content_docs`` table that beats the bundled file until ``/page reset``.
 
 Placement follows the officer's explicit channel choice (``/page post``):
 
@@ -14,7 +15,7 @@ Placement follows the officer's explicit channel choice (``/page post``):
 * **Moved** — requested channel differs from where the live copy sits: the old
   messages are deleted, then the page is re-posted in the new channel.
 * **Unchanged** — same channel, same copy: nothing happens at all.
-* **Edited** — same channel but the copy changed (a dashboard save): each
+* **Edited** — same channel but the copy changed (a deploy or import): each
   message is edited in place, no re-post, no scroll.
 
 Like every outbound surface, the destination resolves through the posting
@@ -45,21 +46,23 @@ if TYPE_CHECKING:
     from .db import Database
     from .posting import PostGate
 
-# Discord's hard cap on bot message content; the dashboard editor enforces it.
+# Discord's hard cap on bot message content; ``validate_page_doc`` enforces it.
 MAX_POST_CHARS = 2000
+# A page is a short stack of messages, not a channel's worth.
+MAX_POSTS = 10
 
 
 @dataclass(frozen=True)
 class PageDef:
     """One sticky page: its registry name and where its copy document lives."""
 
-    name: str  # registry key, used by /page and the dashboard
-    title: str  # friendly name for command choices and the dashboard
+    name: str  # registry key, used by /page
+    title: str  # friendly name for command choices
     content_doc: str  # content document name (content/<doc>.json + DB override)
 
 
 # The sticky pages on offer. Adding a page = a bundled content/page_<name>.json
-# plus one entry here; the /page choices and the dashboard section derive from it.
+# plus one entry here; the /page choices derive from it.
 PAGES: dict[str, PageDef] = {
     "rules_info": PageDef(
         name="rules_info",
@@ -83,9 +86,36 @@ class PagePayload:
 
 
 async def load_page_doc(db: "Database", page: PageDef) -> dict:
-    """The page's copy document: dashboard override first, bundled file second."""
+    """The page's copy document: an imported override first, bundled file second."""
     doc = await db.get_content_doc(page.content_doc)
     return doc if doc is not None else content.load(page.content_doc)
+
+
+class PageCopyError(ValueError):
+    """An imported page document failed validation (message is officer-facing)."""
+
+
+def validate_page_doc(doc: object) -> list[str]:
+    """The ``posts`` of an imported page document, or raise :class:`PageCopyError`.
+
+    Guards ``/page import`` so a bad file can never reach Discord: the shape must
+    be ``{"posts": ["...", ...]}`` with 1 to ``MAX_POSTS`` non-empty messages,
+    each within Discord's per-message limit.
+    """
+    posts = doc.get("posts") if isinstance(doc, dict) else None
+    if not isinstance(posts, list) or not posts:
+        raise PageCopyError('The file needs a non-empty "posts" list.')
+    if len(posts) > MAX_POSTS:
+        raise PageCopyError(f"At most {MAX_POSTS} messages per page.")
+    for i, post in enumerate(posts, start=1):
+        if not isinstance(post, str) or not post.strip():
+            raise PageCopyError(f"Message {i} is empty or not text.")
+        if len(post) > MAX_POST_CHARS:
+            raise PageCopyError(
+                f"Message {i} is {len(post)} characters; Discord allows "
+                f"{MAX_POST_CHARS} per message. Split it into two messages."
+            )
+    return posts
 
 
 async def render_page(db: "Database", config: "Config", page: PageDef) -> PagePayload | None:

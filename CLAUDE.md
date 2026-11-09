@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Discord bot + FastAPI web app + SQLite database for the **From the Ashes**
-WoW guild (Hellfire EU). It pulls live roster data from WoW community APIs into
-one SQLite file and lets the guild query it from Discord or a browser. See
+A Discord bot + SQLite database for the **From the Ashes** WoW guild (Hellfire
+EU). It pulls live roster data from WoW community APIs into one SQLite file,
+lets the guild query it from Discord, and posts feed alerts / living boards /
+sticky pages back into Discord. **There is no dashboard and no browsable API**:
+every runtime control is a Discord command, and anything else is a change
+request to this repo (code, `content/*.json`, or env vars). See
 `README.md` for the full feature/command list and `docs/` for design docs
 (`vision.md` for the whole vision + roadmap, `data-sources.md`, `deploy.md`).
 
@@ -25,13 +28,12 @@ ruff check --fix ftabot scripts tests               # auto-fix
 python -m pytest                                    # full suite
 python -m pytest -q                                 # how CI runs it
 python -m pytest tests/test_metrics.py              # one file
-python -m pytest tests/test_web.py::test_name       # one test
+python -m pytest tests/test_cogs.py::test_name      # one test
 
 # Run the pieces (all read the same SQLite DB; sync is the only net-bound part)
 python -m scripts.sync_cli --list                   # seed/refresh DB headless
-python -m ftabot.bot                                # Discord bot only
-python -m ftabot.web                                # web/API only (:8080)
-python -m ftabot.serve                              # web + bot + scheduled sync (one process; Dockerfile uses this)
+python -m ftabot.bot                                # Discord bot only (slash commands, no loops)
+python -m ftabot.serve                              # bot + loops + scheduled sync + ingest listener (one process; Dockerfile uses this)
 
 # Live-API smoke checks (hit the network; run from a FRESH deployed session
 # that has the secrets injected — see docs/verification-runbook.md)
@@ -55,14 +57,16 @@ Contribution workflow and the GitHub-Flow branching/release model live in
 
 ## Architecture
 
-Three independent surfaces over one shared SQLite database. The **sync** writes;
-the **bot** and **web** only read (plus officer-entered manual fields).
+API connections feed one shared SQLite database; Discord is the only front end.
+The **sync** (and the two inbound pushes) write; the **cogs** read (plus
+officer-entered manual fields) and the **boards/feeds/pages** post.
 
 ```
 WoW Audit / Raider.IO / Blizzard / Warcraft Logs  ──►  ftabot/sync.py  ──►  SQLite (ftabot.db)
-                                                                              ▲ reads
-                                              ftabot/cogs/* (Discord) ────────┤
-                                              ftabot/web.py (FastAPI) ────────┘
+Raid-Helper webhook / addon .lua upload  ──►  ftabot/ingest.py  ──────────────►  ▲
+                                                                                 │ reads
+                              ftabot/cogs/* (slash commands) ────────────────────┤
+                              boards / feeds / pages (Discord posts) ────────────┘
 ```
 
 Key flow and layering:
@@ -105,8 +109,8 @@ Key flow and layering:
   (a dependency-free WoW SavedVariables Lua reader) + `rclootcouncil.py` / `grm.py`
   (addon mappers).
 - **Data spine** — `spine.py` orchestrates ingestion of the GM's uploaded addon
-  `.lua` (via `POST /api/upload/savedvars`, secret `SAVEDVARS_UPLOAD_SECRET`,
-  pushed by `scripts/upload_savedvars.py`): RCLootCouncil → `loot_history`, and
+  `.lua` (via `POST /api/upload/savedvars` on `ingest.py`, secret
+  `SAVEDVARS_UPLOAD_SECRET`, pushed by `scripts/upload_savedvars.py`): RCLootCouncil → `loot_history`, and
   GRM → the `identity_members` table + `identity.py`'s pure alt↔main account
   grouping overlaid onto `members`. GRM ingestion is an **authoritative manual
   write** (it owns `is_main`/`main_character_id`), distinct from API syncs.
@@ -126,15 +130,15 @@ Key flow and layering:
 - **`scores.py`** — targeted, bounded Mythic+ score refresh (raiders + top
   scorers) that re-pulls only who matters, then nudges the living boards.
 - **`models.py`** (`Member` dataclass + `details_json` blob, WoW reference data),
-  **`views.py`** (shared view-models for GM/Raid/Loot), **`wow_data.py`** (editable
+  **`views.py`** (view-models behind the GM/Raid/Loot report commands), **`wow_data.py`** (editable
   raid-buff table), **`ui.py`** (Member → Discord embeds), **`brand.py`**
   (Calcifer's colour/icon/voice/mood layer; `persona.py` is the older feed-only
   voice module). The full Discord formatting palette these render *through*
   (markdown, `<t:…>` timestamps, mentions, embeds, Components V2, limits) is
   catalogued in [`docs/communication.md`](docs/communication.md).
-- **`content/`** — GM-editable JSON: `page_*.json` (the **sticky pages'** bundled
-  default copy for Rules & Info and Guides & Resources; the dashboard saves
-  overrides to `content_docs` instead of the file) and `recruitment.json` (the
+- **`content/`** — GM-editable JSON, changed by change request: `page_*.json`
+  (the **sticky pages'** copy for Rules & Info and Guides & Resources; a
+  `/page import` override in `content_docs` beats the file until `/page reset`) and `recruitment.json` (the
   Recruitment board's cultural prose). `content.load(name, default)` reads the
   bundled file and falls back to a default on a missing/malformed file, so a
   surface never crashes on a hand-edit typo.
@@ -144,50 +148,32 @@ Key flow and layering:
   member-count/progression/recruiting values). One home so both surfaces import
   the same substitution without a cycle.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
-  `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `scores`
-  (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
+  `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`,
+  `scores` (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
   permission gate (Manage-Server perm or the admin role) so every cog gates through
   one helper. Registered in `bot.py:setup_hook`; setting `DISCORD_GUILD_ID` makes
   commands appear instantly instead of ~1h global propagation. `BOT_COMMANDS_ENABLED=0`
   skips the cogs and clears any registered commands (the bot still runs feeds/boards).
-- **`web.py`** — `create_app(config)` returns the FastAPI app (the dashboard
-  shell + JSON API + Swagger at `/docs`). It serves **one single-page dashboard at
-  `/app`** (a static, dependency-free shell in `ftabot/static/`: `index.html` +
-  `css/app.css` + ES-module `js/` — `app.js` bootstrap, `router.js` hash router,
-  `api.js` fetch/unlock, `components.js`, and one module per `js/sections/`:
-  home, roster, raid, loot, recruitment, comms, settings). `/` redirects to
-  `/app`; `/static` is a `StaticFiles` mount. The shell is served unconditionally
-  and **every JSON API is gated by `SYNC_TOKEN`** (constant-time; the first 401
-  reveals an unlock overlay that posts to `/api/sync/unlock`, setting an http-only
-  cookie). The Raid-Helper webhook verifies a shared secret; `/healthz`,
-  `/webhooks/*` and `/api/upload/savedvars` stay open. All logic lives in
-  `views.py` (async, composing pure `metrics.py`) — the JS only fetches a dict and
-  paints, which keeps the coverage gate satisfiable. **Home** hydrates from
-  `GET /api/home` (`views.home` + `views.attention` — a guild-health pulse + a
-  ranked "needs attention" triage queue merged with live `SyncManager` status);
-  **Roster** from `/api/members` (+ `/api/members/{name}/detail` for the profile
-  drill-down + embedded manual-field editor → `/api/admin/members/{id}`); **Raid**
-  from `/api/raid` + `/api/roster`; **Loot** from `/api/loot` (+ `/api/loot/
-  priority`); **Recruitment** from `/api/recruiting` + `/api/leads/*`; **Comms**
-  from `/api/boards`, `/api/feeds`, `/api/pages` + `/api/content/{page}` (sticky-
-  page copy → `content_docs`); **Settings** from `/api/settings`, `/api/sync*`,
-  `/api/overview`. These mirror the `/board`, `/feed`, `/page`, `/recruit`, and
-  member-admin (`/link`, `/setteam`, …) Discord cogs. Every control writes DB
-  state the `serve.py` board/feed loops (and the cogs) re-read each tick, so a
-  change goes live within one refresh interval (an on-demand refresh renders
-  immediately when the bot shares the process, else reports `queued`).
-  `ScoutManager` mirrors `SyncManager` to run the network-bound recruitment scout
-  (`/api/leads/capture`) as a background task.
+- **`ingest.py`** — the **only HTTP surface**: a small aiohttp listener (`Ingest`)
+  with exactly three routes: `GET /healthz` (host liveness; DB reachable +
+  Discord gateway state, always 200 so a gateway reconnect can't trip a restart
+  storm), `POST /webhooks/raidhelper` (shared secret; persists the event for the
+  Weekly Events board, then routes the alert into `feed_outbox`) and
+  `POST /api/upload/savedvars` (shared secret; the data-spine intake). Both POST
+  routes answer 503 until their secret is configured. `serve.py` sets
+  `ingest.feed_sender` / `ingest.bot` once the bot exists. **Do not add
+  dashboard, read-API or admin routes here**: new controls are Discord commands.
 - **`runtime_settings.py`** — the live config overlay. A frozen `Config` is built
-  once from env, so the dashboard can't mutate it; instead a small whitelist
+  once from env, so nothing can mutate it; instead a small whitelist
   (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`)
-  is saved into the `settings` table and resolved *through here* per use
-  (`effective_post_gate`, `effective_feed_channel`) — the override wins, else the
-  env `Config` default. The board/feed loops and the `/board`+`/page` cogs build
-  their `PostGate` from this so Discord and the dashboard share one live mode.
-  Loop-launch toggles stay env-only (the Settings page shows them read-only).
-- **`serve.py`** — all-in-one host entry point: runs uvicorn, the bot, the periodic
-  sync, and the feed/board/score loops as asyncio tasks on one loop. A long-running
+  is saved into the `settings` table by the **`/posting`** cog and resolved
+  *through here* per use (`effective_post_gate`, `effective_feed_channel`) — the
+  override wins, else the env `Config` default. The board/feed loops and the
+  `/board`+`/page` cogs build their `PostGate` from this, so a `/posting mode`
+  change applies on the next post. Loop-launch toggles stay env-only.
+- **`serve.py`** — all-in-one host entry point: runs the bot, the periodic sync,
+  the feed/board/score/digest loops and the ingest listener as asyncio tasks on
+  one loop. A long-running
   task dying brings the process down so the host restarts cleanly; one-shot setup
   tasks finishing does not.
 
@@ -235,8 +221,8 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   boards — they are sticky pages; see `pages.py`.)
 - **`pages.py`** — **sticky pages**: multi-message, GM-authored Discord-markdown
   pages the bot owns (currently `rules_info` + `guides_resources`). Copy lives in
-  `content/page_<name>.json` with a dashboard override in the `content_docs`
-  table; `render_page` substitutes the live `{tokens}` from `prose.py`
+  `content/page_<name>.json` (optionally overridden by a `/page import`, stored
+  in the `content_docs` table and validated by `validate_page_doc`); `render_page` substitutes the live `{tokens}` from `prose.py`
   but posts the GM's words verbatim (no voice sanitise). `refresh_page` is the
   reconcile engine (pure of Discord, drives the boards messenger + `delete`):
   first run posts, a channel change deletes the old copy and re-posts, same
@@ -244,14 +230,16 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   Placement is the `/page` cog (`cogs/pages.py`); the destination resolves
   through the `PostGate` with `promoted=True` (the channel is an officer's
   explicit choice). The board loop in `serve.py` also reconciles placed pages, so
-  dashboard edits go live within one refresh interval. Adding a page = a bundled
-  `content/page_<name>.json` + one `PageDef` in `PAGES`; the `/page` choices and
-  the dashboard Content section derive from the registry.
+  their live tokens stay current. Adding a page = a bundled
+  `content/page_<name>.json` + one `PageDef` in `PAGES`; the `/page` choices
+  derive from the registry.
 - **`posting.py`** — the **deny-by-default posting guardrail**. *Every* outbound
   message (boards, sticky pages and feed alerts) resolves its destination through
-  a `PostGate` first: `POSTING_MODE=off` posts nothing, `test` redirects to
-  `TEST_CHANNEL_ID`, `live` lets only `/board promote`d surfaces reach their real
-  channel. The off → test → promote flow lives in the `/board` cog. New posting
+  a `PostGate` first: mode `off` posts nothing, `test` redirects to the test
+  channel, `live` lets only `/board promote`d surfaces reach their real
+  channel. The mode and test channel are set live with `/posting` (env
+  `POSTING_MODE` / `TEST_CHANNEL_ID` are the boot defaults); the off → test →
+  promote flow lives in the `/posting` + `/board` cogs. New posting
   surfaces must route through the gate.
 
 ### SQLite tables (in `db_schema.py:SCHEMA`)
@@ -263,10 +251,10 @@ points); feed hub: `seen_items`, `feed_rules`, `feed_outbox`, `feed_mutes`,
 `realm_progress`, `calendar_events`, `mplus_bests`; boards: `boards`,
 `board_baselines`, `recruitment_config` (officer-set recruitment board state);
 sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
-(dashboard copy overrides for the bundled `content/*.json`); recruitment funnel:
+(`/page import` copy overrides for the bundled `content/*.json`); recruitment funnel:
 `scout_leads` (scouted candidates tracked through new→contacted→trialing→
 joined/passed; discovered fields refreshed by a re-scout, officer state/notes
-preserved); `settings` (the dashboard's live config overlay — see
+preserved); `settings` (the `/posting` live config overlay — see
 `runtime_settings.py`); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
@@ -299,5 +287,10 @@ preserved); `settings` (the dashboard's live config overlay — see
   permission check or import one from a sibling cog.
 - New API clients should subclass `services/_http.py:BaseHTTPClient` (or
   `OAuthClientCredentials`) rather than re-implementing the session/token plumbing.
-- Tests are organized partly by feature (`test_web.py`, `test_metrics.py`,
-  `test_wowaudit.py`) and partly by rollout phase (`test_phase*.py`).
+- **Discord is the control surface.** A new runtime control is a slash command
+  (officer-gated through `_guards.py`); a behaviour change is hard-coded and
+  shipped as a change request. Don't add web UI, read APIs or new env toggles
+  for things a command or a code change covers.
+- Tests are organized partly by feature (`test_cogs*.py`, `test_metrics.py`,
+  `test_wowaudit.py`) and partly by rollout phase (`test_phase*.py`). The ingest
+  routes are exercised through the `ingest_client` fixture in `conftest.py`.

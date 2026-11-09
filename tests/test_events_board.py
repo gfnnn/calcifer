@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 from datetime import datetime, timezone
-
-from fastapi.testclient import TestClient
 
 from ftabot import brand
 from ftabot.boards import REGISTRY
 from ftabot.boards.events import EVENTS_TYPE, WeeklyEventsBoard
 from ftabot.config import Config
-from ftabot.db import Database
 from ftabot.services.raidhelper import parse_webhook
-from ftabot.web import create_app
 
 _NOW = int(datetime.now(timezone.utc).timestamp())
 _DAY = 86400
@@ -135,32 +130,18 @@ async def test_board_fingerprint_tracks_signups(db):
 # --- the webhook persists for the board -------------------------------------
 
 
-def _webhook_app(tmp_path):
-    path = str(tmp_path / "wh.db")
-
-    async def init():
-        async with Database(path):
-            pass
-
-    asyncio.run(init())
-    return create_app(dataclasses.replace(
-        Config(), database_path=path, persona_tone="off",
+async def test_webhook_persists_event_for_the_board(tmp_path, ingest_client):
+    cfg = dataclasses.replace(
+        Config(), database_path=str(tmp_path / "wh.db"), persona_tone="off",
         raidhelper_webhook_secret="s3cret", raidhelper_default_channel_id="555",
-    )), path
-
-
-def test_webhook_persists_event_for_the_board(tmp_path):
-    app, path = _webhook_app(tmp_path)
+    )
+    client, ingest = await ingest_client(cfg)
     body = {"type": "create", "event": {
         "id": "evt-9", "title": "Heroic Night", "startTime": _NOW + 2 * _DAY,
         "signUpCount": 7, "url": "https://rh/evt-9"}}
-    with TestClient(app) as client:
-        assert client.post("/webhooks/raidhelper?token=s3cret", json=body).status_code == 200
+    resp = await client.post("/webhooks/raidhelper?token=s3cret", json=body)
+    assert resp.status == 200
 
-    async def check():
-        async with Database(path) as db:
-            return await db.upcoming_events(now_epoch=_NOW)
-
-    rows = asyncio.run(check())
+    rows = await ingest.db.upcoming_events(now_epoch=_NOW)
     assert len(rows) == 1
     assert rows[0]["event_id"] == "evt-9" and rows[0]["signup_count"] == 7

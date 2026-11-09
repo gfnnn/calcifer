@@ -2,6 +2,8 @@
 #   1. Push this repo to GitHub.
 #   2. On render.com (mobile browser): New + → Blueprint → pick this repo.
 #   3. Fill in the secret env vars when prompted, then Apply.
+# The service type is `web` only so Render health-checks /healthz and routes
+# the Raid-Helper webhook + SavedVariables upload; there is no dashboard.
 # Note: a persistent disk requires a paid instance type (free web services
 # spin down on idle, which disconnects the Discord bot).
 services:
@@ -25,7 +27,7 @@ services:
         value: hellfire
       - key: GUILD_REGION
         value: eu
-      # Secrets — set these in the dashboard (sync: false keeps them out of git).
+      # Secrets — set these in Render's settings (sync: false keeps them out of git).
       - key: DISCORD_TOKEN
         sync: false
       - key: DISCORD_GUILD_ID

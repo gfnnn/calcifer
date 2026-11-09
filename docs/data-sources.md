@@ -137,8 +137,8 @@ authorization-code flow, `GET /profile/user/wow` (and
 binding no public endpoint exposes. Paired with the Discord identity we already
 hold, a member completing a Battle.net login is the leading candidate for the
 data-spine's still-open **character↔Discord** link (today a manual officer link;
-[`vision.md`](vision.md) §5c). It needs only an OAuth callback route on the
-existing `web.py` — no new service, token, or runtime dependency.
+[`vision.md`](vision.md) §5c). It would need an OAuth callback route on the
+ingest listener (`ingest.py`), the bot's only HTTP surface.
 
 **What we wire today:** only **Guild Roster** (rank + level) and the **Profile
 Summary** (race/faction/class/spec/level/ilvl). Everything else above is
@@ -302,5 +302,5 @@ The `members` table keeps frequently-queried values as first-class columns
 (class, spec, role, item level, M+ score, raid progression, parse average) and
 stores the richer nested data (full gear, Great Vault, wishlist, per-boss
 parses) as a JSON blob in `details_json`. This keeps queries fast while letting
-the browser/API surface deep detail and letting us absorb new source fields
+the Discord views surface deep detail and letting us absorb new source fields
 without a migration. See [`ftabot/db.py`](../ftabot/db.py).

@@ -794,93 +794,6 @@ class Database:
         pct = (100.0 * present / scheduled) if scheduled else None
         return present, scheduled, pct
 
-    # -- analytics aggregations (read-only roll-ups for the dashboard) --------
-    # Pure SQL roll-ups; the view layer shapes/sorts/scores them. "Present"
-    # mirrors attendance_stats: any status other than 'absent' counts.
-
-    async def recent_raids(self, *, limit: int = 12) -> list[dict]:
-        """Recent raid events with team-level turnout (present / roster)."""
-        cur = await self.conn.execute(
-            "SELECT e.id, e.started_at, e.instance, e.difficulty, "
-            "COUNT(a.id) AS roster, "
-            "SUM(CASE WHEN lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
-            "  AS present "
-            "FROM raid_events e LEFT JOIN attendance a ON a.raid_event_id = e.id "
-            "GROUP BY e.id "
-            "ORDER BY substr(e.started_at, 1, 10) DESC, e.id DESC LIMIT ?",
-            (limit,),
-        )
-        return [dict(r) for r in await cur.fetchall()]
-
-    async def attendance_by_character(self, *, recent_window: int = 4) -> list[dict]:
-        """Per-character present/scheduled overall, plus over the most recent
-        ``recent_window`` events (so the view can show a slipping/steady trend)."""
-        recent = (
-            "SELECT id FROM raid_events "
-            "ORDER BY substr(started_at, 1, 10) DESC, id DESC LIMIT ?"
-        )
-        cur = await self.conn.execute(
-            "SELECT MIN(a.character_name) AS name, "
-            "COUNT(*) AS scheduled, "
-            "SUM(CASE WHEN lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
-            "  AS present, "
-            f"SUM(CASE WHEN a.raid_event_id IN ({recent}) THEN 1 ELSE 0 END) "
-            "  AS recent_scheduled, "
-            f"SUM(CASE WHEN a.raid_event_id IN ({recent}) "
-            "  AND lower(COALESCE(a.status,'')) != 'absent' THEN 1 ELSE 0 END) "
-            "  AS recent_present "
-            "FROM attendance a GROUP BY lower(a.character_name)",
-            (recent_window, recent_window),
-        )
-        return [dict(r) for r in await cur.fetchall()]
-
-    async def loot_breakdown(self) -> dict[str, list[dict]]:
-        """Award counts grouped by slot, difficulty and response."""
-        out: dict[str, list[dict]] = {}
-        for field in ("slot", "difficulty", "response"):
-            cur = await self.conn.execute(
-                f"SELECT COALESCE({field}, '?') AS key, COUNT(*) AS count "
-                f"FROM loot_history GROUP BY {field} ORDER BY count DESC"
-            )
-            out[field] = [dict(r) for r in await cur.fetchall()]
-        return out
-
-    async def wishlist_contention(self, *, limit: int = 40) -> list[dict]:
-        """Per item: how many characters want it, how many call it BiS, how many
-        already have it, and the average upgrade %. Most-contested first."""
-        cur = await self.conn.execute(
-            "SELECT item_id, MIN(item_name) AS item_name, MIN(slot) AS slot, "
-            "COUNT(DISTINCT lower(character_name)) AS wishlisters, "
-            "SUM(CASE WHEN is_bis THEN 1 ELSE 0 END) AS bis, "
-            "SUM(CASE WHEN obtained THEN 1 ELSE 0 END) AS obtained, "
-            "AVG(upgrade_pct) AS avg_upgrade "
-            "FROM wishlist_items GROUP BY item_id "
-            "ORDER BY wishlisters DESC, avg_upgrade DESC LIMIT ?",
-            (limit,),
-        )
-        return [dict(r) for r in await cur.fetchall()]
-
-    async def wishlist_coverage(self) -> list[dict]:
-        """Per character: obtained vs total wishlisted items (BiS completion)."""
-        cur = await self.conn.execute(
-            "SELECT MIN(character_name) AS name, COUNT(*) AS total, "
-            "SUM(CASE WHEN obtained THEN 1 ELSE 0 END) AS obtained "
-            "FROM wishlist_items GROUP BY lower(character_name)"
-        )
-        return [dict(r) for r in await cur.fetchall()]
-
-    async def lead_funnel(self) -> dict[str, dict[str, int]]:
-        """Lead counts grouped by funnel state, by source and by class."""
-        out: dict[str, dict[str, int]] = {}
-        for label, field in (("by_state", "state"), ("by_source", "source"),
-                             ("by_class", "class_name")):
-            cur = await self.conn.execute(
-                f"SELECT COALESCE({field}, '?') AS key, COUNT(*) AS count "
-                f"FROM scout_leads GROUP BY {field} ORDER BY count DESC"
-            )
-            out[label] = {r["key"]: r["count"] for r in await cur.fetchall()}
-        return out
-
     # -- snapshots -----------------------------------------------------------
 
     async def add_snapshot(self, snapshot: dict) -> int:
@@ -1267,17 +1180,6 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
-    async def set_board_config(self, board_id: int, config: dict) -> bool:
-        """Replace a board's per-instance config (e.g. News zone sizes). The next
-        refresh re-renders with it (diff-before-edit, so an unchanged render is a
-        no-op). Returns True if a matching board was updated."""
-        cur = await self.conn.execute(
-            "UPDATE boards SET config_json = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(config), now_iso(), board_id),
-        )
-        await self.conn.commit()
-        return cur.rowcount > 0
-
     async def delete_board(self, board_id: int) -> bool:
         cur = await self.conn.execute("DELETE FROM boards WHERE id = ?", (board_id,))
         await self.conn.commit()
@@ -1433,10 +1335,10 @@ class Database:
         await self.conn.commit()
         return cur.rowcount > 0
 
-    # -- dashboard-edited content documents -------------------------------------
+    # -- sticky-page copy overrides (/page import) -------------------------------
 
     async def get_content_doc(self, name: str) -> dict | None:
-        """A dashboard-saved content document, or None to use the bundled file."""
+        """An imported content document, or None to use the bundled file."""
         cur = await self.conn.execute(
             "SELECT body_json FROM content_docs WHERE name = ?", (name,)
         )
@@ -1450,7 +1352,7 @@ class Database:
         return doc if isinstance(doc, dict) else None
 
     async def set_content_doc(self, name: str, doc: dict) -> None:
-        """Save (or replace) a content document edited from the dashboard."""
+        """Save (or replace) a content document override (``/page import``)."""
         await self.conn.execute(
             "INSERT INTO content_docs (name, body_json, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT (name) DO UPDATE SET body_json = excluded.body_json, "
@@ -1459,26 +1361,18 @@ class Database:
         )
         await self.conn.commit()
 
-    async def content_doc_updated_at(self, name: str) -> str | None:
-        """When a dashboard override was last saved (None = no override)."""
-        cur = await self.conn.execute(
-            "SELECT updated_at FROM content_docs WHERE name = ?", (name,)
-        )
-        row = await cur.fetchone()
-        return row["updated_at"] if row else None
-
     async def delete_content_doc(self, name: str) -> bool:
-        """Drop a dashboard override, reverting to the bundled copy."""
+        """Drop an override, reverting to the bundled copy (``/page reset``)."""
         cur = await self.conn.execute(
             "DELETE FROM content_docs WHERE name = ?", (name,)
         )
         await self.conn.commit()
         return cur.rowcount > 0
 
-    # -- runtime settings overlay (dashboard-editable, beats env Config) -------
+    # -- runtime settings overlay (/posting; beats env Config) ------------------
 
     async def get_settings(self) -> dict:
-        """Every dashboard-saved override, as a ``{key: value}`` dict."""
+        """Every saved override, as a ``{key: value}`` dict."""
         cur = await self.conn.execute("SELECT key, value_json FROM settings")
         out: dict = {}
         for row in await cur.fetchall():
@@ -1488,21 +1382,8 @@ class Database:
                 continue
         return out
 
-    async def get_setting(self, key: str, default: object = None) -> object:
-        """One override value, or ``default`` when the dashboard hasn't set it."""
-        cur = await self.conn.execute(
-            "SELECT value_json FROM settings WHERE key = ?", (key,)
-        )
-        row = await cur.fetchone()
-        if row is None:
-            return default
-        try:
-            return json.loads(row["value_json"])
-        except json.JSONDecodeError:
-            return default
-
     async def set_setting(self, key: str, value: object) -> None:
-        """Save (or replace) a runtime override edited from the dashboard."""
+        """Save (or replace) a runtime override (the ``/posting`` commands)."""
         await self.conn.execute(
             "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, "

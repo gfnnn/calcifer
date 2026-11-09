@@ -1,14 +1,14 @@
 """Tests for ``serve._run`` (the all-in-one orchestrator) and ``serve.main``.
 
 ``_run`` decides *which* long-running tasks to launch from the configuration:
-the web app always, the bot + its feed/board/score/digest loops only when a
+the ingest listener always, the bot + its feed/board/score/digest loops only when a
 Discord token (and the relevant interval/channel) is set, and the periodic sync
 only when its interval is set. That wiring was untested — exercising it here
 guards against a loop silently never starting (or starting when disabled).
 
-Technique: every heavy dependency is patched (uvicorn server, the bot, the loop
-coroutines, ``build_sources``) so nothing touches the network. The fake web
-server's ``serve()`` returns immediately, which makes ``_supervise`` see a
+Technique: every heavy dependency is patched (the ingest listener, the bot, the
+loop coroutines, ``build_sources``) so nothing touches the network. The fake
+listener's ``serve()`` returns immediately, which makes ``_supervise`` see a
 "long-running" task finish and tear everything down — so ``_run`` returns
 promptly. A spy around ``asyncio.create_task`` records which named tasks were
 launched.
@@ -17,18 +17,18 @@ launched.
 from __future__ import annotations
 
 import asyncio
-import types
 
 from ftabot import serve
 from ftabot.config import Config
 
 
-class _FakeServer:
-    """uvicorn.Server stand-in whose serve() returns at once, triggering the
-    supervised shutdown so ``_run`` unwinds without real I/O."""
+class _FakeIngest:
+    """Ingest stand-in whose serve() returns at once, triggering the supervised
+    shutdown so ``_run`` unwinds without real I/O."""
 
-    def __init__(self, _uconfig):
-        pass
+    def __init__(self, _config):
+        self.bot = None
+        self.feed_sender = None
 
     async def serve(self):
         return None
@@ -49,7 +49,7 @@ async def _forever(*_a, **_k):
 
 def _patch_common(monkeypatch, *, sources):
     """Patch every heavy piece ``_run`` touches and return the create_task spy's
-    name list plus the app the run built."""
+    name list plus the ingest listener the run built."""
     created: list[str | None] = []
     captured: dict[str, object] = {}
     real_create_task = asyncio.create_task
@@ -58,14 +58,11 @@ def _patch_common(monkeypatch, *, sources):
         created.append(name)
         return real_create_task(coro, name=name)
 
-    def _fake_create_app(config):
-        app = types.SimpleNamespace(state=types.SimpleNamespace())
-        captured["app"] = app
-        return app
+    def _fake_ingest(config):
+        captured["ingest"] = _FakeIngest(config)
+        return captured["ingest"]
 
-    monkeypatch.setattr(serve, "create_app", _fake_create_app)
-    monkeypatch.setattr(serve.uvicorn, "Config", lambda *a, **k: object())
-    monkeypatch.setattr(serve.uvicorn, "Server", _FakeServer)
+    monkeypatch.setattr(serve, "Ingest", _fake_ingest)
     monkeypatch.setattr("ftabot.bot.FtaBot", _FakeBot)
     monkeypatch.setattr("ftabot.feeds.runner.build_sources", lambda config: list(sources))
     monkeypatch.setattr(serve, "_wire_webhook_sender", _forever)
@@ -100,24 +97,24 @@ async def test_run_launches_every_task_when_fully_configured(tmp_path, monkeypat
     await serve._run(cfg)
 
     assert set(created) == {
-        "web", "bot", "webhook-sender", "feeds", "digest", "boards", "scores", "sync",
+        "ingest", "bot", "webhook-sender", "feeds", "digest", "boards", "scores", "sync",
     }
-    assert captured["app"].state.bot is not None  # bot exposed to /healthz
+    assert captured["ingest"].bot is not None  # bot exposed to /healthz
 
 
-async def test_run_web_only_when_no_token_or_sync(tmp_path, monkeypatch):
+async def test_run_ingest_only_when_no_token_or_sync(tmp_path, monkeypatch):
     created, captured = _patch_common(monkeypatch, sources=["src"])
     cfg = _cfg(tmp_path, discord_token="", sync_interval_minutes=0)
 
     await serve._run(cfg)
 
-    assert created == ["web"]  # no bot, no loops, no sync
-    assert not hasattr(captured["app"].state, "bot")
+    assert created == ["ingest"]  # no bot, no loops, no sync
+    assert captured["ingest"].bot is None
 
 
 async def test_run_bot_without_optional_loops(tmp_path, monkeypatch):
     # Token set, but feeds yield no sources and every optional interval is off:
-    # only the web app, the bot, and the one-shot webhook wiring should start.
+    # only the listener, the bot, and the one-shot webhook wiring should start.
     created, _ = _patch_common(monkeypatch, sources=[])
     cfg = _cfg(
         tmp_path,
@@ -132,7 +129,7 @@ async def test_run_bot_without_optional_loops(tmp_path, monkeypatch):
 
     await serve._run(cfg)
 
-    assert set(created) == {"web", "bot", "webhook-sender"}
+    assert set(created) == {"ingest", "bot", "webhook-sender"}
 
 
 def test_main_builds_config_and_runs(monkeypatch, tmp_path):

@@ -129,7 +129,7 @@ async def test_feed_sender_uses_the_real_channel_when_live(tmp_path):
 
 
 async def test_feed_sender_honours_a_live_settings_override(tmp_path):
-    # A dashboard change to the posting mode takes effect on the next send, with
+    # A `/posting mode` change takes effect on the next send, with
     # no loop restart: saving an override flips the sender from live → off.
     from ftabot.db import Database
     from ftabot.posting import PostBlocked
