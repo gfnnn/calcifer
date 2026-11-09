@@ -26,7 +26,7 @@ The repo includes [`railway.json`](../railway.json) (Dockerfile build,
 `/healthz` health check, restart-on-failure), so Railway is close to turnkey.
 
 1. On **railway.app** (mobile browser), sign in with GitHub.
-2. **New Project → Deploy from GitHub repo →** pick `gfnnn/fta`. Railway reads
+2. **New Project → Deploy from GitHub repo →** pick `gfnnn/calcifer`. Railway reads
    `railway.json` and builds the `Dockerfile`. (The first build fails its health
    check until you add the volume + variables below — that's expected.)
 3. **Add a Volume** (service → **Variables/Settings → Volumes → New Volume**)

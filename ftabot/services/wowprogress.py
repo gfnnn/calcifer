@@ -69,7 +69,7 @@ class WowProgressClient(BaseHTTPClient):
         # real User-Agent (and accept JSON) on a client-owned session.
         return {
             "Accept": "application/json",
-            "User-Agent": "ftabot/1.0 (+https://github.com/gfnnn/Fta)",
+            "User-Agent": "ftabot/1.0 (+https://github.com/gfnnn/calcifer)",
         }
 
     async def guild_rank(
