@@ -16,7 +16,7 @@ at least once (PR #22's run makes them appear).
 **Apply via `gh` (fastest):**
 
 ```bash
-gh api -X PUT repos/gfnnn/Fta/branches/main/protection --input - <<'JSON'
+gh api -X PUT repos/gfnnn/calcifer/branches/main/protection --input - <<'JSON'
 {
   "required_status_checks": { "strict": true, "contexts": ["lint", "test"] },
   "enforce_admins": false,

@@ -328,7 +328,7 @@ Run the sync on a schedule with cron (it's idempotent):
 
 ```cron
 # Refresh every 6 hours
-0 */6 * * * cd /path/to/Fta && /usr/bin/python -m scripts.sync_cli >> sync.log 2>&1
+0 */6 * * * cd /path/to/calcifer && /usr/bin/python -m scripts.sync_cli >> sync.log 2>&1
 ```
 
 Or use `/sync` from Discord whenever an officer wants an on-demand refresh.

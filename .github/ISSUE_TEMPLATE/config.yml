@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Project docs
-    url: https://github.com/gfnnn/fta/tree/main/docs
+    url: https://github.com/gfnnn/calcifer/tree/main/docs
     about: Design docs for data sources, views, the integration hub and deploy.
   - name: Contributing guide
-    url: https://github.com/gfnnn/fta/blob/main/CONTRIBUTING.md
+    url: https://github.com/gfnnn/calcifer/blob/main/CONTRIBUTING.md
     about: How to set up, test, branch, and open a PR.
