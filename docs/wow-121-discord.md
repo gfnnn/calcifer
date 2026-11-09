@@ -108,9 +108,13 @@ That was fine when linking was rare officer bookkeeping. 12.1 changes the
 economics: it pushes *every* member to link Battle.net ↔ Discord, so officers
 shouldn't be the bottleneck for Calcifer knowing who's who.
 
-**Proposed: a self-service Discord OAuth2 flow in the web app.**
+**Proposed: a self-service Discord OAuth2 flow.**
 
-- Add a "Link your character" web flow in `ftabot/web.py` using Discord **OAuth2**
+> The dashboard and its web app have since been removed; the bot's only HTTP
+> surface is the ingest listener (`ftabot/ingest.py`). This proposal would add
+> an OAuth callback route there.
+
+- Add a "Link your character" flow (callback on `ftabot/ingest.py`) using Discord **OAuth2**
   with the **`connections`** scope. That scope lets Calcifer read the member's
   linked **Battle.net** connection.
 - Match the Battle.net handle (or a character the member confirms) against the
@@ -119,7 +123,7 @@ shouldn't be the bottleneck for Calcifer knowing who's who.
   so a roster sync will **never** clobber a self-linked id — the existing column
   ownership invariant already protects this. No migration needed; the column
   exists.
-- Keep all OAuth in the **web app** — the bot stays stateless. Officer `/link`
+- Keep all OAuth in the **ingest listener** — the bot stays stateless. Officer `/link`
   remains as an override/fallback for edge cases.
 
 **Prerequisites / open questions to resolve before building:**
@@ -127,7 +131,7 @@ shouldn't be the bottleneck for Calcifer knowing who's who.
 - New `Config` fields for the Discord **application client id + secret** (read
   only in `config.py`, threaded through as today).
 - A redirect/callback endpoint and **constant-time state** validation (reuse the
-  `SYNC_TOKEN`-style care already in `web.py`).
+  constant-time secret check already in `ingest.py`).
 - **Does the Discord connection reliably expose the Battle.net handle in a form
   we can map to a character/realm?** If not, fall back to "member confirms which
   roster character is theirs" after OAuth — still self-service, just one extra

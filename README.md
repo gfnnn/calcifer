@@ -24,7 +24,7 @@ One bot, one process, one SQLite database, two audiences:
 > what it does, how to run it, and every command.
 
 Under the hood he pulls live data from the WoW community APIs into one SQLite
-file and lets the guild query it from **either Discord or a browser**:
+file and lets the guild query it from **Discord**:
 
 - **WoW Audit as the source of truth** ([API](https://wowaudit.com/api-docs)) when
   a team key is set — gear, Great Vault, wishlist/BiS, parses, all pre-joined.
@@ -32,9 +32,9 @@ file and lets the guild query it from **either Discord or a browser**:
   (no key — roster, M+ score, raid progression), the
   [Blizzard API](https://develop.battle.net) (rank, race, level, equipment) and
   [Warcraft Logs](https://www.warcraftlogs.com/api/docs) (parse averages).
-- **Browser query layer**: a FastAPI app serving a JSON API + a roster/search
-  page (and free Swagger docs at `/docs`).
-- **Discord slash commands**: lookup, roster, search, stats.
+- **Discord slash commands**: lookup, roster, search, stats, reports.
+- **Discord posts**: routed feed alerts, self-updating living boards and sticky
+  pages, all behind one posting guardrail.
 - **Officer tooling**: link characters to Discord users, flag mains/alts, add notes.
 - **Standalone sync CLI** so you can seed/refresh the database (e.g. from cron)
   without running the bot.
@@ -56,28 +56,27 @@ cp .env.example .env        # then edit .env (only DISCORD_TOKEN is required)
 # 3. Seed the database from the live roster (no Discord needed)
 python -m scripts.sync_cli --list
 
-# 4a. Run the Discord bot
+# 4. Run the Discord bot
 python -m ftabot.bot
-
-# 4b. ...and/or the browser query layer  ->  http://localhost:8080
-python -m ftabot.web
 ```
 
-The bot and the web app are independent processes that read the same SQLite
-database; run either or both. Only the **sync** needs the external APIs.
+`ftabot.bot` runs the slash commands only. Only the **sync** needs the external
+APIs.
 
 ### Run everything in one process (cloud / mobile)
 
 ```bash
-python -m ftabot.serve   # web + Discord bot + scheduled sync together
+python -m ftabot.serve   # Discord bot + feeds/boards + scheduled sync + ingest listener
 ```
 
-This is what the `Dockerfile` runs. Each piece self-enables: the web app always
-starts (binds `$PORT`), the bot starts if `DISCORD_TOKEN` is set, and the roster
-auto-refreshes if `SYNC_INTERVAL_MINUTES > 0`.
+This is what the `Dockerfile` runs. Each piece self-enables: the bot starts if
+`DISCORD_TOKEN` is set, the feed/board/score loops start when their interval is
+set, and the roster auto-refreshes if `SYNC_INTERVAL_MINUTES > 0`. A small
+[ingest listener](#inbound-http-ingest-only) always binds `$PORT` for the host's
+health check and the two inbound data pushes.
 
 **Deploying from your phone (no dev environment):** see
-**[docs/deploy.md](docs/deploy.md)** — Railway/Render (always-on, browser-managed),
+**[docs/deploy.md](docs/deploy.md)** — Railway/Render (always-on, managed from a browser),
 a free GitHub Actions sync, or Termux on Android.
 
 > **Network note:** the sync calls `raider.io` (and optionally
@@ -98,14 +97,14 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `ADMIN_ROLE_NAME` | optional | Discord role allowed to run officer commands (default `Officer`). |
 | `GUILD_NAME` / `GUILD_REALM` / `GUILD_REGION` | optional | Defaults to `From the Ashes` / `hellfire` / `eu`. |
 | `DATABASE_PATH` | optional | SQLite file path (default `ftabot.db`). |
-| `WEB_HOST` / `WEB_PORT` | optional | Browser app bind address (default `0.0.0.0:8080`). |
+| `WEB_HOST` / `WEB_PORT` | optional | Bind address of the ingest listener (default `0.0.0.0:8080`; hosts inject `PORT`). |
 | `WOWAUDIT_API_KEY` | optional | Makes WoW Audit the primary source of truth. |
 | `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET` | optional | Enables Blizzard enrichment. |
 | `WARCRAFTLOGS_CLIENT_ID` / `_SECRET` | optional | Enables Warcraft Logs parse averages (the raid tier is auto-detected; `WARCRAFTLOGS_ZONE_ID` only pins a specific tier). |
 | `WARCRAFTLOGS_ZONE_IDS` / `RECRUIT_*` | optional | Tunes the `/scout` recruitment scout (tier zones, season window, ilvl floor, open roles). |
 | `FEED_POLL_MINUTES` / `FEED_DEFAULT_CHANNEL_ID` | optional | Turn on the **Calcifer feed hub** (Wowhead news → a Discord channel). See [docs/vision.md](docs/vision.md#4b-the-feed--integration-hub-shipped). |
 | `YOUTUBE_FEED_ENABLED`+`YOUTUBE_CHANNEL_IDS` / `WOWPROGRESS_FEED_ENABLED` | optional | Extra feed sources: **YouTube** channel uploads (keyless Atom) and **WoWProgress** guild world/realm rank movement (their JSON export; credits WoWProgress.com per their terms). Default off. |
-| `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | The **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
+| `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | Boot defaults for the **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert; change it live with `/posting`. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
@@ -147,8 +146,9 @@ switch to the richer WoW Audit data set.
 | `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
 | `/recruit lead capture\|list\|set\|note\|remove` | **Recruitment funnel**: capture the scout's candidates as trackable leads and move them through the funnel (new → contacted → trialing → joined/passed). |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
-| `/board create\|list\|refresh\|promote\|demote\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
-| `/page post\|list\|refresh\|remove` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy is edited in the dashboard's **Content** section. |
+| `/posting status\|mode\|test-channel\|feed-channel` | **Posting guardrail** (*GM or Discord admin only*): switch `off`/`test`/`live` and set the test and default feed channels live, overriding the env defaults. |
+| `/board create\|list\|refresh\|promote\|demote\|disable\|enable\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
+| `/page post\|list\|refresh\|remove\|export\|import\|reset` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy lives in `ftabot/content/page_*.json`; `export`/`import`/`reset` handle a copy fix without a deploy. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
 
 ---
@@ -220,18 +220,20 @@ subtext, emoji) the bot owns — the **Rules & Info** welcome page and the
 `/page post page:<name> channel:#somewhere`: the first run posts it, pointing it
 at a different channel deletes the old copy and re-posts there, and the same
 channel does nothing (or quietly applies a copy edit in place). The copy itself
-lives in [`ftabot/content/page_*.json`](ftabot/content/) and is edited from the
-web dashboard's **Content** section (`/content`, unlocked by `SYNC_TOKEN`); the
+lives in [`ftabot/content/page_*.json`](ftabot/content/) and changes with a
+change request. For a fix that can't wait for a deploy, `/page export` hands you
+the live copy as JSON, `/page import` applies an edited file (validated against
+Discord's limits) and `/page reset` returns to the bundled file. The
 board loop keeps placed pages in sync, and pages carry the same live `{tokens}`
 (progression, member count, recruiting) so their facts never drift stale. Pages
 always post with mentions disabled, so pasted `@role`/`<@id>` text never pings.
 
 Every outbound message — boards **and** feed alerts — passes through one
-**deny-by-default posting guardrail** before it can reach Discord, set by
-`POSTING_MODE`:
+**deny-by-default posting guardrail** before it can reach Discord, set with
+`/posting mode` (boot default: `POSTING_MODE`):
 
 - **`off`** (default) — nothing posts anywhere.
-- **`test`** — every post is redirected to `TEST_CHANNEL_ID` (a private channel).
+- **`test`** — every post is redirected to the test channel (`/posting test-channel`, default `TEST_CHANNEL_ID`).
 - **`live`** — boards you have `/board promote`d reach their real channel; the
   rest stay sandboxed.
 
@@ -241,29 +243,34 @@ ever sees it, and a deploy can never surprise the server. Full workflow in
 
 ---
 
-## Browser / HTTP API
+## Inbound HTTP (ingest only)
 
-`python -m ftabot.web` starts a FastAPI app (default <http://localhost:8080>):
+There is **no dashboard and no browsable API**: the bot is controlled from
+Discord, and anything that isn't a command is a change request against this
+repo. The process still listens on one port for the two sources that *push*
+data to it, plus the host's liveness probe:
 
 | Route | Description |
 | --- | --- |
-| `GET /` | Redirects to `/app`. |
-| `GET /app` | **The dashboard** — a single-page app with Home, Roster (incl. character profiles), Raid, Loot, Recruitment, Comms (boards/feeds/sticky-page copy), and Settings (incl. **Sync now**) sections. Every JSON API it calls is gated by `SYNC_TOKEN`; the first locked call shows an unlock overlay that stores the token in an http-only cookie. |
-| `POST /api/sync` | Trigger a sync (`X-Sync-Token` header, unlock cookie, or `?token=`). |
-| `GET /api/sync/status` | Whether a sync is running + the last result. |
-| `GET /api/trends` | Snapshot history series + deltas JSON (`?limit=`). |
-| `GET /api/members` | JSON roster. Filters: `?class=`, `?role=`, `?q=`, `?sort=`. |
-| `GET /api/members/{name}` | One character incl. full `details` (gear/vault/wishlist). |
-| `GET /api/stats` | Roster summary (counts by role/class, M+ averages). |
-| `GET /api/gm` | GM report JSON. |
-| `GET /api/raid` | Readiness board JSON (`?team=`). |
-| `GET /api/loot` | Loot fairness + recent awards JSON. |
-| `GET /api/loot/priority?item=<name>` | Advisory loot priority ranking JSON. |
-| `GET/PUT/DELETE /api/content/{page}` | **Sticky-page copy** — read, save, or revert a page's messages (auth like `/api/sync`). |
-| `POST /webhooks/raidhelper` | **Raid-Helper webhook** — verifies a shared secret (`?token=`/`X-Signature`), posts the event to Discord. |
-| `POST /api/upload/savedvars` | **Data-spine intake** — RCLootCouncil loot + GRM identity `.lua` (auth `SAVEDVARS_UPLOAD_SECRET`); the GM's `scripts/upload_savedvars.py` posts here. |
-| `GET /healthz` | Health check + member count. |
-| `GET /docs` | Auto-generated Swagger UI. |
+| `POST /webhooks/raidhelper` | **Raid-Helper webhook**: verifies a shared secret (`?token=`/`X-Signature`), feeds the Weekly Events board and posts the alert. Answers 503 until `RAIDHELPER_WEBHOOK_SECRET` is set. |
+| `POST /api/upload/savedvars` | **Data-spine intake**: RCLootCouncil loot + GRM identity `.lua` (auth `SAVEDVARS_UPLOAD_SECRET`); the GM's `scripts/upload_savedvars.py` posts here. Answers 503 until the secret is set. |
+| `GET /healthz` | Liveness for the host: DB reachable, member count, Discord gateway state. |
+
+Every other path returns 404.
+
+### How to change things
+
+| You want to change... | Do it with... |
+| --- | --- |
+| Posting mode / test channel / default feed channel | `/posting mode`, `/posting test-channel`, `/posting feed-channel` |
+| Which boards exist, where, and whether they are live | `/board ...` |
+| Feed routing, styling, pings, mutes | `/feed ...` |
+| Sticky page placement | `/page post`, `/page remove` |
+| Sticky page copy | a change request to `ftabot/content/page_*.json` (or `/page export` then `/page import` for a fix that can't wait for a deploy) |
+| Recruitment slots, rules, pitch, leads | `/recruit ...` |
+| Member links, mains/alts, notes, teams | `/link`, `/setmain`, `/note`, `/setteam`, `/setofficer` |
+| An on-demand roster refresh | `/sync` |
+| Board layouts, wording, thresholds, schedules, new feeds | a change request (code + env vars) |
 
 ---
 
@@ -311,7 +318,7 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
                                                     │
                         ┌───────────────────────────┴───────────────┐
                         ▼ reads                                      ▼ reads
-            ftabot/cogs/* (Discord slash cmds)        ftabot/web.py (JSON API + page)
+            ftabot/cogs/* (Discord slash cmds)        boards / feeds / pages (Discord posts)
 ```
 
 | Path | Responsibility |
@@ -322,17 +329,18 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/services/` | API clients: `wowaudit`, `raiderio`, `blizzard`, `warcraftlogs`, `raidhelper`. |
 | `ftabot/sync.py` | Orchestrates fetch → enrich → upsert → prune → loot/wishlist → snapshot. |
 | `ftabot/metrics.py` | Pure scoring: activity, readiness, guild health, loot priority. |
-| `ftabot/views.py` | Shared view-models for the GM / Raid / Loot views. |
+| `ftabot/views.py` | View-models behind the GM / Raid / Loot report commands. |
 | `ftabot/wow_data.py` | Editable raid-buff table for comp coverage. |
-| `ftabot/cogs/` | Discord slash commands (`members`, `reports`, `admin`, `recruit`, `feeds`, `boards`, `scores`). |
-| `ftabot/web.py` | FastAPI browser/JSON query layer + HTML pages. |
+| `ftabot/cogs/` | Discord slash commands (`members`, `reports`, `alerts`, `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`, `scores`). |
+| `ftabot/ingest.py` | The only HTTP surface: `/healthz`, the Raid-Helper webhook, the SavedVariables upload. |
+| `ftabot/serve.py` | All-in-one entry point: bot + loops + sync + ingest listener. |
 | `ftabot/ui.py` | Renders members into Discord embeds. |
 | `scripts/sync_cli.py` | Headless sync entry point. |
 | `docs/vision.md` | The project vision and pillars. |
 | `docs/ROADMAP.md` · `docs/DECISIONS.md` | Feature planning (phases 0–5, delivery contracts) · decisions locked + open questions. |
 | `docs/data-sources.md` | API capability reference (what each service exposes). |
 | `docs/wow-121-discord.md` | Getting the most out of WoW 12.1's native Discord integration with Calcifer (bridge layout + linking/Linked-Roles proposals). |
-| `tests/` | Pytest suite (DB, metrics, views, WoW Audit mapping, web API). |
+| `tests/` | Pytest suite (DB, metrics, views, cogs, boards, feeds, ingest). |
 
 A roster sync only ever overwrites **API-sourced** columns. Manually entered
 data — Discord links, main/alt relationships and officer notes — is preserved

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Drop privileges to the non-root `app` user for the actual long-running process
-# (the internet-facing web server), while first ensuring the mounted data volume
+# (the bot and its ingest listener), while first ensuring the mounted data volume
 # is writable by it.
 #
 # The container starts as root only so this script can fix ownership of /data:

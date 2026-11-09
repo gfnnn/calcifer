@@ -202,7 +202,7 @@ role counts) agree without re-inferring.
 
 **Mythic+ score colour (Raider.IO scale).** `brand.score_color(score)` returns
 the *exact* hex from Raider.IO's ramp (`brand.SCORE_TIERS`) for surfaces that can
-show real colour (the web dashboard, an embed accent). Discord embed text can't be
+show real colour (an embed accent). Discord embed text can't be
 coloured per character, so boards leave the score plain rather than approximating
 the ramp with emoji.
 

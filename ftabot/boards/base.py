@@ -55,8 +55,8 @@ class Board(abc.ABC):
 # ``board_type``. Empty in Phase 0; populated as boards land.
 REGISTRY: dict[str, Board] = {}
 
-# Friendly display names for the registered board types, shared by the /board
-# cog and the web dashboard so both label boards identically. (Rules & Info and
+# Friendly display names for the registered board types, used by the /board
+# cog. (Rules & Info and
 # Guides & Resources are not boards — they are sticky pages, managed via /page.)
 BOARD_NAMES: dict[str, str] = {
     "hot20": "Calcifer's Hot 20",

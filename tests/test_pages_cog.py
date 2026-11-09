@@ -7,6 +7,8 @@ bot with real-enough channels (send/fetch/edit/delete) so the cog's
 
 from __future__ import annotations
 
+import json
+
 import discord
 from discord import app_commands
 
@@ -246,7 +248,7 @@ async def test_page_refresh_requires_placement(db):
     assert "isn't placed" in it.response.content
 
 
-async def test_page_refresh_applies_dashboard_edit(db):
+async def test_page_refresh_applies_copy_change(db):
     bot = _PageBot(db, _live_cfg())
     cog = PagesCog(bot)
     await PagesCog.post.callback(cog, _admin(), _page_choice(), _Channel(111))
@@ -278,3 +280,131 @@ async def test_page_remove_without_placement(db):
     it = _admin()
     await PagesCog.remove.callback(cog, it, _page_choice())
     assert "isn't placed" in it.response.content
+
+
+# --- copy: export / import / reset ----------------------------------------------
+
+
+class _Attachment:
+    """Stands in for discord.Attachment: a size and a read()."""
+
+    def __init__(self, payload, *, size=None):
+        self._data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        self.size = len(self._data) if size is None else size
+
+    async def read(self):
+        return self._data
+
+
+async def test_page_export_sends_the_bundled_copy_as_json(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    it = _admin()
+    await PagesCog.export.callback(cog, it, _page_choice())
+    assert it.response.ephemeral is True and "bundled copy" in it.response.content
+    sent = it.response.kwargs["file"]
+    assert sent.filename == "page_rules_info.json"
+    assert json.loads(sent.fp.read())["posts"]  # round-trips as a page document
+
+
+async def test_page_import_saves_override_and_updates_the_posted_page(db):
+    bot = _PageBot(db, _live_cfg())
+    cog = PagesCog(bot)
+    await PagesCog.post.callback(cog, _admin(), _page_choice(), _Channel(111))
+
+    it = _admin()
+    await PagesCog.import_copy.callback(
+        cog, it, _page_choice(), _Attachment({"posts": ["new one", "new two"]})
+    )
+    assert "Imported 2 message(s)" in it.followup.content
+    assert "was updated" in it.followup.content
+    assert [m.content for m in bot.channels[111].messages.values()] == ["new one", "new two"]
+
+    # The override is now what export hands back, and /page list flags it.
+    exported = _admin()
+    await PagesCog.export.callback(cog, exported, _page_choice())
+    assert "imported copy" in exported.response.content
+    assert json.loads(exported.response.kwargs["file"].fp.read())["posts"] == [
+        "new one", "new two",
+    ]
+    listed = _admin()
+    await PagesCog.list_pages.callback(cog, listed)
+    assert "imported copy" in listed.response.content
+
+
+async def test_page_import_before_placement_just_saves(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    it = _admin()
+    await PagesCog.import_copy.callback(cog, it, _page_choice(), _Attachment({"posts": ["x"]}))
+    assert "isn't placed yet" in it.followup.content
+    assert (await db.get_content_doc("page_rules_info"))["posts"] == ["x"]
+
+
+async def test_page_import_reports_a_guardrail_hold(db):
+    bot = _PageBot(db, Config(admin_role_name="Officer"))  # posting off
+    cog = PagesCog(bot)
+    await db.upsert_sticky_page("rules_info", "111")
+    it = _admin()
+    await PagesCog.import_copy.callback(cog, it, _page_choice(), _Attachment({"posts": ["x"]}))
+    assert "Not posted yet" in it.followup.content
+
+
+async def test_page_import_rejects_bad_files_without_changing_anything(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    cases = [
+        (_Attachment(b"{not json"), "not valid JSON"),
+        (_Attachment(b"\xff\xfe"), "not valid JSON"),
+        (_Attachment({"posts": []}), "non-empty"),
+        (_Attachment(["a"]), "non-empty"),
+        (_Attachment({"posts": ["ok", "  "]}), "Message 2 is empty"),
+        (_Attachment({"posts": ["x" * 2001]}), "2001 characters"),
+        (_Attachment({"posts": ["x"] * 11}), "At most 10"),
+    ]
+    for attachment, expected in cases:
+        it = _admin()
+        await PagesCog.import_copy.callback(cog, it, _page_choice(), attachment)
+        assert "Nothing changed" in it.followup.content
+        assert expected in it.followup.content
+    oversized = _admin()
+    await PagesCog.import_copy.callback(
+        cog, oversized, _page_choice(), _Attachment({"posts": ["x"]}, size=10**7)
+    )
+    assert "too large" in oversized.response.content
+    assert await db.get_content_doc("page_rules_info") is None
+
+
+async def test_page_reset_restores_the_bundled_copy(db):
+    bot = _PageBot(db, _live_cfg())
+    cog = PagesCog(bot)
+    await PagesCog.post.callback(cog, _admin(), _page_choice(), _Channel(111))
+    bundled = [m.content for m in bot.channels[111].messages.values()]
+    await PagesCog.import_copy.callback(
+        cog, _admin(), _page_choice(), _Attachment({"posts": ["a", "b", "c"]})
+    )
+
+    it = _admin()
+    await PagesCog.reset.callback(cog, it, _page_choice())
+    assert "back on the bundled copy" in it.followup.content
+    assert [m.content for m in bot.channels[111].messages.values()] == bundled
+    assert await db.get_content_doc("page_rules_info") is None
+
+    again = _admin()
+    await PagesCog.reset.callback(cog, again, _page_choice())
+    assert "already using the bundled copy" in again.followup.content
+
+
+async def test_page_copy_commands_are_gated_and_reject_unknown_pages(db):
+    cog = PagesCog(_PageBot(db, _live_cfg()))
+    ghost = app_commands.Choice(name="Ghost", value="ghost")
+    file = _Attachment({"posts": ["x"]})
+    for invoke in (
+        lambda it, page: PagesCog.export.callback(cog, it, page),
+        lambda it, page: PagesCog.import_copy.callback(cog, it, page, file),
+        lambda it, page: PagesCog.reset.callback(cog, it, page),
+    ):
+        denied = _Interaction(perms=_Perms())
+        await invoke(denied, _page_choice())
+        assert "Officer" in denied.response.content
+        unknown = _admin()
+        await invoke(unknown, ghost)
+        assert "Unknown page" in unknown.response.content
+    assert await db.get_content_doc("page_rules_info") is None

@@ -1,11 +1,8 @@
 """Tests for data-spine ingestion + the SavedVariables upload endpoint."""
 
-from fastapi.testclient import TestClient
-
 from ftabot.config import Config
 from ftabot.models import Member
 from ftabot.spine import ingest_savedvars
-from ftabot.web import create_app
 
 SWORD = "|cffa335ee|Hitem:212396::::::::80:::::|h[Ember Greatsword]|h|r"
 
@@ -135,96 +132,91 @@ async def test_ingest_grm_skips_account_whose_main_is_untracked(db):
     assert alt.is_main is True  # untouched default
 
 
-def test_uploaded_identity_is_readable(tmp_path):
-    cfg = Config(database_path=str(tmp_path / "id.db"), savedvars_upload_secret="s3cret",
-                 sync_token="s3cret", cookie_secure=False)
-    with TestClient(create_app(cfg)) as client:
-        client.post("/api/upload/savedvars?token=s3cret", content=GRM_LUA)
-        client.post("/api/sync/unlock", json={"token": "s3cret"})  # /api/identity now gated
-        resp = client.get("/api/identity/Calcifer")
-        assert resp.status_code == 200, resp.text
-        record = resp.json()
-        assert record["is_main"] is True
-        assert record["join_date"] == "2020-01-15"
-        assert record["alts"] == ["Emberling-Hellfire"]
-        assert client.get("/api/identity/Nobody").status_code == 404
+async def test_uploaded_identity_is_stored(tmp_path, ingest_client):
+    cfg = Config(database_path=str(tmp_path / "id.db"), savedvars_upload_secret="s3cret")
+    client, ingest = await ingest_client(cfg)
+    resp = await client.post("/api/upload/savedvars?token=s3cret", data=GRM_LUA)
+    assert resp.status == 200, await resp.text()
+    record = await ingest.db.get_identity("Calcifer", cfg.guild_realm, cfg.guild_region)
+    assert record["is_main"] is True
+    assert record["join_date"] == "2020-01-15"
+    assert record["alts"] == ["Emberling-Hellfire"]
+    assert await ingest.db.get_identity("Nobody", cfg.guild_realm, cfg.guild_region) is None
 
 
-async def test_combined_upload_detects_both(tmp_path):
+async def test_combined_upload_detects_both(tmp_path, ingest_client):
     cfg = Config(database_path=str(tmp_path / "both.db"), savedvars_upload_secret="s3cret")
-    with TestClient(create_app(cfg)) as client:
-        resp = client.post(
-            "/api/upload/savedvars?token=s3cret",
-            content=RCLC_LUA + "\n" + GRM_LUA,
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert set(body["detected"]) == {"rclootcouncil", "grm"}
-        assert body["loot_imported"] == 1
-        assert body["identities_stored"] == 2
+    client, _ = await ingest_client(cfg)
+    resp = await client.post(
+        "/api/upload/savedvars?token=s3cret", data=RCLC_LUA + "\n" + GRM_LUA
+    )
+    assert resp.status == 200, await resp.text()
+    body = await resp.json()
+    assert set(body["detected"]) == {"rclootcouncil", "grm"}
+    assert body["loot_imported"] == 1
+    assert body["identities_stored"] == 2
 
 
 # --- upload endpoint --------------------------------------------------------
 
 
-def _client(tmp_path, *, secret: str | None):
-    cfg = Config(database_path=str(tmp_path / "spine.db"), savedvars_upload_secret=secret)
-    return TestClient(create_app(cfg))
+def _cfg(tmp_path, *, secret: str | None):
+    return Config(database_path=str(tmp_path / "spine.db"), savedvars_upload_secret=secret)
 
 
-def test_upload_disabled_without_secret(tmp_path):
-    with _client(tmp_path, secret=None) as client:
-        resp = client.post("/api/upload/savedvars", content=RCLC_LUA)
-        assert resp.status_code == 503
+async def test_upload_disabled_without_secret(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret=None))
+    resp = await client.post("/api/upload/savedvars", data=RCLC_LUA)
+    assert resp.status == 503
 
 
-def test_upload_rejects_wrong_secret(tmp_path):
-    with _client(tmp_path, secret="s3cret") as client:
-        resp = client.post("/api/upload/savedvars?token=nope", content=RCLC_LUA)
-        assert resp.status_code == 401
+async def test_upload_rejects_wrong_secret(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    resp = await client.post("/api/upload/savedvars?token=nope", data=RCLC_LUA)
+    assert resp.status == 401
 
 
-def test_upload_happy_path_ingests_loot(tmp_path):
-    with _client(tmp_path, secret="s3cret") as client:
-        resp = client.post(
-            "/api/upload/savedvars",
-            content=RCLC_LUA,
-            headers={"X-Upload-Token": "s3cret"},
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["detected"] == ["rclootcouncil"]
-        assert body["loot_imported"] == 1
-        # Re-uploading the same dump imports nothing, proving the first POST
-        # persisted through the HTTP path (the dedup is over stored rows).
-        again = client.post(
-            "/api/upload/savedvars",
-            content=RCLC_LUA,
-            headers={"X-Upload-Token": "s3cret"},
-        )
-        assert again.status_code == 200
-        assert again.json()["loot_imported"] == 0
+async def test_upload_happy_path_ingests_loot(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    headers = {"X-Upload-Token": "s3cret"}
+    resp = await client.post("/api/upload/savedvars", data=RCLC_LUA, headers=headers)
+    assert resp.status == 200, await resp.text()
+    body = await resp.json()
+    assert body["detected"] == ["rclootcouncil"]
+    assert body["loot_imported"] == 1
+    # Re-uploading the same dump imports nothing, proving the first POST
+    # persisted through the HTTP path (the dedup is over stored rows).
+    again = await client.post("/api/upload/savedvars", data=RCLC_LUA, headers=headers)
+    assert again.status == 200
+    assert (await again.json())["loot_imported"] == 0
 
 
-def test_upload_empty_body_is_400(tmp_path):
-    with _client(tmp_path, secret="s3cret") as client:
-        resp = client.post("/api/upload/savedvars?token=s3cret", content="   ")
-        assert resp.status_code == 400
+async def test_upload_accepts_a_multi_megabyte_dump(tmp_path, ingest_client):
+    # Real dumps exceed aiohttp's 1 MB default body cap; the listener raises it.
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    padding = "-- " + "x" * (2 * 1024 * 1024) + "\n"
+    resp = await client.post("/api/upload/savedvars?token=s3cret", data=padding + RCLC_LUA)
+    assert resp.status == 200, await resp.text()
 
 
-def test_upload_unparseable_is_400(tmp_path):
-    with _client(tmp_path, secret="s3cret") as client:
-        resp = client.post("/api/upload/savedvars?token=s3cret", content="DB = {{{ broken")
-        assert resp.status_code == 400
+async def test_upload_empty_body_is_400(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    resp = await client.post("/api/upload/savedvars?token=s3cret", data="   ")
+    assert resp.status == 400
 
 
-def test_upload_unrecognised_addon_is_422(tmp_path):
-    with _client(tmp_path, secret="s3cret") as client:
-        resp = client.post(
-            "/api/upload/savedvars?token=s3cret",
-            content='SomethingElseDB = { ["x"] = 1 }',
-        )
-        assert resp.status_code == 422
+async def test_upload_unparseable_is_400(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    resp = await client.post("/api/upload/savedvars?token=s3cret", data="DB = {{{ broken")
+    assert resp.status == 400
+
+
+async def test_upload_unrecognised_addon_is_422(tmp_path, ingest_client):
+    client, _ = await ingest_client(_cfg(tmp_path, secret="s3cret"))
+    resp = await client.post(
+        "/api/upload/savedvars?token=s3cret", data='SomethingElseDB = { ["x"] = 1 }'
+    )
+    assert resp.status == 422
 
 
 async def test_apply_accounts_clears_a_removed_alt_link(db):

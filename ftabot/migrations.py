@@ -78,7 +78,7 @@ async def _m4_outbox_visibility(conn: aiosqlite.Connection) -> None:
 
 
 async def _m5_settings_table(conn: aiosqlite.Connection) -> None:
-    """The runtime settings overlay the dashboard edits (posting mode/channels)."""
+    """The runtime settings overlay ``/posting`` edits (posting mode/channels)."""
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS settings ("
         "key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT)"

@@ -58,9 +58,9 @@ These are load-bearing architectural choices. Revisit only if the assumption cha
 
 ### 5. One Database, Many Surfaces
 
-**Decision:** All three surfaces (Discord bot, web, sync CLI) read/write the same SQLite file.
+**Decision:** Every surface (Discord bot, posting loops, sync CLI, ingest listener) reads/writes the same SQLite file.
 
-**Why:** Single source of truth. Sync is write-only; bot and web are read-only (+ officer writes).
+**Why:** Single source of truth. The sync and the two inbound pushes write; the bot reads (+ officer writes).
 
 **Status:** ✅ Locked. Implemented in `db.py`.
 
@@ -74,7 +74,7 @@ These are load-bearing architectural choices. Revisit only if the assumption cha
 
 **Why:** Deploys work the same way everywhere. Feature flags don't require code changes.
 
-**Status:** ✅ Locked. Enforced by `config.py` design.
+**Status:** ✅ Locked. Enforced by `config.py` design. Narrowed by decision 11: env vars carry secrets, IDs and on/off switches; bot *behaviour* (layouts, wording, thresholds) is hard-coded and changed by change request.
 
 **Where it matters:** All features, all integrations.
 
@@ -125,6 +125,18 @@ These are load-bearing architectural choices. Revisit only if the assumption cha
 **Status:** ✅ Locked. Implemented in `feeds/`, `router.py`.
 
 **Where it matters:** Feed scalability, operator control.
+
+---
+
+### 11. Discord Is the Only Front End (No Dashboard)
+
+**Decision:** The web dashboard and its JSON API are removed. Every runtime control is a Discord command (`/posting`, `/board`, `/feed`, `/page`, `/recruit`, the member-admin commands, `/sync`); everything else is hard-coded and changed with a change request. The only HTTP surface is `ingest.py`: `/healthz`, the Raid-Helper webhook and the SavedVariables upload.
+
+**Why:** The project is a Discord bot over API connections and storage. A second control surface doubled the code, the auth surface and the test burden for one guild.
+
+**Status:** ✅ Locked. `web.py`, `static/`, FastAPI and uvicorn are gone.
+
+**Where it matters:** Any new control (make it a command), any new HTTP route (don't, unless a source can only push).
 
 ---
 

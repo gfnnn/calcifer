@@ -1,8 +1,8 @@
-"""The runtime settings overlay: a small env + DB merge so the dashboard can
-change a few operational values live, without a redeploy.
+"""The runtime settings overlay: a small env + DB merge so officers can change
+a few operational values live from Discord (``/posting``), without a redeploy.
 
 Frozen :class:`~ftabot.config.Config` is built once from the environment and
-threaded everywhere, so a live edit can't mutate it. Instead the dashboard saves
+threaded everywhere, so a live edit can't mutate it. Instead ``/posting`` saves
 an override into the ``settings`` table and the surfaces that consume these
 values resolve them *through here* each time they post: the override wins, and
 its absence falls back to the env-built ``Config`` (the boot default).
@@ -10,7 +10,7 @@ its absence falls back to the env-built ``Config`` (the boot default).
 Scope is deliberately narrow — only values the loops re-read each tick belong
 here: the posting guardrail (``posting_mode``) and its channels. Loop-launch
 toggles (``board_refresh_minutes`` …) decide *at startup* whether a task spawns,
-so they stay env-only and the dashboard shows them read-only.
+so they stay env-only (a change request / redeploy).
 
 ``posting.py`` stays pure (no I/O); the single DB read lives in this module.
 """
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Overridable:
-    """A single dashboard-editable setting: how to show, store and validate it."""
+    """A single live-editable setting: how to show, store and validate it."""
 
     key: str
     label: str
@@ -39,8 +39,8 @@ class Overridable:
     help: str = ""
 
 
-# The whitelist of live-editable keys. The Settings UI and the write validator
-# are both derived from this, so adding a key is a one-line change here.
+# The whitelist of live-editable keys. The `/posting` status view and the write
+# validator are both derived from this, so adding a key is a one-line change here.
 OVERRIDABLE: tuple[Overridable, ...] = (
     Overridable(
         key="posting_mode",
@@ -71,11 +71,11 @@ _BY_KEY: dict[str, Overridable] = {o.key: o for o in OVERRIDABLE}
 
 
 class SettingError(ValueError):
-    """A dashboard-supplied setting value failed validation."""
+    """An officer-supplied setting value failed validation."""
 
 
 def normalise(key: str, raw: object) -> str | None:
-    """Validate a raw dashboard value against the manifest, returning the value
+    """Validate a raw officer-supplied value against the manifest, returning the value
     to store (a ``None``/empty channel clears it). Raises :class:`SettingError`."""
     spec = _BY_KEY.get(key)
     if spec is None:
@@ -110,7 +110,7 @@ def _env_value(config: "Config", key: str) -> object:
 
 
 async def effective(db: "Database", config: "Config", key: str) -> object:
-    """The live value for a key: dashboard override if set, else the env default."""
+    """The live value for a key: the saved override if set, else the env default."""
     saved = await overrides(db)
     return saved[key] if key in saved else _env_value(config, key)
 
@@ -130,7 +130,7 @@ async def effective_feed_channel(db: "Database", config: "Config") -> str | None
 
 
 async def settings_overview(db: "Database", config: "Config") -> list[dict]:
-    """For the Settings page: each key's env default, override and effective value."""
+    """For ``/posting status``: each key's env default, override and effective value."""
     saved = await overrides(db)
     out: list[dict] = []
     for spec in OVERRIDABLE:

@@ -3,14 +3,11 @@
 import asyncio
 import dataclasses
 
-from fastapi.testclient import TestClient
-
 from ftabot.config import Config
 from ftabot.db import Database
 from ftabot.feeds.raiderio_mplus import RaiderIOMythicSource, _run_event, _select_members
 from ftabot.models import Member
 from ftabot.services.raidhelper import parse_webhook
-from ftabot.web import create_app
 
 # --- Raider.IO M+ source ----------------------------------------------------
 
@@ -121,58 +118,152 @@ def test_parse_webhook_flat_payload():
 # --- Raid-Helper webhook endpoint ------------------------------------------
 
 
-def _webhook_app(tmp_path, **overrides):
-    path = str(tmp_path / "wh.db")
-
-    async def init():
-        db = Database(path)
-        await db.connect()
-        await db.close()
-
-    asyncio.run(init())
+def _webhook_cfg(tmp_path, **overrides):
     fields = {
-        "database_path": path,
+        "database_path": str(tmp_path / "wh.db"),
         "persona_tone": "off",
         "raidhelper_webhook_secret": "s3cret",
         "raidhelper_default_channel_id": "555",
         **overrides,
     }
-    return create_app(dataclasses.replace(Config(), **fields))
+    return dataclasses.replace(Config(), **fields)
 
 
 _BODY = {"type": "create", "event": {"id": "evt-7", "title": "Mythic Prog"}}
 
 
-def test_webhook_rejects_bad_secret(tmp_path):
-    with TestClient(_webhook_app(tmp_path)) as client:
-        assert client.post("/webhooks/raidhelper?token=wrong", json=_BODY).status_code == 401
+async def test_webhook_rejects_bad_secret(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path))
+    resp = await client.post("/webhooks/raidhelper?token=wrong", json=_BODY)
+    assert resp.status == 401
 
 
-def test_webhook_disabled_without_secret(tmp_path):
-    app = _webhook_app(tmp_path, raidhelper_webhook_secret=None)
-    with TestClient(app) as client:
-        assert client.post("/webhooks/raidhelper?token=x", json=_BODY).status_code == 503
+async def test_webhook_accepts_signature_header(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path))
+    resp = await client.post(
+        "/webhooks/raidhelper", json=_BODY, headers={"X-Signature": "s3cret"}
+    )
+    assert resp.status == 200
 
 
-def test_webhook_queues_then_dedups(tmp_path):
-    with TestClient(_webhook_app(tmp_path)) as client:
-        # No bot sender wired in a bare web app -> the event queues for the loop.
-        r1 = client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
-        assert r1.status_code == 200 and r1.json()["status"] == "queued"
-        # Same event again -> deduped, not re-queued.
-        r2 = client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
-        assert r2.json()["status"] == "duplicate"
+async def test_webhook_disabled_without_secret(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path, raidhelper_webhook_secret=None))
+    resp = await client.post("/webhooks/raidhelper?token=x", json=_BODY)
+    assert resp.status == 503
 
 
-def test_webhook_posts_when_sender_present(tmp_path):
-    app = _webhook_app(tmp_path)
+async def test_webhook_rejects_non_json_and_unrecognised(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path))
+    bad = await client.post("/webhooks/raidhelper?token=s3cret", data="not json")
+    assert bad.status == 400
+    empty = await client.post("/webhooks/raidhelper?token=s3cret", json={"type": "create"})
+    assert empty.status == 400
+
+
+async def test_webhook_queues_then_dedups(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path))
+    # No bot sender wired -> the event queues for the feed loop.
+    r1 = await client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
+    assert r1.status == 200 and (await r1.json())["status"] == "queued"
+    # Same event again -> deduped, not re-queued.
+    r2 = await client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
+    assert (await r2.json())["status"] == "duplicate"
+
+
+async def test_webhook_muted_source_is_swallowed(tmp_path, ingest_client):
+    client, ingest = await ingest_client(_webhook_cfg(tmp_path))
+    await ingest.db.mute_source("raidhelper")
+    resp = await client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
+    assert (await resp.json())["status"] == "muted"
+
+
+async def test_webhook_without_a_route_is_recorded(tmp_path, ingest_client):
+    client, _ = await ingest_client(
+        _webhook_cfg(tmp_path, raidhelper_default_channel_id=None)
+    )
+    resp = await client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
+    assert (await resp.json())["status"] == "no_route"
+
+
+async def test_webhook_posts_when_sender_present(tmp_path, ingest_client):
+    client, ingest = await ingest_client(_webhook_cfg(tmp_path))
     sent = []
 
     async def fake_send(channel_id, embed, content=None):
         sent.append((channel_id, embed.title))
 
-    with TestClient(app) as client:
-        app.state.feed_sender = fake_send
-        r = client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
-        assert r.json()["status"] == "posted"
+    ingest.feed_sender = fake_send
+    resp = await client.post("/webhooks/raidhelper?token=s3cret", json=_BODY)
+    assert (await resp.json())["status"] == "posted"
     assert sent and sent[0][0] == "555"
+
+
+# --- /healthz ----------------------------------------------------------------
+
+
+class _Gateway:
+    def __init__(self, *, ready, latency):
+        self._ready, self.latency = ready, latency
+
+    def is_ready(self):
+        return self._ready
+
+    def is_closed(self):
+        return False
+
+
+async def test_healthz_reports_db_and_gateway(tmp_path, ingest_client):
+    client, ingest = await ingest_client(_webhook_cfg(tmp_path))
+    body = await (await client.get("/healthz")).json()
+    assert body == {"status": "ok", "members": 0}  # no bot attached
+
+    ingest.bot = _Gateway(ready=True, latency=0.042)
+    body = await (await client.get("/healthz")).json()
+    assert body["status"] == "ok" and body["bot"] == {"ready": True, "latency_ms": 42}
+
+    # Gateway down: still HTTP 200 (no host restart storm), flagged in the body.
+    ingest.bot = _Gateway(ready=False, latency=float("nan"))
+    resp = await client.get("/healthz")
+    body = await resp.json()
+    assert resp.status == 200 and body["status"] == "degraded"
+    assert body["bot"]["latency_ms"] is None
+
+
+async def test_no_dashboard_routes_are_served(tmp_path, ingest_client):
+    client, _ = await ingest_client(_webhook_cfg(tmp_path))
+    for path in ("/", "/app", "/api/members", "/docs"):
+        assert (await client.get(path)).status == 404
+
+
+async def test_serve_listens_until_cancelled(tmp_path):
+    # The real listener (not the in-process test server): bind an ephemeral
+    # port, answer /healthz over TCP, and shut down cleanly on cancel.
+    import socket
+
+    import aiohttp
+
+    from ftabot.ingest import Ingest
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    cfg = _webhook_cfg(tmp_path, web_host="127.0.0.1", web_port=port)
+    task = asyncio.create_task(Ingest(cfg).serve())
+    try:
+        async with aiohttp.ClientSession() as session:
+            for _ in range(50):
+                try:
+                    async with session.get(f"http://127.0.0.1:{port}/healthz") as resp:
+                        assert resp.status == 200
+                        assert (await resp.json())["status"] == "ok"
+                        break
+                except aiohttp.ClientConnectorError:
+                    await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("listener never came up")
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

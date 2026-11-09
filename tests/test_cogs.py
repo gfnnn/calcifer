@@ -39,6 +39,7 @@ class _Response:
         self.content = content
         self.embed = embed
         self.ephemeral = ephemeral
+        self.kwargs = kw
 
     async def defer(self, *, thinking=False, **kw):
         self.deferred = True

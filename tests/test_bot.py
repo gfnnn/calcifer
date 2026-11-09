@@ -58,7 +58,7 @@ async def test_setup_hook_loads_all_cogs_and_syncs_globally(tmp_path, monkeypatc
     try:
         await bot.setup_hook()
         # All nine cogs are registered.
-        assert len(bot.cogs) == 9
+        assert len(bot.cogs) == 10
         assert {"MembersCog", "AdminCog", "ReportsCog", "RecruitCog", "FeedsCog",
                 "BoardsCog", "PagesCog", "ScoresCog", "AlertsCog"} <= set(bot.cogs)
         assert synced == [None]  # one global sync
@@ -71,7 +71,7 @@ async def test_setup_hook_syncs_to_guild_when_configured(tmp_path, monkeypatch):
     synced = _stub_gateway(bot, monkeypatch)
     try:
         await bot.setup_hook()
-        assert len(bot.cogs) == 9
+        assert len(bot.cogs) == 10
         # Synced to the guild object (instant), not globally.
         assert len(synced) == 1 and getattr(synced[0], "id", None) == 4242
     finally:

@@ -67,7 +67,7 @@ the guild-native version of the idea:
 | Safe `allowed_mentions` default + explicit opt-in to ping | **BORROW** ✅ *(done)* | If unset, Discord parses `@everyone`/role/user pings from bot content. Boards force `AllowedMentions.none()`; `/alerts` is the opt-in. |
 | Least-privilege intents (no Message Content) | **BORROW** ✅ *(done)* | A slash-command bot rarely needs Message Content; Discord won't approve it where Interactions suffice. [`bot.py`](../ftabot/bot.py) uses `Intents.default()`. |
 | Least-privilege OAuth scopes; never Administrator | **BORROW** | Smaller blast radius if the token leaks; owners distrust Admin-asking bots. Invite with the minimum permission integer. |
-| SQLite + `aiosqlite` + **WAL** + single-writer | **BORROW** ✅ *(done)* | The exact "one sync writes, bot+web read" model SQLite+WAL is built for. WAL + `busy_timeout` set in [`db.py:69`](../ftabot/db.py). |
+| SQLite + `aiosqlite` + **WAL** + single-writer | **BORROW** ✅ *(done)* | The exact "one sync writes, the bot reads" model SQLite+WAL is built for. WAL + `busy_timeout` set in [`db.py:69`](../ftabot/db.py). |
 | Supervised single-process auto-restart | **BORROW** ✅ *(done)* | `serve.py`'s "a dying long-running task brings the process down so the host restarts cleanly" is the endorsed pattern (systemd `Restart=on-failure`). |
 | Web dashboard as the *onboarding* surface | **ADAPT** | The giants' dashboards exist to configure *per-guild settings*. We have one guild, so config is env-vars; but the **discoverability** win (a "here's what this does" surface) is real → concierge cards + `/me` ([vision §4d](vision.md#4d-personal--toggleable)). |
 | Chat-message XP / leveling loop | **ADAPT → SKIP generic** | MEE6's signature loop needs message events (Message Content/Members) and rewards *posting volume* — it fights "default intents only" and the "less, not more" rule. The guild-native equivalent already exists: **Hot 20**, first-kill milestones, Ashes Awards reward *real achievement*, not message spam. |
@@ -122,8 +122,8 @@ deletion** (actionable via a command, email, or support server). Under **GDPR**
 receiving API data is "processing." There is no privacy surface today.
 
 **The borrow.**
-1. A short **privacy policy** — a repo template rendered at a `GET /privacy` route
-   in [`web.py`](../ftabot/web.py) (sits naturally beside the existing HTML pages),
+1. A short **privacy policy** — a repo template (the bot hosts no web pages, so link
+   it from the repo or post it as a sticky page),
    covering: what's stored (roster, identity links, loot), why (guild management),
    that it's **never sold or shared** (Discord's Developer Policy flatly bans
    disclosing API data to data brokers / commercialising it anyway), and a
@@ -144,13 +144,13 @@ failure mode — the web server answers 200 while the bot's Discord connection i
 silently dead, so an external uptime check sees green during an outage.
 
 **What shipped.** [`serve.py`](../ftabot/serve.py) now hands the running bot to the
-web app (`app.state.bot`), and [`web.py`](../ftabot/web.py)'s `/healthz` reports a
+ingest listener (`ingest.bot`), and [`ingest.py`](../ftabot/ingest.py)'s `/healthz` reports a
 `bot: {ready, latency_ms}` object and flips `status` to `degraded` when the gateway
 is down. It deliberately **stays HTTP 200**: Render and Railway both point their
 restart-triggering `healthCheckPath` at `/healthz`, so a transient reconnect must
 not trip a restart storm (a fully-dead bot *task* is already caught by the
 `_supervise` shutdown). The gateway signal therefore rides in the body, where a
-monitor or a future `/status` reads it. Covered by `tests/test_web.py`.
+monitor or a future `/status` reads it. Covered by `tests/test_phase3.py`.
 
 ### P1 — Backoff on the loops; never tight-retry on error — ✅ done
 

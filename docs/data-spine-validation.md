@@ -20,8 +20,8 @@ Related: [`data-sources.md` §5](data-sources.md#5-local-desktop-addon-databases
 - `services/grm.py` — member-record extraction, positional + named alts, join
   dates, shape-agnostic walking, dedup, non-member tables ignored. ~7 tests.
 - `identity.py` — account grouping / main selection / transitive links. ~7 tests.
-- `spine.py` + `web.py` upload route — ingestion, auth, error codes, the roster
-  alt↔main overlay, the identity read endpoint. ~13 tests.
+- `spine.py` + the `ingest.py` upload route — ingestion, auth, error codes, the
+  roster alt↔main overlay, the stored identity record. ~13 tests.
 - `scripts/upload_savedvars.py` — request building + exit codes with a faked
   opener. ~5 tests.
 
@@ -68,9 +68,9 @@ checked against a real `Guild_Roster_Manager.lua`:
 ### Pipeline / operational
 - [ ] **Real file size & performance** — tested on tiny fixtures only. A full
       guild history can be multi-MB; the parser is O(n) but unprofiled at scale.
-- [ ] **End-to-end uploader → running server** — only the request building is
-      tested (mocked opener). The actual `scripts/upload_savedvars.py` POST
-      against a live `web.py` has not been exercised.
+- [x] **End-to-end uploader → running server** — `scripts/upload_savedvars.py`
+      was run against a locally started `python -m ftabot.serve` (ingest
+      listener) and imported a dump. Not yet exercised against the deployed host.
 - [ ] **Character → Discord link** — out of scope by design; GRM holds no
       reliable Discord signal, so that hop stays a manual/officer link.
 

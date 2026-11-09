@@ -50,6 +50,7 @@ class FtaBot(commands.Bot):
         from .cogs.feeds import FeedsCog
         from .cogs.members import MembersCog
         from .cogs.pages import PagesCog
+        from .cogs.posting import PostingCog
         from .cogs.recruit import RecruitCog
         from .cogs.reports import ReportsCog
         from .cogs.scores import ScoresCog
@@ -61,6 +62,7 @@ class FtaBot(commands.Bot):
         await self.add_cog(FeedsCog(self))
         await self.add_cog(BoardsCog(self))
         await self.add_cog(PagesCog(self))
+        await self.add_cog(PostingCog(self))
         await self.add_cog(ScoresCog(self))
         await self.add_cog(AlertsCog(self))
 

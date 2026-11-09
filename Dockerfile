@@ -1,7 +1,7 @@
-# All-in-one image: web app + Discord bot + scheduled sync.
+# All-in-one image: Discord bot + scheduled sync + the small ingest listener.
 FROM python:3.12-slim
 
-# Run as an unprivileged user (defense-in-depth for an internet-facing process):
+# Run as an unprivileged user (defense-in-depth: the ingest listener is reachable):
 # a future dependency/path-traversal bug then can't act as root in the container.
 # Create the user up front so /app and the /data mount point are owned by it.
 RUN useradd --create-home --uid 10001 app
@@ -10,7 +10,7 @@ WORKDIR /app
 
 # gosu lets the entrypoint drop from root to a non-root user *after* fixing
 # ownership of the mounted data volume (which can mount root-owned at runtime).
-# A non-root runtime user is defense-in-depth for an internet-facing process.
+# A non-root runtime user is defense-in-depth for a network-reachable process.
 # (The `app` user itself is created once, up front, above.)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
@@ -36,7 +36,8 @@ ENV DATABASE_PATH=/data/ftabot.db \
     WEB_HOST=0.0.0.0 \
     PYTHONUNBUFFERED=1
 
-# Hosts inject $PORT; the app reads it (falls back to 8080).
+# Hosts inject $PORT; the ingest listener binds it (falls back to 8080). It
+# serves /healthz, the Raid-Helper webhook and the SavedVariables upload only.
 EXPOSE 8080
 
 # Intentionally NO `USER app` here. The container must start as root so the

@@ -51,7 +51,7 @@ Beneath the community face, the same data powers the tools the guild's
 **management** (the GM and the **Flamekeepers**) actually run the guild with:
 *is the guild healthy? who do I bring? where should the loot go? who should we
 recruit? who is this person, really?* These are **pull-when-needed** surfaces —
-Discord commands and browser pages — not ambient spam. They are already live
+Discord commands — not ambient spam. They are already live
 (the GM / Raid Leader / Loot views, the recruitment scout) and they deepen as the
 data spine lands (§5).
 
@@ -166,8 +166,9 @@ channel. So a surface is reviewed privately and promoted deliberately before the
 community ever sees it, and a deploy can never surprise the server. Any new
 posting surface must route through the gate.
 
-**The web app doubles as a webhook receiver.** `web.py` already runs FastAPI on
-`$PORT`, so push sources (Raid-Helper) hit a signature-verified route here and
+**A small ingest listener is the webhook receiver.** `ingest.py` binds `$PORT`
+(no dashboard, no browsable API), so push sources (Raid-Helper) hit a
+signature-verified route here and
 enqueue a durable `feed_outbox` row; pull sources run on the feed loop. No extra
 service.
 
@@ -189,7 +190,8 @@ service.
   engineering.
 - **Content in the repo** — static prose (rules, welcome) lives as template files
   the GM edits via a GitHub change request; Calcifer owns the post and renders
-  it. No in-Discord editor or dashboard (a future, out-of-scope project).
+  it. No dashboard: `/page export` + `/page import` cover a copy fix that
+  can't wait for a deploy.
 - **Bounded M+ pulls** — M+ boards/feeds never poll all ~300. The pollset is
   bounded (raiders first, then above a score/percentile threshold *or* logged in
   within a window) and hard-capped (`mplus_feed_member_cap`), so it stays under
@@ -293,9 +295,7 @@ surfaces, not ambient spam, gated to the right tier (§5d).
 
 ### 5a. The views *(shipped)*
 
-Three role-specific views render in the browser (the Raid and Loot sections of
-the `/app` dashboard, plus the GM health pulse on Home) and in
-Discord (`/gmreport`, `/raidcheck`, `/loot`, `/wishlist`, `/lootpriority`,
+Three role-specific views render in Discord (`/gmreport`, `/raidcheck`, `/loot`, `/wishlist`, `/lootpriority`,
 `/trends`), reading the same DB the sync populates. The scoring is pure
 (`metrics.py`):
 
@@ -528,7 +528,7 @@ variation on the shipped engine), and **done** (its finish line, on top of the
 
 | Component | Inputs | Build | Status |
 | --- | --- | --- | --- |
-| Companion uploader | `SAVEDVARS_UPLOAD_SECRET` | stdlib `scripts/upload_savedvars.py` + secret-verified `POST /api/upload/savedvars` on `web.py` | ✅ shipped |
+| Companion uploader | `SAVEDVARS_UPLOAD_SECRET` | stdlib `scripts/upload_savedvars.py` + secret-verified `POST /api/upload/savedvars` on `ingest.py` | ✅ shipped |
 | RCLootCouncil ingestion | (none — schema is stable) | `savedvars.py` parser + `services/rclootcouncil.py` → `loot_history` | ✅ shipped |
 | GRM ingestion | tighten aliases against a live `Guild_Roster_Manager.lua` | `services/grm.py` → `identity_members` (defensive, shape-agnostic) | ✅ shipped, validate on real data |
 | Identity graph | a reliable character↔Discord signal (lead candidate: Battle.net **user-OAuth** owned-characters profile — §9, data-sources §2a) | `identity.py` account grouping + `db.apply_accounts` alt↔main overlay; Discord link still manual | 🟡 account half done; Discord link remains |
@@ -577,8 +577,7 @@ majors); the *empty-fetch prune guard* (a 0-member roster fetch no longer wipes
 the table); *case-insensitive boolean config*; the *constant-time admin token*
 + `http(s)`-only link allowlist; the *GM health delta* (the stored snapshot now
 carries the retention component the live view uses); *date-portion attendance
-ordering*; the *sync token cookie* (the `/app` unlock posts the token as JSON
-into an http-only cookie, so it stays out of the URL); and the *real server
+ordering*; and the *real server
 timezone* (raid/event times now resolve through `Config.raid_timezone` —
 Europe/Paris as an IANA `zoneinfo` zone, DST-correct — instead of the static
 `RAID_TZ_OFFSET_HOURS`).

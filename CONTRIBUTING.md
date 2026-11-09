@@ -12,7 +12,7 @@ cp .env.example .env                             # fill in only what you need
 ```
 
 Python **3.12**. Nothing here needs network access to develop or test — the bot,
-web app, and sync all read one local SQLite file, and the test suite is fully
+posting loops, and sync all share one local SQLite file, and the test suite is fully
 offline.
 
 Seed a local database to click around:

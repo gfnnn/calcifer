@@ -78,13 +78,6 @@ def test_feed_bool_flags_enable_on_truthy(monkeypatch):
     assert c.realm_progress_feed_enabled is True
 
 
-def test_cookie_secure_defaults_on_and_respects_env(monkeypatch):
-    assert Config().cookie_secure is True
-    assert Config.from_env().cookie_secure is True
-    monkeypatch.setenv("COOKIE_SECURE", "0")
-    assert Config.from_env().cookie_secure is False
-
-
 def test_non_numeric_int_and_float_env_fall_back_to_default(monkeypatch):
     # A garbage value for a numeric env var must not crash from_env; it parses to
     # None and the field keeps its default rather than raising.

@@ -1,7 +1,7 @@
 """Raid-Helper integration — normalize its outbound webhooks into FeedEvents.
 
 Raid-Helper POSTs to a callback URL when an event is created / updated / deleted.
-We receive it at ``POST /webhooks/raidhelper`` (see web.py), verify a shared
+We receive it at ``POST /webhooks/raidhelper`` (see ingest.py), verify a shared
 secret, and turn the payload into a FeedEvent the hub can route + post.
 
 The exact payload keys aren't published behind their Cloudflare docs, so the

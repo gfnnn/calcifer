@@ -190,13 +190,10 @@ async def test_make_sender_blocks_when_guardrail_off(tmp_path):
 # --- _wire_webhook_sender ---------------------------------------------------
 
 
-class _AppState:
-    pass
-
-
 class _App:
-    def __init__(self):
-        self.state = _AppState()
+    """Stand-in for the ingest listener: just the attribute serve.py sets."""
+
+    feed_sender = None
 
 
 async def test_wire_webhook_sender_sets_sender_and_drains(tmp_path, monkeypatch):
@@ -210,8 +207,8 @@ async def test_wire_webhook_sender_sets_sender_and_drains(tmp_path, monkeypatch)
     cfg = _cfg(tmp_path)
     await serve._wire_webhook_sender(app, cfg, _Bot(_Channel()))
 
-    assert callable(app.state.feed_sender)
-    assert drained == [app.state.feed_sender]  # the outbox was flushed with it
+    assert callable(app.feed_sender)
+    assert drained == [app.feed_sender]  # the outbox was flushed with it
 
 
 async def test_wire_webhook_sender_swallows_drain_errors(tmp_path, monkeypatch, caplog):
