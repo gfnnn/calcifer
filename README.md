@@ -14,11 +14,12 @@ spreadsheets, websites and half a dozen third-party bots, each posting in its ow
 style. Calcifer collects the data once, stores it in one place and presents it
 consistently, so officers spend less time chasing information by hand.
 
-**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite), Docker, hosted on
-Railway. Tested with pytest (965 offline tests, 88% coverage gate in CI) and
+**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite) and Docker, set up
+to deploy on Railway. Tested with pytest (965 offline tests, 88% coverage gate in CI) and
 linted with ruff.
 
-**Status:** in development. It is my own unpaid hobby project for a guild I run.
+**Status:** in development, and not currently deployed. It is my own unpaid hobby
+project for a guild I run.
 
 **How it was built:** with AI assistance. I designed and directed the project and
 reviewed the changes; much of the code was written with Claude (Anthropic's AI
