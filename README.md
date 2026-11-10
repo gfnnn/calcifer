@@ -3,7 +3,7 @@
 ## At a glance
 
 **What it is:** a Discord bot that runs the community for an online gaming guild
-(about 300 members, the size of the guild rather than a count of bot users). It
+with a Discord server of 300+ members (the server's size, not a count of bot users). It
 pulls member and activity data from several public game APIs into one database,
 then uses it to keep the guild's Discord tidy: self-updating information boards,
 one news feed in place of several noisy bots, and officer tools for recruitment,
@@ -50,10 +50,10 @@ server** with features for the community.
 
 One bot, one process, one SQLite database, two audiences:
 
-- 🏰 **The guild's living home** *(community-facing)* — self-updating boards,
+- 🏰 **The guild's living home** *(community-facing)*: self-updating boards,
   deduped news, one-glance event and key summaries, and a single charming voice
   in place of a notification dump.
-- 🛠️ **The management tool** *(pull-when-needed)* — the GM / Raid Leader / Loot
+- 🛠️ **The management tool** *(pull-when-needed)*: the GM / Raid Leader / Loot
   views and the recruitment scout, all reading the same trustworthy roster record.
 
 > 📖 The full story, design system, and roadmap live in
@@ -64,9 +64,9 @@ Under the hood he pulls live data from the WoW community APIs into one SQLite
 file and lets the guild query it from **Discord**:
 
 - **WoW Audit as the source of truth** ([API](https://wowaudit.com/api-docs)) when
-  a team key is set — gear, Great Vault, wishlist/BiS, parses, all pre-joined.
+  a team key is set: gear, Great Vault, wishlist/BiS, parses, all pre-joined.
 - **Open-API fallbacks/supplements**: [Raider.IO](https://raider.io/api)
-  (no key — roster, M+ score, raid progression), the
+  (no key: roster, M+ score, raid progression), the
   [Blizzard API](https://develop.battle.net) (rank, race, level, equipment) and
   [Warcraft Logs](https://www.warcraftlogs.com/api/docs) (parse averages).
 - **Discord slash commands**: lookup, roster, search, stats, reports.
@@ -113,7 +113,7 @@ set, and the roster auto-refreshes if `SYNC_INTERVAL_MINUTES > 0`. A small
 health check and the two inbound data pushes.
 
 **Deploying from your phone (no dev environment):** see
-**[docs/deploy.md](docs/deploy.md)** — Railway/Render (always-on, managed from a browser),
+**[docs/deploy.md](docs/deploy.md)**: Railway/Render (always-on, managed from a browser),
 a free GitHub Actions sync, or Termux on Android.
 
 > **Network note:** the sync calls `raider.io` (and optionally
@@ -145,7 +145,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
-Everything except `DISCORD_TOKEN` has a sensible default — the pipeline works
+Everything except `DISCORD_TOKEN` has a sensible default, so the pipeline works
 with **Raider.IO only**, no API keys, out of the box. Add `WOWAUDIT_API_KEY` to
 switch to the richer WoW Audit data set.
 
@@ -190,7 +190,7 @@ switch to the richer WoW Audit data set.
 
 ---
 
-## Calcifer — the feed hub
+## Calcifer: the feed hub
 
 A blue-flame persona that consumes external feeds and posts branded alerts to
 the channels you choose. Turn it on with `FEED_POLL_MINUTES` +
@@ -221,27 +221,27 @@ poll of each source primes silently, so there's no history dump.
 **Living boards** are bot-owned messages that re-render from the database on an
 interval and edit themselves in place (never re-post). The shipped boards:
 
-- **Calcifer's Hot 20** — the guild's top-20 Mythic+ leaderboard with weekly
+- **Calcifer's Hot 20**: the guild's top-20 Mythic+ leaderboard with weekly
   rank movement.
-- **News Highlights** — a calm two-zone news page that replaces the trio of
+- **News Highlights**: a calm two-zone news page that replaces the trio of
   news bots: **Top stories** (retail blue-tracker posts, live patch
   notes/hotfixes, general WoW news) is the larger list up top, with a short
   **PTR & Blizzard** corner below for test-realm coverage and other Blizzard
   games. Items are sorted by their RSS section category (`Live`/`WoW` high,
   `PTR`/`Blizzard` low); the classic-games sections (`Classic`/`Mists`/`TBC`)
-  stay off the page. It renders from news the feeds archive — **Wowhead**
+  stay off the page. It renders from news the feeds archive (**Wowhead**
   (`WOWHEAD_ENABLED`) and **Blizzard's official news** (`BLIZZARD_NEWS_ENABLED`,
-  archived into the top zone) — so turn the feed loop on (`FEED_POLL_MINUTES`)
+  archived into the top zone), so turn the feed loop on (`FEED_POLL_MINUTES`)
   to fill it. Adding another news feed is one `RssNewsSource` line; the feed
   loop nudges the board right after every news poll, so a new post reaches the
   page without waiting for the board tick.
-- **Weekly Events** — the week's Raid-Helper events at a glance (localised time
+- **Weekly Events**: the week's Raid-Helper events at a glance (localised time
   stamp, sign-up count, a "Sign up ➜" jump-link), fed by the Raid-Helper webhook
   (`RAIDHELPER_WEBHOOK_SECRET`). Sign-ups stay in Raid-Helper; the board is
   read-only.
-- **Roster Pulse** — the guild's heartbeat: member count, activity, readiness
-  and composition at a glance.
-- **Recruitment ("We're Looking")** — the guild's open front door: open slots
+- **Roster Pulse**: the guild's heartbeat, showing member count, activity,
+  readiness and composition at a glance.
+- **Recruitment ("We're Looking")**: the guild's open front door, with open slots
   per role (count, ilvl floor, note), the trial rules, and a live-token pitch.
   Officers configure it from Discord with the `/recruit` commands; the cultural
   prose is GM-editable in [`ftabot/content/recruitment.json`](ftabot/content/recruitment.json).
@@ -252,7 +252,7 @@ Create one with `/board create`, refresh on a schedule with
 
 **Sticky pages** are the boards' hand-written sibling and the single home for
 the guild's managed prose: multi-message Discord markdown pages (headers, `-#`
-subtext, emoji) the bot owns — the **Rules & Info** welcome page and the
+subtext, emoji) the bot owns: the **Rules & Info** welcome page and the
 **Guides & Resources** link page. Place one with
 `/page post page:<name> channel:#somewhere`: the first run posts it, pointing it
 at a different channel deletes the old copy and re-posts there, and the same
@@ -265,13 +265,13 @@ board loop keeps placed pages in sync, and pages carry the same live `{tokens}`
 (progression, member count, recruiting) so their facts never drift stale. Pages
 always post with mentions disabled, so pasted `@role`/`<@id>` text never pings.
 
-Every outbound message — boards **and** feed alerts — passes through one
+Every outbound message (boards **and** feed alerts) passes through one
 **deny-by-default posting guardrail** before it can reach Discord, set with
 `/posting mode` (boot default: `POSTING_MODE`):
 
-- **`off`** (default) — nothing posts anywhere.
-- **`test`** — every post is redirected to the test channel (`/posting test-channel`, default `TEST_CHANNEL_ID`).
-- **`live`** — boards you have `/board promote`d reach their real channel; the
+- **`off`** (default): nothing posts anywhere.
+- **`test`**: every post is redirected to the test channel (`/posting test-channel`, default `TEST_CHANNEL_ID`).
+- **`live`**: boards you have `/board promote`d reach their real channel; the
   rest stay sandboxed.
 
 So a board is reviewed privately and explicitly promoted before the community
@@ -380,7 +380,7 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `tests/` | Pytest suite (DB, metrics, views, cogs, boards, feeds, ingest). |
 
 A roster sync only ever overwrites **API-sourced** columns. Manually entered
-data — Discord links, main/alt relationships and officer notes — is preserved
+data (Discord links, main/alt relationships and officer notes) is preserved
 across syncs.
 
 ---
