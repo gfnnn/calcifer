@@ -22,7 +22,7 @@ linted with ruff.
 project for a guild I run.
 
 **How it was built:** with AI assistance. I designed and directed the project and
-reviewed the changes; much of the code was written with Claude (Anthropic's AI
+reviewed the changes; the code was written with Claude (Anthropic's AI
 assistant), and most commits are co-authored with it.
 
 **Try it locally:** the test suite needs no accounts, keys or network access.
