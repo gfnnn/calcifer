@@ -42,6 +42,10 @@ python -m scripts.check_wowaudit                    # one integration at a time
 python -m scripts.check_raiderio                    #   (also check_blizzard,
 python -m scripts.check_warcraftlogs                #    check_raidhelper)
 
+# Operations
+python -m scripts.backup_db --dest backups          # consistent copy of the live SQLite DB (+ pruning)
+docker compose up -d --build                        # run the all-in-one process on any Docker host
+
 # Data-spine (addon SavedVariables) tooling — pure, offline
 python -m scripts.inspect_savedvars dump.lua        # report the shape of a .lua dump
 python -m scripts.redact_savedvars in.lua out.lua   # sanitise a real dump into a test fixture
@@ -104,7 +108,10 @@ Key flow and layering:
   `warcraftlogs`, `raidhelper`), all built on **`services/_http.py`**: `BaseHTTPClient`
   centralises the aiohttp session lifecycle (own-or-share a session) and the
   `Retry-After` parsing, and `OAuthClientCredentials` is the shared OAuth2
-  token cache used by Blizzard + Warcraft Logs (re-mints on 401). WoW Audit is the
+  token cache used by Blizzard + Warcraft Logs (re-mints on 401). Open every
+  outbound session with `_http.new_session()` (it sets `trust_env=True`):
+  a bare `aiohttp.ClientSession` ignores `HTTPS_PROXY` and fails at DNS behind
+  a proxy, including in a Claude Code web session. WoW Audit is the
   source of truth when a key is set; Raider.IO is the keyless fallback that always
   works. The **data spine** also lives here as pure offline parsers: `savedvars.py`
   (a dependency-free WoW SavedVariables Lua reader) + `rclootcouncil.py` / `grm.py`
@@ -121,7 +128,22 @@ Key flow and layering:
   snapshot, returning a `SyncResult`. `enrich_max_age_hours`/`enrich_limit` throttle
   re-enrichment; raiders are always enriched.
 - **`metrics.py`** — pure scoring functions (activity, readiness, guild health,
-  loot priority). No I/O — keep it pure and unit-test it directly.
+  loot priority). No I/O — keep it pure and unit-test it directly. "Active"
+  reads `last_login` (WoW Audit), else `last_crawled_at` (Raider.IO's crawl
+  time, the keyless signal), and only then `last_synced`: never promote
+  `last_synced` above them, it says when *we* looked and makes everyone active.
+- **`raids.py`** — pure raid-tier knowledge. Raider.IO's `raid_progression` dict
+  is **not** in chronological order (an ended tier or a one-boss side raid can
+  come first), so "the current raid" is decided from its raid catalog
+  (`/raiding/static-data`: names, boss counts, open/close dates per region) via
+  `current_raids` / `headline_slug`. Everything degrades to "first key" when no
+  catalog is available. `guild_raid_rows` flattens the guild's own progress +
+  standings into the `guild_raids` table the sync fills.
+- **`milestones.py`** — pure milestone detection (`detect`) + the DB-backed
+  `collect`. Edge-triggered against `milestone_marks` (last value per
+  entity/metric), so a new joiner or the first run announces nothing; found
+  milestones are stored in `milestones` and offered to the runner by the
+  `milestones` feed for a week (so one held by the guardrail still posts).
 - **`recruit.py`** (pure scout scoring: weak-slot detection + trajectory +
   `LEAD_STATES`) + **`scout.py`** (orchestrates WCL/Raider.IO discovery; pure
   `lead_dicts` flattens reports into leads) back the `/scout` command and the
@@ -187,7 +209,7 @@ Raid-Helper webhooks) and posts branded Discord alerts.
 - **`feeds/`** — `base.py` (`FeedSource`/`FeedEvent`), one module per source
   (`wowhead`, `rss_news` (a generic config-driven RSS news source, e.g. Blizzard
   official news), `raiderio_mplus`, `raiderio_affixes`, `raiderio_realm_progress`,
-  `wcl_prog`, `wowaudit_raids`), the shared pure RSS reader `_rss.py` (used by
+  `wcl_prog`, `wowaudit_raids`, `milestones` (reads the DB, no network)), the shared pure RSS reader `_rss.py` (used by
   `wowhead` + `rss_news`), and `runner.py` whose `poll_once` is the pure-ish
   pipeline: fetch → dedup (`seen_items`) → route → render → publish. It takes
   injected sources, an aiohttp session, and a `send` coroutine so it is fully
@@ -217,7 +239,11 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   import. Current boards: `hot20` (Calcifer's Hot 20 M+ leaderboard), `news`
   (News Highlights), `events` (Weekly Events from Raid-Helper), `pulse` (Roster
   Pulse), `recruitment` (We're Looking; officer-configured via `/recruit`, state
-  in `recruitment_config`). The `/board` cog and the `_board_loop`/`_score_loop`
+  in `recruitment_config`), `raidprog` (Raid Progress, from `guild_raids`),
+  `armoury` (The Armoury: top item levels among recently seen characters) and
+  `climb` (The Climb: levelling, needs Blizzard-sourced `level`). Boards that
+  show weekly movement share `_weekly.weekly_baseline` (seed, compare, roll at
+  the EU reset) over the `board_baselines` table. The `/board` cog and the `_board_loop`/`_score_loop`
   in `serve.py` drive them. (Rules & Info and Guides & Resources are **not**
   boards — they are sticky pages; see `pages.py`.)
 - **`pages.py`** — **sticky pages**: multi-message, GM-authored Discord-markdown
@@ -249,7 +275,8 @@ Raid-Helper webhooks) and posts branded Discord alerts.
 `wishlist_items`, `raid_events` + `attendance`, `guild_snapshots` (daily trend
 points); feed hub: `seen_items`, `feed_rules`, `feed_outbox`, `feed_mutes`,
 `feed_digest_queue`, `feed_subscriptions`, `news_items`, `mythic_affixes`,
-`realm_progress`, `calendar_events`, `mplus_bests`; boards: `boards`,
+`realm_progress`, `calendar_events`, `mplus_bests`, `milestone_marks`,
+`milestones`; our own raid progress: `guild_raids`; boards: `boards`,
 `board_baselines`, `recruitment_config` (officer-set recruitment board state);
 sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
 (`/page import` copy overrides for the bundled `content/*.json`); recruitment funnel:

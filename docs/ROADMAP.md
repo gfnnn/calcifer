@@ -18,7 +18,8 @@ The roadmap is organized in **phases 0–5**, with each phase independently ship
 | **1** | First board: Hot 20 (M+ leaderboard) + targeted score refresh | ✅ Shipped | Complete |
 | **2** | Tidy: Events, News, Rules, Guides, Pulse boards + raid-night roster | 🟡 Partial (4/5) | TBD |
 | **3** | Quiet: Digest mode, M+ gating, `/alerts` subscriptions, `/me` card | 📋 Planned | TBD |
-| **4** | Charm: First-kill milestones, Raid Progress board, Weekly MVP, mood system | 📋 Planned | TBD |
+| **4** | Charm: First-kill milestones, Raid Progress board, Weekly MVP, mood system | 🟡 Partial (milestones + Raid Progress shipped keyless) | TBD |
+| **MVP** | A surface for every kind of public guild data + chosen hosting | ✅ Shipped (Nov 2026) | Complete |
 | **5** | Recruitment: WoWProgress/RIO LFG feeds, recruitment funnel, recruitment board | 📋 Planned | TBD |
 | **—** | **Data spine** (parallel) | 🟡 Partial (intake shipped, linking in progress) | TBD |
 
@@ -43,6 +44,28 @@ Every surface must clear this gate before deployment:
 **Two cross-cutting prerequisites:**
 - ✅ **Real server timezone** — Shipped. Time-anchored surfaces read wall-clock times through `Config.raid_timezone` (Europe/Paris as IANA zone).
 - **Config values** — See "Inputs still needed" in §8 below.
+
+---
+
+## MVP (shipped November 2026)
+
+The MVP is "every kind of public guild data has a surface, and there is
+somewhere affordable to run it". Verified against the guild's live Raider.IO
+data.
+
+| Data | Surface | Source | Status |
+|------|---------|--------|--------|
+| Mythic+ | Calcifer's Hot 20 board; timed-key alerts | Raider.IO (keyless) | ✅ Shipped earlier |
+| Raid | **Raid Progress** board; realm-progress alerts | Raider.IO (keyless) | ✅ |
+| Gear | **The Armoury** board | Raider.IO (keyless) | ✅ |
+| Levelling | **The Climb** board | Blizzard API (free keys) | ✅ offline-tested; live check pending keys |
+| Roster | Roster Pulse board | Raider.IO (keyless) | ✅ Shipped earlier; activity signal corrected |
+| Moments | **Guild milestones** feed (boss kills, M+ thresholds, level caps) | stored data | ✅ |
+| Hosting | Options compared, three setup guides, Compose + Fly configs, backups | [`deploy.md`](deploy.md) | ✅ documented; first deploy pending |
+
+**Next after the MVP:** the first production deploy (Guide A or B in
+[`deploy.md`](deploy.md)), then tick the remaining live checks in
+[`testing-status.md`](testing-status.md) as their keys are added.
 
 ---
 
@@ -82,8 +105,8 @@ Every surface must clear this gate before deployment:
 
 | Feature | Inputs | Build | Done when |
 |---------|--------|-------|-----------|
-| **First-kill milestones** | WCL prog creds; stored "already killed" set | Detect new boss kill in prog feed; celebratory render (`EMBER_RED`) | First kill fires exactly once, idempotent across restarts |
-| **Raid Progress board** | WCL creds; prog channel ID | Board rendering N/H/M kills + best pull on current boss | Current progression renders ambiently (edits in place) |
+| **First-kill milestones** | ✅ Shipped keyless: the milestones feed announces each new Heroic/Mythic kill from Raider.IO kill counts (it knows *how many* are down, not *which* boss). Naming the boss still needs WCL prog creds | Stored marks + `milestones` table | A kill fires exactly once, idempotent across restarts |
+| **Raid Progress board** | ✅ Shipped keyless (N/H/M bars + standings). "Best pull on the current boss" still needs WCL creds | `boards/raidprog.py` over `guild_raids` | Current progression renders ambiently (edits in place) |
 | **Weekly MVP / Ashes Awards** | Ranking metric; weekly schedule; winners history | Weekly award renderer with anti-repeat memory | Weekly MVP posts without repeating trivially |
 | **Achievement shoutouts** | Achievement source (Blizzard/WCL) | Detect + render new achievements | Shoutout fires on notable achievement |
 | **Concierge helper cards** | Per-channel CTA copy (content in repo) | Board (one sticky per channel) | Each channel has a "here's what you can do" card |
