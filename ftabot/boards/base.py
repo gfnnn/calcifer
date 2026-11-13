@@ -64,6 +64,9 @@ BOARD_NAMES: dict[str, str] = {
     "weekly_events": "Weekly Events",
     "roster_pulse": "Roster Pulse",
     "recruitment": "Recruitment",
+    "raid_progress": "Raid Progress",
+    "armoury": "The Armoury",
+    "the_climb": "The Climb",
 }
 
 

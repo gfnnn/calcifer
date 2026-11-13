@@ -48,7 +48,8 @@ def test_sync_columns_derived_exactly():
     assert SYNC_COLUMNS == (
         "class_name", "active_spec", "role", "race", "level", "faction",
         "guild_rank", "item_level", "average_item_level", "mythic_plus_score",
-        "raid_progression", "best_parse_avg", "last_login", "missing_enchants",
+        "raid_progression", "best_parse_avg", "last_login", "last_crawled_at",
+        "missing_enchants",
         "missing_gems", "vault_slots_filled", "wishlist_pct", "thumbnail_url",
         "profile_url", "source", "blizzard_id", "wowaudit_team",
     )
@@ -64,7 +65,8 @@ def test_manual_columns_derived_exactly():
 def test_migration_columns_derived_exactly():
     assert MIGRATION_COLUMNS == {
         "average_item_level": "REAL", "source": "TEXT", "blizzard_id": "INTEGER",
-        "details_json": "TEXT", "last_login": "TEXT", "missing_enchants": "INTEGER",
+        "details_json": "TEXT", "last_login": "TEXT", "last_crawled_at": "TEXT",
+        "missing_enchants": "INTEGER",
         "missing_gems": "INTEGER", "vault_slots_filled": "INTEGER",
         "wishlist_pct": "REAL", "raid_team": "TEXT", "officer_role": "TEXT",
         "wowaudit_team": "TEXT",

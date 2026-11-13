@@ -110,6 +110,7 @@ class Database:
             raid_progression=row["raid_progression"],
             best_parse_avg=row["best_parse_avg"],
             last_login=row["last_login"],
+            last_crawled_at=row["last_crawled_at"],
             missing_enchants=row["missing_enchants"],
             missing_gems=row["missing_gems"],
             vault_slots_filled=row["vault_slots_filled"],
@@ -1610,6 +1611,139 @@ class Database:
                 "summary": r["summary"],
                 "realm_rank": r["realm_rank"],
                 "updated_at": r["updated_at"],
+            }
+            for r in await cur.fetchall()
+        ]
+
+    # -- our guild's raid progress ----------------------------------------------
+
+    async def replace_guild_raids(self, raids: list[dict]) -> None:
+        """Replace the stored raid progress with ``raids`` (headline first).
+
+        Each raid: {raid_slug, name, total_bosses, normal_killed, heroic_killed,
+        mythic_killed, summary, ranks, is_current}. The list order is kept as
+        the display order. An empty list is ignored, so a blank upstream answer
+        can never wipe the progress a board is showing.
+        """
+        if not raids:
+            return
+        now = now_iso()
+        await self.conn.execute("DELETE FROM guild_raids")
+        await self.conn.executemany(
+            "INSERT INTO guild_raids (raid_slug, name, total_bosses, normal_killed, "
+            "heroic_killed, mythic_killed, summary, ranks_json, is_current, "
+            "position, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    r["raid_slug"],
+                    r["name"],
+                    int(r.get("total_bosses") or 0),
+                    int(r.get("normal_killed") or 0),
+                    int(r.get("heroic_killed") or 0),
+                    int(r.get("mythic_killed") or 0),
+                    r.get("summary"),
+                    json.dumps(r.get("ranks") or {}),
+                    1 if r.get("is_current") else 0,
+                    position,
+                    now,
+                )
+                for position, r in enumerate(raids)
+            ],
+        )
+        await self.conn.commit()
+
+    async def guild_raids(self) -> list[dict]:
+        """Our guild's stored raid progress, in display order (headline first)."""
+        cur = await self.conn.execute(
+            "SELECT * FROM guild_raids ORDER BY position ASC"
+        )
+        return [
+            {
+                "raid_slug": r["raid_slug"],
+                "name": r["name"],
+                "total_bosses": r["total_bosses"],
+                "normal_killed": r["normal_killed"],
+                "heroic_killed": r["heroic_killed"],
+                "mythic_killed": r["mythic_killed"],
+                "summary": r["summary"],
+                "ranks": json.loads(r["ranks_json"]) if r["ranks_json"] else {},
+                "is_current": bool(r["is_current"]),
+                "updated_at": r["updated_at"],
+            }
+            for r in await cur.fetchall()
+        ]
+
+    # -- milestones ---------------------------------------------------------------
+
+    async def milestone_marks(self) -> dict[tuple[str, str], float]:
+        """The last value seen per ``(entity_key, metric)``."""
+        cur = await self.conn.execute(
+            "SELECT entity_key, metric, value FROM milestone_marks"
+        )
+        return {
+            (r["entity_key"], r["metric"]): r["value"] for r in await cur.fetchall()
+        }
+
+    async def set_milestone_marks(self, marks: dict[tuple[str, str], float]) -> None:
+        """Record the current value for each ``(entity_key, metric)``."""
+        if not marks:
+            return
+        now = now_iso()
+        await self.conn.executemany(
+            "INSERT INTO milestone_marks (entity_key, metric, value, updated_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(entity_key, metric) DO UPDATE SET "
+            "value = excluded.value, updated_at = excluded.updated_at",
+            [(entity, metric, value, now) for (entity, metric), value in marks.items()],
+        )
+        await self.conn.commit()
+
+    async def add_milestones(self, milestones: list[dict], *, keep_days: int = 90) -> int:
+        """Store newly detected milestones and prune ones older than ``keep_days``.
+
+        Each milestone: {kind, entity_key, subject, value, detail}. Returns how
+        many were stored.
+        """
+        now = datetime.now(timezone.utc)
+        for m in milestones:
+            await self.conn.execute(
+                "INSERT INTO milestones (kind, entity_key, subject, value, "
+                "detail_json, achieved_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    m["kind"],
+                    m["entity_key"],
+                    m["subject"],
+                    m.get("value"),
+                    json.dumps(m.get("detail") or {}),
+                    now.isoformat(timespec="seconds"),
+                ),
+            )
+        cutoff = (now - timedelta(days=keep_days)).isoformat(timespec="seconds")
+        await self.conn.execute(
+            "DELETE FROM milestones WHERE achieved_at < ?", (cutoff,)
+        )
+        await self.conn.commit()
+        return len(milestones)
+
+    async def recent_milestones(self, *, days: int = 7) -> list[dict]:
+        """Milestones achieved in the last ``days``, newest first."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(
+            timespec="seconds"
+        )
+        cur = await self.conn.execute(
+            "SELECT * FROM milestones WHERE achieved_at >= ? "
+            "ORDER BY achieved_at DESC, id DESC",
+            (cutoff,),
+        )
+        return [
+            {
+                "id": r["id"],
+                "kind": r["kind"],
+                "entity_key": r["entity_key"],
+                "subject": r["subject"],
+                "value": r["value"],
+                "detail": json.loads(r["detail_json"]) if r["detail_json"] else {},
+                "achieved_at": r["achieved_at"],
             }
             for r in await cur.fetchall()
         ]

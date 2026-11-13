@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
-from ..models import Member, normalize_realm
+from .. import raids
+from ..models import CURRENT_EXPANSION_ID, Member, normalize_realm
 from ._http import BaseHTTPClient, retry_after_seconds
 
 log = logging.getLogger("ftabot.raiderio")
@@ -24,12 +26,23 @@ BASE_URL = "https://raider.io/api/v1"
 _CHARACTER_FIELDS = "gear,mythic_plus_scores_by_season:current,raid_progression"
 
 
+# The raid catalog (names, boss counts, open/close dates) changes a few times a
+# year, so one fetch is shared by every client in the process for a few hours
+# rather than repeated on each score-refresh tick. Keyed by (expansion, region).
+_CATALOG_TTL_SECONDS = 6 * 3600
+_catalog_cache: dict[tuple[int, str], tuple[float, list[raids.RaidInfo]]] = {}
+
+
 class RaiderIOError(RuntimeError):
     """Raised when Raider.IO returns an error we can't recover from."""
 
 
 class RaiderIOClient(BaseHTTPClient):
     """Async Raider.IO client. Use as an async context manager."""
+
+    # The raid catalog this client labels progression with; ``None`` until
+    # ``raid_catalog`` has been called (then possibly ``[]`` if unavailable).
+    _catalog: list[raids.RaidInfo] | None = None
 
     def _session_headers(self) -> dict[str, str]:
         return {"Accept": "application/json"}
@@ -101,9 +114,60 @@ class RaiderIOClient(BaseHTTPClient):
                     faction=char.get("faction"),
                     guild_rank=entry.get("rank"),
                     profile_url=char.get("profile_url"),
+                    last_crawled_at=char.get("last_crawled_at"),
                 )
             )
         return members
+
+    async def guild_overview(
+        self, name: str, realm: str, region: str
+    ) -> dict[str, Any]:
+        """The guild's raid progression and standings in one call.
+
+        Returns ``{"raid_progression": {slug: {...}}, "raid_rankings": {slug:
+        {difficulty: {world, region, realm}}}}`` (either may be empty).
+        """
+        data = await self._get(
+            "/guilds/profile",
+            {
+                "region": region,
+                "realm": realm,
+                "name": name,
+                "fields": "raid_progression,raid_rankings",
+            },
+        )
+        return {
+            "raid_progression": data.get("raid_progression") or {},
+            "raid_rankings": data.get("raid_rankings") or {},
+        }
+
+    async def raid_catalog(
+        self, region: str, *, expansion_id: int = CURRENT_EXPANSION_ID
+    ) -> list[raids.RaidInfo]:
+        """The current expansion's raids (name, boss count, open/close dates).
+
+        Best-effort and cached: any failure yields ``[]``, which every caller
+        treats as "label raids the old way", so the catalog can improve a
+        result but never break a sync. Also remembered on the client so
+        ``enrich_character`` labels progression with it.
+        """
+        key = (expansion_id, region.lower())
+        cached = _catalog_cache.get(key)
+        if cached and time.monotonic() - cached[0] < _CATALOG_TTL_SECONDS:
+            self._catalog = cached[1]
+            return cached[1]
+        try:
+            data = await self._get(
+                "/raiding/static-data", {"expansion_id": expansion_id}
+            )
+            catalog = raids.parse_catalog(data, region)
+        except Exception as exc:  # noqa: BLE001 - the catalog is an optional nicety
+            log.warning("Raider.IO raid catalog unavailable: %s", exc)
+            catalog = []
+        if catalog:  # never cache a miss, so the next call retries
+            _catalog_cache[key] = (time.monotonic(), catalog)
+        self._catalog = catalog
+        return catalog
 
     async def guild_raid_progression(
         self, name: str, realm: str, region: str
@@ -147,6 +211,10 @@ class RaiderIOClient(BaseHTTPClient):
 
     async def enrich_character(self, member: Member) -> Member:
         """Fill in item level, Mythic+ score and raid progression in place."""
+        # Load the raid catalog on first use (cached for hours process-wide), so
+        # every caller labels progression against the raid that is current.
+        if self._catalog is None:
+            await self.raid_catalog(member.region)
         try:
             data = await self._get(
                 "/characters/profile",
@@ -168,6 +236,7 @@ class RaiderIOClient(BaseHTTPClient):
         member.faction = data.get("faction") or member.faction
         member.thumbnail_url = data.get("thumbnail_url") or member.thumbnail_url
         member.profile_url = data.get("profile_url") or member.profile_url
+        member.last_crawled_at = data.get("last_crawled_at") or member.last_crawled_at
 
         gear = data.get("gear") or {}
         if gear.get("item_level_equipped") is not None:
@@ -180,11 +249,18 @@ class RaiderIOClient(BaseHTTPClient):
                 member.mythic_plus_score = float(scores["all"])
 
         progression = data.get("raid_progression") or {}
-        member.raid_progression = _summarize_progression(progression)
-        # Keep the full per-raid breakdown so /member can show every raid of the
-        # current tier (Voidspire / Dreamrift / March), not just the summary line.
+        member.raid_progression = _summarize_progression(progression, self._catalog)
+        # Keep the full per-raid breakdown so /member can show every raid, open
+        # raids first, with their real names alongside (Raider.IO keys by slug).
         if progression:
-            member.details = {**(member.details or {}), "raid_progression": progression}
+            ordered = raids.order_progression(progression, self._catalog)
+            member.details = {
+                **(member.details or {}),
+                "raid_progression": ordered,
+                "raid_names": {
+                    slug: raids.raid_name(slug, self._catalog) for slug in ordered
+                },
+            }
         return member
 
     async def character_card(
@@ -322,6 +398,10 @@ class RaiderIOClient(BaseHTTPClient):
         on memory (rather than scheduling one coroutine per member at once).
         """
         semaphore = asyncio.Semaphore(max(1, concurrency))
+        # One catalog fetch up front, so every member's progression is labelled
+        # against the raid that is actually current (see ``raids.py``).
+        if members and self._catalog is None and self._session is not None:
+            await self.raid_catalog(members[0].region)
 
         async def _one(m: Member) -> Member:
             async with semaphore:
@@ -352,22 +432,14 @@ class RaiderIOClient(BaseHTTPClient):
         return enriched
 
 
-def _summarize_progression(progression: dict[str, Any]) -> str | None:
+def _summarize_progression(
+    progression: dict[str, Any], catalog: list[raids.RaidInfo] | None = None
+) -> str | None:
     """Turn Raider.IO raid_progression into a compact label.
 
-    Picks the most-recent raid (Raider.IO orders them with the current tier
-    first) and formats e.g. "Nerub-ar Palace: 8/8 N, 6/8 H, 2/8 M".
+    Describes the raid that is current per the ``catalog`` (the biggest raid
+    open right now), e.g. "Nerub-ar Palace: 8/8 N, 6/8 H, 2/8 M". Without a
+    catalog it falls back to the first raid in the payload, which is not
+    reliably the current one: Raider.IO's ordering is not chronological.
     """
-    if not progression:
-        return None
-    # The first key is the current tier.
-    raid_slug, raid = next(iter(progression.items()))
-    summary = raid.get("summary")
-    title = raid_slug.replace("-", " ").title()
-    if summary:
-        return f"{title}: {summary}"
-    n = raid.get("normal_bosses_killed", 0)
-    h = raid.get("heroic_bosses_killed", 0)
-    m = raid.get("mythic_bosses_killed", 0)
-    total = raid.get("total_bosses", 0)
-    return f"{title}: {n}/{total} N, {h}/{total} H, {m}/{total} M"
+    return raids.summarize(progression, catalog)

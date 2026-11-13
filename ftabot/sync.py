@@ -9,12 +9,15 @@ The flow is:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from . import metrics
+import aiohttp
+
+from . import metrics, raids
 from .config import Config
 from .db import Database
 from .models import Member, effective_role
@@ -81,12 +84,28 @@ async def sync_guild(
 
     # 1: Raider.IO roster of record for the WHOLE guild (lean — class/spec/rank;
     #    per-character stats come from the enrichment step below).
+    guild_raid_rows: list[dict] = []
     async with RaiderIOClient() as rio:
         try:
             members = await rio.guild_members(name, realm, region)
         except RaiderIOError as exc:
             return SyncResult(error=f"Raider.IO roster: {exc}")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            # Raider.IO unreachable (DNS, proxy, outage): report it like any
+            # other failed roster fetch instead of raising out of /sync.
+            return SyncResult(error=f"Raider.IO unreachable: {exc}")
         sources.append("Raider.IO")
+
+        # 1b: the guild's own raid progress + standings, labelled against the
+        #     raid catalog (which raids are open, and their real names). Feeds
+        #     the Raid Progress board and the milestones feed. Best-effort: a
+        #     failure here must not cost the roster sync.
+        try:
+            catalog = await rio.raid_catalog(region)
+            overview = await rio.guild_overview(name, realm, region)
+            guild_raid_rows = raids.guild_raid_rows(overview, catalog)
+        except Exception as exc:  # noqa: BLE001 - raid progress is best-effort
+            log.warning("Raider.IO guild raid progress skipped: %s", exc)
 
     by_name: dict[str, Member] = {m.character_name.lower(): m for m in members}
 
@@ -231,6 +250,9 @@ async def sync_guild(
             sources.append("Warcraft Logs")
         except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
             log.warning("Warcraft Logs enrichment skipped: %s", exc)
+
+    # 3c: persist the guild's raid progress (an empty fetch keeps the old rows).
+    await db.replace_guild_raids(guild_raid_rows)
 
     # 4: persist members.
     present_ids: list[int] = []

@@ -54,8 +54,20 @@ def percentile_rank(values: list[float], value: float | None) -> float:
 def is_active(
     member: Member, *, window_days: int = 14, now: datetime | None = None
 ) -> bool:
+    """Whether a member has been seen playing within ``window_days``.
+
+    Best signal first: a real ``last_login`` (WoW Audit), else when Raider.IO
+    last crawled the character (it re-crawls characters that are being played,
+    so this is the keyless stand-in). ``last_synced`` is only the last resort
+    for a row with neither: it says when *we* looked, not when they played, so
+    preferring it would count the whole roster as active after every sync.
+    """
     now = now or datetime.now(timezone.utc)
-    seen = _parse_dt(member.last_login) or _parse_dt(member.last_synced)
+    seen = (
+        _parse_dt(member.last_login)
+        or _parse_dt(member.last_crawled_at)
+        or _parse_dt(member.last_synced)
+    )
     if seen is None:
         return False
     return (now - seen) <= timedelta(days=window_days)

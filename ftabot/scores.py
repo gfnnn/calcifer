@@ -22,6 +22,7 @@ from .config import Config
 from .db import Database
 from .models import Member
 from .runtime_settings import effective_post_gate
+from .services._http import new_session
 from .services.raiderio import RaiderIOClient
 
 log = logging.getLogger("ftabot.scores")
@@ -67,7 +68,7 @@ async def refresh_scores(
     changed: list[Member] = []
     own_session = session is None
     if own_session:
-        session = aiohttp.ClientSession(headers={"Accept": "application/json"})
+        session = new_session({"Accept": "application/json"})
     try:
         async with RaiderIOClient(session=session) as rio:
             for member in members:

@@ -81,6 +81,11 @@ def effective_role(role: str | None, spec: str | None = None) -> str | None:
 # the slot is reused for their Mythic+ score (a sub-cap character has none yet).
 MAX_LEVEL: int = 90
 
+# Raider.IO's id for the current expansion (Midnight). Its raid static data is
+# requested per expansion, so this is what tells the bot which raids exist and
+# which of them are open (see ``raids.py``). Bump it alongside ``MAX_LEVEL``.
+CURRENT_EXPANSION_ID: int = 11
+
 # Class colours (hex) — handy for Discord embeds. Sourced from Blizzard's
 # canonical class colour palette.
 CLASS_COLORS: dict[str, int] = {
@@ -163,6 +168,10 @@ class Member:
 
     # Engagement / preparedness signals (sync-managed).
     last_login: str | None = None
+    # When Raider.IO last crawled the character. It re-crawls characters that
+    # are being played, so this is the keyless activity signal: the only one
+    # there is for a member with no ``last_login`` (which needs WoW Audit).
+    last_crawled_at: str | None = None
     missing_enchants: int | None = None
     missing_gems: int | None = None
     vault_slots_filled: int | None = None
@@ -230,6 +239,7 @@ class Member:
             "raid_progression": self.raid_progression,
             "best_parse_avg": self.best_parse_avg,
             "last_login": self.last_login,
+            "last_crawled_at": self.last_crawled_at,
             "missing_enchants": self.missing_enchants,
             "missing_gems": self.missing_gems,
             "vault_slots_filled": self.vault_slots_filled,

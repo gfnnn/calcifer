@@ -63,3 +63,27 @@ async def test_pulse_shows_progression_when_known(db):
     assert "Progression" in fields
     assert "4/8 M" in fields["Progression"]
     assert not brand.has_em_dash(fields["Progression"])
+
+
+async def test_pulse_averages_ignore_dormant_characters(db):
+    # A character not seen for a year keeps old-scale gear and no Mythic+ score;
+    # counting it would describe nobody who is actually playing.
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    await db.upsert_synced(
+        Member("Playing", role="DPS", item_level=330.0, mythic_plus_score=3000.0,
+               last_crawled_at=(now - timedelta(days=1)).isoformat())
+    )
+    await db.upsert_synced(
+        Member("Dormant", role="DPS", item_level=740.0, mythic_plus_score=0.0,
+               last_crawled_at=(now - timedelta(days=400)).isoformat())
+    )
+    fields = {
+        f.name: f.value
+        for f in (await RosterPulseBoard().render(db, Config(), {})).embed.fields
+    }
+    assert fields["Members"] == "2"
+    assert fields["Active"] == "1 (50%)"
+    assert fields["Avg ilvl"] == "330"
+    assert fields["Avg M+"] == "3000"

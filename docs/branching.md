@@ -44,10 +44,10 @@ number: `feat/42-wishlist-export`.
 | ----------- | --------------------- | -------------------------------------------------- |
 | Development  | feature branch + `.env` | A contributor's machine (`python -m ftabot.serve`) |
 | CI / Test    | every PR & push to `main` | GitHub Actions (`ci.yml`: lint + tests + coverage) |
-| Production   | `main`                | Railway / Render auto-deploy (`railway.json`, `render.yaml`) |
+| Production   | `main`                | The chosen host (see `deploy.md`): `git pull` + `docker compose up -d --build`, or `fly deploy` |
 
-There is intentionally no always-on staging server (the free Render/Railway
-tiers spin down on idle, which disconnects the bot). Pre-merge confidence comes
+There is intentionally no always-on staging server (free PaaS tiers spin down
+on idle, which disconnects the bot). Pre-merge confidence comes
 from the offline test suite; if a change needs live verification, run it locally
 against a throwaway `.env` and a temp SQLite DB before merging.
 

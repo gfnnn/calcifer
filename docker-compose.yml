@@ -1,0 +1,44 @@
+# Run Calcifer on any machine that has Docker: a free cloud VM, a cheap VPS, a
+# Raspberry Pi or a spare PC. Step-by-step guide: docs/deploy.md.
+#
+#   cp .env.example .env            # then fill it in (only DISCORD_TOKEN is required)
+#   docker compose up -d --build    # build the image and start the bot
+#   docker compose logs -f          # watch it come up
+#   docker compose pull; docker compose up -d --build   # after a git pull
+services:
+  calcifer:
+    build: .
+    image: calcifer:local
+    container_name: calcifer
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Pinned here so they win over whatever .env says: the database must live
+      # on the mounted ./data folder (anything else is lost when the container
+      # is rebuilt), and the port must match the mapping and health check below.
+      DATABASE_PATH: /data/ftabot.db
+      PORT: "8080"
+    volumes:
+      # A plain folder next to this file, so a backup is just a file copy.
+      - ./data:/data
+    ports:
+      # Bound to this machine only. The bot dials out to Discord, so nothing
+      # needs to reach it from the internet unless you use the Raid-Helper
+      # webhook or the SavedVariables upload (see docs/deploy.md).
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      # Cap the logs so they can never fill a small disk.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

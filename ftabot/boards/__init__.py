@@ -8,10 +8,13 @@ offline-testable. Concrete board renderers register themselves into ``REGISTRY``
 """
 
 from . import (
+    armoury,  # noqa: F401 - registers The Armoury (gear) board
+    climb,  # noqa: F401 - registers The Climb (levelling) board
     events,  # noqa: F401 - registers the Weekly Events board
     hot20,  # noqa: F401 - imported for its side effect: registers Hot 20
     news,  # noqa: F401 - registers the News Highlights board
     pulse,  # noqa: F401 - registers the Roster Pulse board
+    raidprog,  # noqa: F401 - registers the Raid Progress board
     recruitment,  # noqa: F401 - registers the Recruitment board
 )
 from .base import (

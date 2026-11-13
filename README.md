@@ -14,12 +14,15 @@ spreadsheets, websites and half a dozen third-party bots, each posting in its ow
 style. Calcifer collects the data once, stores it in one place and presents it
 consistently, so officers spend less time chasing information by hand.
 
-**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite) and Docker, set up
-to deploy on Railway. Tested with pytest (965 offline tests, 88% coverage gate in CI) and
-linted with ruff.
+**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite) and Docker. It
+runs anywhere Docker does: a free cloud VM, a machine at home, or Fly.io (see
+[docs/deploy.md](docs/deploy.md)). Tested with pytest (1,036 offline tests, 88%
+coverage gate in CI) and linted with ruff.
 
-**Status:** in development, and not currently deployed. It is my own unpaid hobby
-project for a guild I run.
+**Status:** a working MVP, verified against the guild's live public data
+(November 2026), and not yet deployed: hosting is chosen and documented, and the
+first production deploy is the next step. It is my own unpaid hobby project for
+a guild I run.
 
 **How it was built:** with AI assistance. I designed and directed the project and
 reviewed the changes; the code was written with Claude (Anthropic's AI
@@ -72,6 +75,10 @@ file and lets the guild query it from **Discord**:
 - **Discord slash commands**: lookup, roster, search, stats, reports.
 - **Discord posts**: routed feed alerts, self-updating living boards and sticky
   pages, all behind one posting guardrail.
+- **Every kind of public guild data has a surface**: Mythic+ (the Hot 20), raid
+  (Raid Progress), gear (The Armoury), levelling (The Climb), the roster's
+  vital signs (Roster Pulse), and milestone alerts when a boss dies or someone
+  breaks a score threshold.
 - **Officer tooling**: link characters to Discord users, flag mains/alts, add notes.
 - **Standalone sync CLI** so you can seed/refresh the database (e.g. from cron)
   without running the bot.
@@ -112,9 +119,10 @@ set, and the roster auto-refreshes if `SYNC_INTERVAL_MINUTES > 0`. A small
 [ingest listener](#inbound-http-ingest-only) always binds `$PORT` for the host's
 health check and the two inbound data pushes.
 
-**Deploying from your phone (no dev environment):** see
-**[docs/deploy.md](docs/deploy.md)**: Railway/Render (always-on, managed from a browser),
-a free GitHub Actions sync, or Termux on Android.
+**Hosting it:** see **[docs/deploy.md](docs/deploy.md)** for the no-cost and
+low-cost options compared and a step-by-step setup guide for each recommended
+one: an Oracle Cloud Always Free VM or a machine you own (both with
+`docker compose up -d --build`), or Fly.io for a few dollars a month.
 
 > **Network note:** the sync calls `raider.io` (and optionally
 > `*.api.blizzard.com` / `warcraftlogs.com`). Those hosts must be reachable from
@@ -142,6 +150,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `FEED_POLL_MINUTES` / `FEED_DEFAULT_CHANNEL_ID` | optional | Turn on the **Calcifer feed hub** (Wowhead news → a Discord channel). See [docs/vision.md](docs/vision.md#4b-the-feed--integration-hub-shipped). |
 | `YOUTUBE_FEED_ENABLED`+`YOUTUBE_CHANNEL_IDS` / `WOWPROGRESS_FEED_ENABLED` | optional | Extra feed sources: **YouTube** channel uploads (keyless Atom) and **WoWProgress** guild world/realm rank movement (their JSON export; credits WoWProgress.com per their terms). Default off. |
 | `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | Boot defaults for the **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert; change it live with `/posting`. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
+| `MILESTONES_FEED_ENABLED` | optional | The **guild milestones** feed: new boss kills, Mythic+ score thresholds and level-cap dings, detected from the stored data (no extra API). Default off. |
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
@@ -204,6 +213,7 @@ for the full design), then shape routing live in Discord:
 /feed route source:Raid-Helper events channel:#events
 /feed route source:WoW Audit raid reminders channel:#raid-chat ping:@Raider
 /feed route source:Warcraft Logs live prog channel:#raid-night
+/feed route source:Guild milestones channel:#achievements
 /feed route source:YouTube channel:#guild-videos
 /feed route source:WoWProgress channel:#progression   # guild rank movement
 /feed test source:Wowhead news      # post a sample to verify the route
@@ -213,6 +223,12 @@ for the full design), then shape routing live in Discord:
 
 Anything without a matching rule falls back to `FEED_DEFAULT_CHANNEL_ID`. First
 poll of each source primes silently, so there's no history dump.
+
+**Guild milestones** (`MILESTONES_FEED_ENABLED=1`) is the celebratory feed: a
+new Heroic or Mythic boss kill (or a full clear), a member's Mythic+ score
+crossing 1,500 and every 500 after, and a levelling character reaching the cap.
+It reads only what the sync has already stored, and it fires on the *crossing*:
+somebody who joins the guild already past a threshold is not announced.
 
 ---
 
@@ -241,6 +257,17 @@ interval and edit themselves in place (never re-post). The shipped boards:
   read-only.
 - **Roster Pulse**: the guild's heartbeat, showing member count, activity,
   readiness and composition at a glance.
+- **Raid Progress**: a bar per difficulty for every raid that is open right
+  now, with the guild's realm, region and world standing. Which raid is
+  "current" comes from Raider.IO's raid catalog, so it follows a new tier by
+  itself.
+- **The Armoury**: the top 20 by equipped item level with weekly rank movement,
+  the gear twin of the Hot 20. Only recently seen characters are ranked, so a
+  long-dormant character on an old item level scale cannot top it.
+- **The Climb**: who is levelling (with levels gained this week) and who
+  reached the cap since the reset. Levels come from the Blizzard API, so this
+  board needs `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`; the others are
+  keyless.
 - **Recruitment ("We're Looking")**: the guild's open front door, with open slots
   per role (count, ilvl floor, note), the trial rules, and a live-token pitch.
   Officers configure it from Discord with the `/recruit` commands; the cultural
@@ -366,6 +393,10 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/services/` | API clients: `wowaudit`, `raiderio`, `blizzard`, `warcraftlogs`, `raidhelper`. |
 | `ftabot/sync.py` | Orchestrates fetch → enrich → upsert → prune → loot/wishlist → snapshot. |
 | `ftabot/metrics.py` | Pure scoring: activity, readiness, guild health, loot priority. |
+| `ftabot/raids.py` | Pure raid-tier knowledge: which raids are open, their names, the guild's progress rows. |
+| `ftabot/milestones.py` | Pure milestone detection (boss kills, M+ thresholds, level caps) + the stored marks. |
+| `ftabot/boards/` | Living-board renderers (Hot 20, Raid Progress, The Armoury, The Climb, Roster Pulse, News, Events, Recruitment). |
+| `ftabot/feeds/` | Feed sources (news, M+, affixes, realm progress, milestones, ...) and the poll runner. |
 | `ftabot/views.py` | View-models behind the GM / Raid / Loot report commands. |
 | `ftabot/wow_data.py` | Editable raid-buff table for comp coverage. |
 | `ftabot/cogs/` | Discord slash commands (`members`, `reports`, `alerts`, `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`, `scores`). |
@@ -373,6 +404,8 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/serve.py` | All-in-one entry point: bot + loops + sync + ingest listener. |
 | `ftabot/ui.py` | Renders members into Discord embeds. |
 | `scripts/sync_cli.py` | Headless sync entry point. |
+| `scripts/backup_db.py` | Consistent copy of the live SQLite database, with pruning. |
+| `docker-compose.yml` · `fly.toml` | Deploy configs for a VM / home machine and for Fly.io. |
 | `docs/vision.md` | The project vision and pillars. |
 | `docs/ROADMAP.md` · `docs/DECISIONS.md` | Feature planning (phases 0–5, delivery contracts) · decisions locked + open questions. |
 | `docs/data-sources.md` | API capability reference (what each service exposes). |

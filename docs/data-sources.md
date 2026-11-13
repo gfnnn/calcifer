@@ -165,10 +165,40 @@ rediscovery, and the hardening to pick it up is tracked in [`vision.md`](vision.
 | --- | --- |
 | `GET /guilds/profile` | `members` (roster w/ rank, class, spec, role), `raid_progression`, `raid_rankings`. |
 | `GET /characters/profile` | `gear` (equipped/total ilvl, per-slot items, enchants, gems, tier), `mythic_plus_scores_by_season:current`, `mythic_plus_ranks`, `mythic_plus_best_runs` / `recent_runs` / `weekly_highest_level_runs`, `raid_progression`, `talents`. |
+| `GET /raiding/static-data?expansion_id=` | The **raid catalog** for an expansion: each raid's slug, display name, encounters, and the dates it opens and closes per region. |
 
 **Per-character base fields:** name, race, class, active spec + role, faction,
 achievement points, thumbnail/render URLs, region, realm, `last_crawled_at`,
 `profile_url`.
+
+**Verified against the live API (November 2026)**, with the real guild:
+
+- **`raid_progression` is not in chronological order.** For this guild the
+  ended first tier came first in the guild payload and a one-boss side raid came
+  first in every character payload. Treating the first key as "the current
+  raid" reported the wrong raid for the whole roster. The current raid is now
+  taken from the raid catalog: the biggest raid open today
+  ([`ftabot/raids.py`](../ftabot/raids.py)).
+- **Raid slugs are not display names.** The combined first tier's slug is
+  `tier-mn-1` and its name is "MN Tier 1 (VS / DR / MQD)"; the catalog supplies
+  the proper name for every raid.
+- **`raid_rankings`** gives `{world, region, realm}` per difficulty per raid
+  (0 means unranked). The Raid Progress board shows the hardest difficulty with
+  a kill.
+- **`last_crawled_at` is the keyless activity signal.** It is on every roster
+  entry, so it costs nothing extra. It tracks play closely: characters crawled
+  in the last fortnight carry current-scale gear and Mythic+ scores, while most
+  of those not crawled for six months or more still carry a previous
+  expansion's item level scale. It is stored as `members.last_crawled_at` and
+  drives "active" wherever a real `last_login` is unknown.
+- **Stale gear is on an old scale.** Item levels were rescaled between
+  expansions, so a long-dormant character can show an item level far above
+  anyone playing now. Anything that ranks or averages gear filters to recently
+  seen characters first (The Armoury, Roster Pulse).
+- **No character level.** Neither the roster nor the character profile exposes
+  it, so levelling data needs the Blizzard API (§2).
+- A full sync of 674 characters at the default concurrency took about 90
+  seconds, with no rate-limit responses.
 
 **Best for:** zero-config roster + Mythic+ scores and raid progression without
 any credentials. This is the default pipeline when no WoW Audit key is set.

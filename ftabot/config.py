@@ -145,14 +145,18 @@ class Config:
     # Raider.IO affixes feed — announces this week's M+ rotation.
     affixes_feed_enabled: bool = False
     # Raider.IO realm progression feed — monitors raid standings on home realm.
-    # realm_progress_raids is a tuple of Raider.IO raid slugs (oldest → newest).
-    # Midnight Season 1: the three-wing tier is a single combined slug "tier-mn-1"
-    # (Raider.IO description: "Tier 35 (VS / DR / MQD)" = Voidspire + Dreamrift +
-    # March of Quel'Dorei).  When Sporefall opens, append "sporefall":
-    #   REALM_PROGRESS_RAIDS=tier-mn-1,sporefall
+    # realm_progress_raids is a tuple of Raider.IO raid slugs to track. Left
+    # empty (the default) the feed follows whichever raids are open right now,
+    # per Raider.IO's raid catalog, so it moves to a new tier by itself; set
+    # REALM_PROGRESS_RAIDS only to pin specific slugs.
     realm_progress_feed_enabled: bool = False
-    realm_progress_raids: tuple[str, ...] = ("tier-mn-1",)
+    realm_progress_raids: tuple[str, ...] = ()
     realm_progress_difficulty: str = "mythic"
+
+    # Guild milestones feed: new boss kills, Mythic+ score thresholds and
+    # level-cap dings, detected from the data the sync already stores (no API
+    # of its own). Off by default.
+    milestones_feed_enabled: bool = False
 
     # YouTube channel uploads (keyless Atom feed per channel). Off until at least
     # one channel id is configured.
@@ -388,13 +392,11 @@ class Config:
             ),
             affixes_feed_enabled=_bool("AFFIXES_FEED_ENABLED", False),
             realm_progress_feed_enabled=_bool("REALM_PROGRESS_FEED_ENABLED", False),
-            realm_progress_raids=(
-                _str_list("REALM_PROGRESS_RAIDS")
-                or ("tier-mn-1",)
-            ),
+            realm_progress_raids=_str_list("REALM_PROGRESS_RAIDS"),
             realm_progress_difficulty=(
                 (_clean(os.environ.get("REALM_PROGRESS_DIFFICULTY")) or "mythic").lower()
             ),
+            milestones_feed_enabled=_bool("MILESTONES_FEED_ENABLED", False),
             youtube_feed_enabled=_bool("YOUTUBE_FEED_ENABLED", False),
             youtube_channel_ids=_str_list("YOUTUBE_CHANNEL_IDS"),
             wowprogress_feed_enabled=_bool("WOWPROGRESS_FEED_ENABLED", False),

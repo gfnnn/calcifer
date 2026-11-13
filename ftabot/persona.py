@@ -59,6 +59,19 @@ _LINES: dict[str, list[str]] = {
         "From the rest of the Blizzard hearth.",
         "Not our fire, but worth a glance.",
     ],
+    "milestone.raid-kill": [
+        "Now that is a proper fire.",
+        "Throw another boss on the pile.",
+        "I felt that one from the hearth.",
+    ],
+    "milestone.mplus": [
+        "Somebody has been feeding the keystone.",
+        "Hot keys, hotter hands.",
+    ],
+    "milestone.level-cap": [
+        "A new spark, fully grown.",
+        "All that way on foot. Impressive.",
+    ],
     "digest": [
         "A week's worth of embers, swept up neatly.",
         "Here's everything I held back. You're welcome.",

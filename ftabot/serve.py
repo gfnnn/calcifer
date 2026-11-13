@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import aiohttp
 import discord
 
 from .config import Config
@@ -25,6 +24,7 @@ from .db import Database
 from .ingest import Ingest
 from .posting import PostBlocked
 from .runtime_settings import effective_post_gate
+from .services._http import new_session
 from .sync import sync_guild
 
 log = logging.getLogger("ftabot.serve")
@@ -116,7 +116,7 @@ async def _feed_loop(config: Config, bot, sources) -> None:
 
     interval = config.feed_poll_minutes * 60
     failures = 0
-    async with aiohttp.ClientSession(headers={"User-Agent": "ftabot-calcifer/1.0"}) as session:
+    async with new_session({"User-Agent": "ftabot-calcifer/1.0"}) as session:
         while True:
             try:
                 async with Database(config.database_path) as db:
@@ -184,7 +184,7 @@ async def _score_loop(config: Config, bot) -> None:
     await asyncio.sleep(12)  # let startup + the first board render settle
     interval = config.score_refresh_minutes * 60
     failures = 0
-    async with aiohttp.ClientSession(headers={"Accept": "application/json"}) as session:
+    async with new_session({"Accept": "application/json"}) as session:
         while True:
             try:
                 async with Database(config.database_path) as db:

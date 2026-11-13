@@ -47,6 +47,19 @@ def retry_after_seconds(headers: Mapping[str, str], *, fallback: float) -> float
     return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
+def new_session(headers: Mapping[str, str] | None = None) -> aiohttp.ClientSession:
+    """Open an aiohttp session the way every outbound call in the bot should.
+
+    ``trust_env=True`` makes aiohttp honour the host's ``HTTPS_PROXY`` /
+    ``NO_PROXY`` variables, which it ignores by default. Without it the bot
+    cannot reach any API from a host that routes egress through a proxy (a
+    corporate network, some container platforms, a Claude Code web session
+    running the live smoke checks): every call fails at DNS instead. On a host
+    with no proxy configured this is a no-op.
+    """
+    return aiohttp.ClientSession(headers=headers, trust_env=True)
+
+
 class BaseHTTPClient:
     """Shared aiohttp session lifecycle for the API clients.
 
@@ -66,7 +79,7 @@ class BaseHTTPClient:
 
     async def __aenter__(self) -> Self:
         if self._session is None:
-            self._session = aiohttp.ClientSession(headers=self._session_headers())
+            self._session = new_session(self._session_headers())
         return self
 
     async def __aexit__(self, *_exc) -> None:

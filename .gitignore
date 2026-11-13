@@ -9,6 +9,9 @@
 *.db-wal
 *.db-shm
 ftabot.db*
+# Docker Compose data folder (the live database) and local backups
+data/
+backups/
 
 # Python
 __pycache__/

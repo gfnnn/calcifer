@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS members (
     best_parse_avg    REAL,
 
     last_login         TEXT,
+    last_crawled_at    TEXT,
     missing_enchants   INTEGER,
     missing_gems       INTEGER,
     vault_slots_filled INTEGER,
@@ -420,6 +421,53 @@ CREATE TABLE IF NOT EXISTS scout_leads (
     UNIQUE (name, realm, region)
 );
 
+-- Our own guild's raid progress, one row per raid of the current expansion
+-- (Raider.IO guild profile + raid static data), replaced wholesale by each
+-- sync. The Raid Progress board renders from it and the milestones feed reads
+-- the kill counts to spot a new boss kill. ranks_json is Raider.IO's
+-- {difficulty: {world, region, realm}} standings; is_current marks the raids
+-- that are open right now and position keeps them headline-first.
+CREATE TABLE IF NOT EXISTS guild_raids (
+    raid_slug     TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    total_bosses  INTEGER NOT NULL DEFAULT 0,
+    normal_killed INTEGER NOT NULL DEFAULT 0,
+    heroic_killed INTEGER NOT NULL DEFAULT 0,
+    mythic_killed INTEGER NOT NULL DEFAULT 0,
+    summary       TEXT,
+    ranks_json    TEXT,
+    is_current    INTEGER NOT NULL DEFAULT 0,
+    position      INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT
+);
+
+-- Milestones feed: the last value seen per (entity, metric), so a milestone
+-- fires on the *crossing* (a member's score passing a threshold, a new boss
+-- kill) rather than on the state. A member with no mark yet is recorded
+-- silently, so somebody who joins the guild already at 3,000 is not announced
+-- as having "just" got there.
+CREATE TABLE IF NOT EXISTS milestone_marks (
+    entity_key TEXT NOT NULL,
+    metric     TEXT NOT NULL,
+    value      REAL,
+    updated_at TEXT,
+    PRIMARY KEY (entity_key, metric)
+);
+
+-- Milestones feed: the achievements themselves, kept (not just announced) so
+-- an alert held back by the posting guardrail is still there to post once it
+-- opens, and a restart between detection and posting loses nothing.
+CREATE TABLE IF NOT EXISTS milestones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    entity_key  TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    value       REAL,
+    detail_json TEXT,
+    achieved_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_milestones_achieved ON milestones (achieved_at);
+
 -- Runtime settings: a small key/value overlay that lets /posting change a
 -- handful of operational values (the posting guardrail and its channels) live,
 -- without a redeploy. A row here beats the env-built Config; deleting it reverts
@@ -486,6 +534,8 @@ MEMBER_COLUMNS: tuple[MemberColumn, ...] = (
     MemberColumn("raid_progression", "TEXT", ColumnOwner.SYNC, "raid_progression", in_sync_upsert=True),
     MemberColumn("best_parse_avg", "REAL", ColumnOwner.SYNC, "best_parse_avg", in_sync_upsert=True),
     MemberColumn("last_login", "TEXT", ColumnOwner.SYNC, "last_login",
+                 in_sync_upsert=True, migrate=True),
+    MemberColumn("last_crawled_at", "TEXT", ColumnOwner.SYNC, "last_crawled_at",
                  in_sync_upsert=True, migrate=True),
     MemberColumn("missing_enchants", "INTEGER", ColumnOwner.SYNC, "missing_enchants",
                  in_sync_upsert=True, migrate=True),
