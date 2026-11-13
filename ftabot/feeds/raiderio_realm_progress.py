@@ -1,12 +1,13 @@
 """Raider.IO realm progression feed — tracks raid standings on our home realm.
 
-On each poll we fetch the raid guild rankings for every configured raid in
-realm_progress_raids, upsert every guild into the realm_progress table, and
-emit FeedEvents only for guilds whose kill count has increased since last poll.
+On each poll we fetch the raid guild rankings for every tracked raid, upsert
+every guild into the realm_progress table, and emit FeedEvents only for guilds
+whose kill count has increased since last poll.
 
-Because all raid slugs are tracked simultaneously, adding a new tier when it
-opens is just appending its slug to REALM_PROGRESS_RAIDS — existing history
-for older raids is unaffected and the new raid starts tracking from first poll.
+By default the tracked raids are the ones open right now (per Raider.IO's raid
+catalog), so a new tier is picked up when it opens with no config change;
+REALM_PROGRESS_RAIDS pins specific slugs instead. Existing history for older
+raids is unaffected and a new raid starts tracking from its first poll.
 
 Our own guild uses event_type "raiderio.our-progression" so officers can route
 it to a dedicated progression channel; rival guilds use "raiderio.realm-progression"
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 from ..config import Config
 from ..models import normalize_realm
+from ..raids import current_raids
 from ..services.raiderio import RaiderIOClient
 from .base import FeedEvent, FeedSource
 
@@ -34,12 +36,17 @@ class RaiderIORealmProgressSource(FeedSource):
         difficulty = cfg.realm_progress_difficulty
         raid_slugs = cfg.realm_progress_raids
 
-        if not raid_slugs:
-            return []
-
         from ..db import Database
         events: list[FeedEvent] = []
         async with RaiderIOClient(session=session) as rio:
+            if not raid_slugs:
+                # Nothing pinned: follow the raids that are open right now, so
+                # the feed moves to a new tier without a config change.
+                raid_slugs = tuple(
+                    raid.slug for raid in current_raids(await rio.raid_catalog(region))
+                )
+            if not raid_slugs:
+                return []
             async with Database(cfg.database_path) as db:
                 for raid_slug in raid_slugs:
                     guilds = await rio.realm_raid_progression(

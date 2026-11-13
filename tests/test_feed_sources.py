@@ -185,7 +185,7 @@ def test_build_sources_includes_every_enabled_source():
         prog_feed_enabled=True,
         warcraftlogs_client_id="cid",
         affixes_feed_enabled=True,
-        realm_progress_feed_enabled=True,  # realm_progress_raids defaults non-empty
+        realm_progress_feed_enabled=True,
     )
     names = {s.name for s in build_sources(cfg)}
     assert names == {
@@ -199,12 +199,13 @@ def test_build_sources_includes_every_enabled_source():
     }
 
 
-def test_build_sources_skips_realm_progress_without_raids():
+def test_build_sources_builds_realm_progress_without_pinned_raids():
     cfg = dataclasses.replace(
         Config(), wowhead_enabled=False, blizzard_news_enabled=False,
         realm_progress_feed_enabled=True, realm_progress_raids=(),
     )
-    assert build_sources(cfg) == []  # enabled but no raids configured -> skipped
+    # No raids pinned is the default: the source follows the open raids itself.
+    assert [s.name for s in build_sources(cfg)] == ["raiderio_realm_progress"]
 
 
 # --- runner.poll_once edge branches -----------------------------------------

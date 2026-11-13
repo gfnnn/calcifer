@@ -453,8 +453,32 @@ def test_config_parses_realm_progress_raids(monkeypatch):
 
 
 def test_config_realm_progress_raids_default():
-    cfg = Config()
-    assert cfg.realm_progress_raids == ("tier-mn-1",)
+    # Empty means "follow the raids that are open now" (see the feed source).
+    assert Config().realm_progress_raids == ()
+
+
+async def test_realm_progress_follows_the_open_raids_when_none_are_pinned(db, monkeypatch):
+    from ftabot.services import raiderio
+
+    from .test_raids import _static
+
+    seen: list[str] = []
+
+    async def fake_get(self, path, params, *, retries=4):
+        if path == "/raiding/static-data":
+            return _static()
+        seen.append(params["raid"])
+        return _REALM_PAYLOAD
+
+    raiderio._catalog_cache.clear()
+    monkeypatch.setattr(raiderio.RaiderIOClient, "_get", fake_get)
+    cfg = dataclasses.replace(Config(), database_path=db.path, realm_progress_raids=())
+    try:
+        await RaiderIORealmProgressSource(cfg).fetch(object())
+    finally:
+        raiderio._catalog_cache.clear()
+    # The two raids open today, headline first; not the ended or future tier.
+    assert seen == ["main-raid", "side-raid"]
 
 
 # --- _affix_summary helper --------------------------------------------------

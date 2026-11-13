@@ -51,18 +51,26 @@ def _fmt(value: object, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
-def _raid_progress_lines(progression: dict) -> list[str]:
+def _raid_progress_lines(
+    progression: dict, names: dict[str, str] | None = None
+) -> list[str]:
     """One line per raid from a Raider.IO ``raid_progression`` dict.
 
-    Raider.IO orders the current tier first, so the season's raids (Voidspire,
-    Dreamrift, March) render in tier order. Each line prefers the API's own
-    ``summary`` and falls back to an N/H/M breakdown.
+    The sync stores the dict with the open raids first and the raids' real
+    names alongside (``names``, from Raider.IO's static data), so the season's
+    raids render on top under their proper titles. Each line prefers the API's
+    own ``summary`` and falls back to an N/H/M breakdown.
     """
+    names = names or {}
     lines: list[str] = []
     for slug, raid in progression.items():
         if not isinstance(raid, dict):
             continue
-        title = RAID_DISPLAY_NAMES.get(slug) or slug.replace("-", " ").title()
+        title = (
+            names.get(slug)
+            or RAID_DISPLAY_NAMES.get(slug)
+            or slug.replace("-", " ").title()
+        )
         summary = raid.get("summary")
         if summary:
             lines.append(f"**{title}**: {summary}")
@@ -129,8 +137,13 @@ def member_embed(
         _field(embed, "Best Parse Avg", _fmt(member.best_parse_avg))
 
     progression = (member.details or {}).get("raid_progression")
+    raid_names = (member.details or {}).get("raid_names")
     raid_lines = (
-        _raid_progress_lines(progression) if isinstance(progression, dict) else []
+        _raid_progress_lines(
+            progression, raid_names if isinstance(raid_names, dict) else None
+        )
+        if isinstance(progression, dict)
+        else []
     )
     if raid_lines:
         _field(embed, "Raid Progress", "\n".join(raid_lines), inline=False)

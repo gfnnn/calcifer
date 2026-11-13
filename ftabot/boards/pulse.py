@@ -40,10 +40,16 @@ class RosterPulseBoard(Board):
         rate = metrics.activity_rate(members, window_days=config.activity_window_days)
         active = round(rate * total) if rate is not None else 0
         active_pct = round(rate * 100) if rate is not None else 0
-        avg_ilvl = _avg([m.item_level for m in members if m.item_level is not None])
-        avg_mplus = _avg(
-            [m.mythic_plus_score for m in members if m.mythic_plus_score is not None]
-        )
+        # Average over the people actually playing. Dormant characters keep
+        # the gear they logged out in (often on a previous expansion's item
+        # level scale) and a zero Mythic+ score, so averaging the whole roster
+        # describes nobody. Falls back to everyone if nobody reads as active.
+        playing = [
+            m for m in members
+            if metrics.is_active(m, window_days=config.activity_window_days)
+        ] or members
+        avg_ilvl = _avg([m.item_level for m in playing if m.item_level is not None])
+        avg_mplus = _avg([m.mythic_plus_score for m in playing if m.mythic_plus_score])
         roles = metrics.role_counts(members)
         progression, _ = metrics.guild_progression(members)
         health = metrics.guild_health(

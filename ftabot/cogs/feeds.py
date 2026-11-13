@@ -26,6 +26,7 @@ SOURCE_CHOICES = [
     app_commands.Choice(name="Raid-Helper events", value="raidhelper"),
     app_commands.Choice(name="WoW Audit raid reminders", value="wowaudit_raids"),
     app_commands.Choice(name="Warcraft Logs live prog", value="wcl_prog"),
+    app_commands.Choice(name="Guild milestones", value="milestones"),
 ]
 
 COLOR_CHOICES = [
@@ -48,6 +49,9 @@ _SAMPLES: dict[str, tuple[str, str, str, list[str], str]] = {
                        "Starts soon · 20/22 signed up", ["Raid"], "info"),
     "wcl_prog": ("wcl.best-pull", "🔥 Sample: Progress on Final Boss (Mythic) · best pull 4.0%",
                  "So close I can feel the heat.", ["Progression"], "warning"),
+    "milestones": ("milestone.raid-kill", "🔥 Sample: Boss down: 5/8 Mythic in The Sample Raid",
+                   "The guild just pushed further into The Sample Raid.",
+                   ["Milestone", "Raid"], "warning"),
 }
 
 

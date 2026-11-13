@@ -101,6 +101,15 @@ async def _m6_wowaudit_team(conn: aiosqlite.Connection) -> None:
     )
 
 
+async def _m7_last_crawled_at(conn: aiosqlite.Connection) -> None:
+    """Add the Raider.IO crawl timestamp (the keyless activity signal).
+
+    Its own migration for the same reason as ``_m6``: ``_m1`` has already run on
+    an established database, so it will not add a column declared after it.
+    """
+    await _add_column_if_missing(conn, "members", "last_crawled_at", "TEXT")
+
+
 # Ordered, append-only. Never renumber or reuse a version.
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "members: forward-only API columns", _m1_member_columns),
@@ -109,6 +118,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "feed_outbox: visibility-timeout columns", _m4_outbox_visibility),
     Migration(5, "settings: runtime override table", _m5_settings_table),
     Migration(6, "members: wowaudit_team column + index", _m6_wowaudit_team),
+    Migration(7, "members: last_crawled_at column", _m7_last_crawled_at),
 )
 
 
