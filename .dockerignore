@@ -14,3 +14,7 @@ __pycache__
 .env
 tests
 docs
+data
+backups
+fly.toml
+docker-compose.yml

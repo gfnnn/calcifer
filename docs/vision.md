@@ -617,7 +617,7 @@ This doc is the vision and the plan. The remaining detail lives in:
 
 - [`data-sources.md`](data-sources.md) — what each external API exposes, how auth
   works, and the local-addon data spine (§5) — the reference behind `services/`.
-- [`deploy.md`](deploy.md) — running and operating it from a phone, and the
+- [`deploy.md`](deploy.md) — hosting options, setup guides, operating it, and the
   posting-guardrail workflow.
 - [`../README.md`](../README.md) — features, commands, and quick start.
 - [`../CLAUDE.md`](../CLAUDE.md) — the codebase architecture, for working on it.

@@ -230,10 +230,14 @@ def build_sources(config: Config) -> list[FeedSource]:
         from .raiderio_affixes import RaiderIOAffixesSource
 
         sources.append(RaiderIOAffixesSource(config))
-    if config.realm_progress_feed_enabled and config.realm_progress_raids:
+    if config.realm_progress_feed_enabled:
         from .raiderio_realm_progress import RaiderIORealmProgressSource
 
         sources.append(RaiderIORealmProgressSource(config))
+    if config.milestones_feed_enabled:
+        from .milestones import MilestonesSource
+
+        sources.append(MilestonesSource(config))
     if config.youtube_feed_enabled and config.youtube_channel_ids:
         from .youtube import YouTubeSource
 

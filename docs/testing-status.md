@@ -47,7 +47,14 @@ output for one integration.
 
 - [ ] Blizzard API (`BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`) — `python -m scripts.check_blizzard`.
 - [ ] Warcraft Logs API (`WARCRAFTLOGS_CLIENT_ID` / `WARCRAFTLOGS_CLIENT_SECRET`) — `python -m scripts.check_warcraftlogs`.
-- [ ] Raider.IO (keyless fallback) — `python -m scripts.check_raiderio`.
+- [x] Raider.IO (keyless fallback) — `python -m scripts.check_raiderio`. — verified
+  2026-11-13 from a Claude Code web session: the smoke check returned the full
+  roster (674 characters), and three full `scripts.sync_cli` runs plus a
+  scheduled sync inside `ftabot.serve` completed against the live guild (about
+  90 seconds each). Also confirmed live: the guild profile's `raid_progression`
+  + `raid_rankings` fields and `/raiding/static-data` (the raid catalog).
+  Needed the proxy fix in `services/_http.py:new_session` and `raider.io` on
+  the session's network allowlist.
 - [ ] Raid-Helper webhook receiver — `python -m scripts.check_raidhelper` (verifies the
   secret + parser; live delivery still needs a real push to confirm end to end).
 
