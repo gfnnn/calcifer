@@ -367,6 +367,49 @@ Tunnel as described at the end of Guide A.
 
 The same on every host. Nothing here is visible to members until the last step.
 
+### Config checklist
+
+Most built features are blocked only by a missing value. Gather these first
+(set them in `.env` or the host's variables; channel targets can instead be set
+live with `/posting`, `/board` and `/feed`):
+
+**Identity and access**
+
+- [ ] `DISCORD_TOKEN`, `DISCORD_GUILD_ID`
+- [ ] `GM_DISCORD_ID`: the GM's numeric Discord user id (GM-only commands such
+  as `/posting`, `/board`, `/trends`)
+- [ ] `ADMIN_ROLE_NAME`: the officer role (default `Officer`)
+
+**Data sources**
+
+- [ ] `WOWAUDIT_API_KEY`: raid-team extras (Great Vault, wishlists, sign-ups,
+  raid reminders, a future raid-night roster board)
+- [ ] `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`: levels, rank, race (The
+  Climb, level-cap milestones)
+- [ ] `WARCRAFTLOGS_CLIENT_ID` / `WARCRAFTLOGS_CLIENT_SECRET`: parses, live prog
+  alerts, `/scout`
+- [ ] `RAIDHELPER_WEBHOOK_SECRET` (event push) and `RAIDHELPER_API_KEY` +
+  `RAIDHELPER_SERVER_ID` (event read access) for the Weekly Events board
+- [ ] `SAVEDVARS_UPLOAD_SECRET` plus a real RCLootCouncil and GRM `.lua` dump, so
+  the data spine maps to the real schema (see
+  [`data-spine-validation.md`](data-spine-validation.md))
+
+**Where things post**
+
+- [ ] `TEST_CHANNEL_ID`: the private sandbox channel
+- [ ] `FEED_DEFAULT_CHANNEL_ID`: catch-all for unrouted alerts
+- [ ] a channel per board and per feed rule (see the layout in
+  [`boards-contract.md`](boards-contract.md#5-channel-layout))
+- [ ] officer-only channels for recruitment intel, admin and board drafts
+
+**Tuning**
+
+- [ ] `MPLUS_ALERT_MIN_LEVEL` / `MPLUS_FEED_MEMBER_CAP`: which keys alert and
+  how many runners are polled
+- [ ] `RECRUIT_ROLES_OPEN` and `RECRUIT_MIN_ITEM_LEVEL` for the recruitment scout
+
+### Bring-up steps
+
 1. **Load the roster.** Run `/sync`. The first run takes a couple of minutes for
    a guild this size; later ones are faster.
 2. **Open a private sandbox.**

@@ -78,7 +78,7 @@ class FtaBot(commands.Bot):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%s members in DB)", self.user, await self.db.count())
-        # Calcifer tends the hearth (the guild's Discord) in Harry's name.
+        # Calcifer tends the hearth (the guild's Discord) in the GM's name.
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching, name="the hearth of From the Ashes"

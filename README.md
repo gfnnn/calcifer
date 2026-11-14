@@ -1,90 +1,10 @@
 # Calcifer: the hearth of From the Ashes
 
-## At a glance
-
-**What it is:** a Discord bot that runs the community for an online gaming guild
-with a Discord server of 300+ members (the server's size, not a count of bot users). It
-pulls member and activity data from several public game APIs into one database,
-then uses it to keep the guild's Discord tidy: self-updating information boards,
-one news feed in place of several noisy bots, and officer tools for recruitment,
-attendance and loot.
-
-**The problem it solves:** the guild's information was scattered across
-spreadsheets, websites and half a dozen third-party bots, each posting in its own
-style. Calcifer collects the data once, stores it in one place and presents it
-consistently, so officers spend less time chasing information by hand.
-
-**Stack:** Python 3.12, discord.py, aiohttp, SQLite (aiosqlite) and Docker. It
-runs anywhere Docker does: a free cloud VM, a machine at home, or Fly.io (see
-[docs/deploy.md](docs/deploy.md)). Tested with pytest (1,036 offline tests, 88%
-coverage gate in CI) and linted with ruff.
-
-**Status:** a working MVP, verified against the guild's live public data
-(November 2026), and not yet deployed: hosting is chosen and documented, and the
-first production deploy is the next step. It is my own unpaid hobby project for
-a guild I run.
-
-**How it was built:** with AI assistance. I designed and directed the project and
-reviewed the changes; the code was written with Claude (Anthropic's AI
-assistant), and most commits are co-authored with it.
-
-**Try it locally:** the test suite needs no accounts, keys or network access.
-
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-```
-
-To run the bot itself you need your own Discord bot token; see
-[Quick start](#quick-start) below.
-
----
-
-> The little fire demon who keeps the **From the Ashes** guild (Hellfire EU)
-> warm, tidy, and alive. He runs the castle in the GM's name: pulling the
-> guild's scattered data into one place and using it to light up the Discord.
-
-**From the Ashes** is a community built by its members, for its members, and the
-Discord is its home. Calcifer is here to protect that home and make it *feel*
-like one. His founding job: retire the noisy pile of third-party bots, each with
-its own channel, filters, and posting quirks, and replace them with a single
-voice that **consumes the data once, stores it, and uses it to light up the
-server** with features for the community.
-
-One bot, one process, one SQLite database, two audiences:
-
-- 🏰 **The guild's living home** *(community-facing)*: self-updating boards,
-  deduped news, one-glance event and key summaries, and a single charming voice
-  in place of a notification dump.
-- 🛠️ **The management tool** *(pull-when-needed)*: the GM / Raid Leader / Loot
-  views and the recruitment scout, all reading the same trustworthy roster record.
-
-> 📖 The full story, design system, and roadmap live in
-> **[docs/vision.md](docs/vision.md)**. This README is the practical front door:
-> what it does, how to run it, and every command.
-
-Under the hood he pulls live data from the WoW community APIs into one SQLite
-file and lets the guild query it from **Discord**:
-
-- **WoW Audit as the source of truth** ([API](https://wowaudit.com/api-docs)) when
-  a team key is set: gear, Great Vault, wishlist/BiS, parses, all pre-joined.
-- **Open-API fallbacks/supplements**: [Raider.IO](https://raider.io/api)
-  (no key: roster, M+ score, raid progression), the
-  [Blizzard API](https://develop.battle.net) (rank, race, level, equipment) and
-  [Warcraft Logs](https://www.warcraftlogs.com/api/docs) (parse averages).
-- **Discord slash commands**: lookup, roster, search, stats, reports.
-- **Discord posts**: routed feed alerts, self-updating living boards and sticky
-  pages, all behind one posting guardrail.
-- **Every kind of public guild data has a surface**: Mythic+ (the Hot 20), raid
-  (Raid Progress), gear (The Armoury), levelling (The Climb), the roster's
-  vital signs (Roster Pulse), and milestone alerts when a boss dies or someone
-  breaks a score threshold.
-- **Officer tooling**: link characters to Discord users, flag mains/alts, add notes.
-- **Standalone sync CLI** so you can seed/refresh the database (e.g. from cron)
-  without running the bot.
-
-📋 See **[docs/data-sources.md](docs/data-sources.md)** for a full review of what
-each API exposes and how we use it.
+Calcifer is a Discord bot for the **From the Ashes** WoW guild (Hellfire EU). It
+pulls roster and activity data from WoW Audit, Raider.IO, the Blizzard API and
+Warcraft Logs into one SQLite database and serves it back as slash commands,
+feed alerts and self-updating boards. Python 3.12, discord.py, aiohttp and
+aiosqlite in one process; API details in [docs/data-sources.md](docs/data-sources.md).
 
 ---
 
@@ -147,7 +67,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET` | optional | Enables Blizzard enrichment. |
 | `WARCRAFTLOGS_CLIENT_ID` / `_SECRET` | optional | Enables Warcraft Logs parse averages (the raid tier is auto-detected; `WARCRAFTLOGS_ZONE_ID` only pins a specific tier). |
 | `WARCRAFTLOGS_ZONE_IDS` / `RECRUIT_*` | optional | Tunes the `/scout` recruitment scout (tier zones, season window, ilvl floor, open roles). |
-| `FEED_POLL_MINUTES` / `FEED_DEFAULT_CHANNEL_ID` | optional | Turn on the **Calcifer feed hub** (Wowhead news → a Discord channel). See [docs/vision.md](docs/vision.md#4b-the-feed--integration-hub-shipped). |
+| `FEED_POLL_MINUTES` / `FEED_DEFAULT_CHANNEL_ID` | optional | Turn on the **Calcifer feed hub** (Wowhead news → a Discord channel). |
 | `YOUTUBE_FEED_ENABLED`+`YOUTUBE_CHANNEL_IDS` / `WOWPROGRESS_FEED_ENABLED` | optional | Extra feed sources: **YouTube** channel uploads (keyless Atom) and **WoWProgress** guild world/realm rank movement (their JSON export; credits WoWProgress.com per their terms). Default off. |
 | `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | Boot defaults for the **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert; change it live with `/posting`. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
 | `MILESTONES_FEED_ENABLED` | optional | The **guild milestones** feed: new boss kills, Mythic+ score thresholds and level-cap dings, detected from the stored data (no extra API). Default off. |
@@ -203,8 +123,9 @@ switch to the richer WoW Audit data set.
 
 A blue-flame persona that consumes external feeds and posts branded alerts to
 the channels you choose. Turn it on with `FEED_POLL_MINUTES` +
-`FEED_DEFAULT_CHANNEL_ID` (see [`docs/vision.md`](docs/vision.md#4b-the-feed--integration-hub-shipped)
-for the full design), then shape routing live in Discord:
+`FEED_DEFAULT_CHANNEL_ID` (the routing map is in
+[`docs/boards-contract.md`](docs/boards-contract.md#6-feed-routing-map)), then shape
+routing live in Discord:
 
 ```
 /feed route source:Wowhead news channel:#wow-news
@@ -406,10 +327,8 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `scripts/sync_cli.py` | Headless sync entry point. |
 | `scripts/backup_db.py` | Consistent copy of the live SQLite database, with pruning. |
 | `docker-compose.yml` · `fly.toml` | Deploy configs for a VM / home machine and for Fly.io. |
-| `docs/vision.md` | The project vision and pillars. |
-| `docs/ROADMAP.md` · `docs/DECISIONS.md` | Feature planning (phases 0–5, delivery contracts) · decisions locked + open questions. |
+| `docs/boards-contract.md` | The board/page design contract, channel layout and feed routing map. |
 | `docs/data-sources.md` | API capability reference (what each service exposes). |
-| `docs/wow-121-discord.md` | Getting the most out of WoW 12.1's native Discord integration with Calcifer (bridge layout + linking/Linked-Roles proposals). |
 | `tests/` | Pytest suite (DB, metrics, views, cogs, boards, feeds, ingest). |
 
 A roster sync only ever overwrites **API-sourced** columns. Manually entered

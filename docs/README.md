@@ -1,26 +1,19 @@
 # Documentation index
 
-> **The vision is now in one place:** [`vision.md`](vision.md). It is the single,
-> canonical statement of what From the Ashes is building and how: both pillars
-> (a community Discord bot for the guild, and a roster/team-management tool for
-> management) on one codebase. The scattered per-session brainstorming docs
-> (`calcifer-vision`, `community-experience-plan`, `discord-design-system`,
-> `integration-hub-plan`, `views-plan`) have been merged into it.
-
-The vision, plus four references, no overlap:
+Technical references for building, testing and running Calcifer. For the
+feature and command list see [`../README.md`](../README.md); for the codebase
+architecture and conventions see [`../CLAUDE.md`](../CLAUDE.md); for the
+contribution workflow see [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 | Doc | What it's for |
 | --- | --- |
-| [`vision.md`](vision.md) | **Start here.** The whole vision, the architecture approach, the design system, the feature goals, the one roadmap (Phases 0–5 plus the parallel data-spine track, with ✅ for what has shipped) and each in-development feature's path to delivery, and the locked decisions. |
-| [`data-sources.md`](data-sources.md) | Reference: what each external API (WoW Audit, Blizzard, Raider.IO, Warcraft Logs) exposes, how auth works, and the local-addon data spine: the detail behind `ftabot/services/`. |
-| [`communication.md`](communication.md) | Reference: Calcifer's full Discord communication palette (text markdown, dynamic `<t:…>` timestamps, mentions/`allowed_mentions`, emoji, embeds, Components V2, and message limits), framed around the house rules, the detail behind `ftabot/brand.py` + `ftabot/publisher.py`. |
-| [`deploy.md`](deploy.md) | Reference: hosting options compared, step-by-step setup guides (Oracle Cloud free VM, Fly.io, your own machine), first run, backups, and the posting-guardrail workflow. |
-| [`discord-bot-learnings.md`](discord-bot-learnings.md) | Reference: learnings from the popular Discord bots (MEE6, Dyno, Carl-bot, Raid-Helper, …), with a keep/borrow/skip verdict for a single-guild bot. Defers to `vision.md`; surfaces findings and a few prioritised gap fixes, it does not change the roadmap. |
-
-For the user-facing feature/command list see [`../README.md`](../README.md); for
-the codebase architecture (working on it) see [`../CLAUDE.md`](../CLAUDE.md).
-
-**Keep ideas in one place.** New ideas, decisions and roadmap changes go into
-[`vision.md`](vision.md), tied to the central two-pillar vision, not into new
-side documents. That is what keeps the project's direction coherent across
-sessions.
+| [`boards-contract.md`](boards-contract.md) | The sticky-post contract: the shared board grammar, each shipped board's and page's markup, colours, limits and update triggers, the `brand.py` voice hooks, the canonical channel layout, the feed routing map and the ping policy. Build boards from this. |
+| [`communication.md`](communication.md) | Calcifer's Discord communication palette: markdown, dynamic `<t:…>` timestamps, mentions and `allowed_mentions`, emoji, embeds, Components V2 and message limits. The detail behind `ftabot/brand.py` + `ftabot/publisher.py`. |
+| [`voice-usage-examples.md`](voice-usage-examples.md) | Code patterns for using `brand.Voice` in boards, commands, feeds and errors. Pairs with [`../MESSAGING.md`](../MESSAGING.md). |
+| [`data-sources.md`](data-sources.md) | What each external API (WoW Audit, Blizzard, Raider.IO, Warcraft Logs) exposes, how auth works, and the local-addon data spine: the detail behind `ftabot/services/`. |
+| [`data-spine-validation.md`](data-spine-validation.md) | What the SavedVariables ingestion has and hasn't been validated against, and how to check it on a real dump. |
+| [`deploy.md`](deploy.md) | Hosting options, step-by-step setup guides (Oracle Cloud free VM, Fly.io, your own machine), the first-run config checklist, backups and the posting-guardrail workflow. |
+| [`verification-runbook.md`](verification-runbook.md) | The credential-gated live checks to run from a fresh session. |
+| [`testing-status.md`](testing-status.md) | Which integrations have been verified live versus offline only. |
+| [`branching.md`](branching.md) | The GitHub Flow branching and release model. |
+| [`maintainer-setup.md`](maintainer-setup.md) | One-time GitHub repository settings (branch protection and friends). |

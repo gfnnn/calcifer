@@ -35,7 +35,7 @@ class Config:
     discord_token: str | None = None
     discord_guild_id: int | None = None
     admin_role_name: str = "Officer"
-    # The GM's Discord user id, so Calcifer can address Harry in his own register.
+    # The GM's Discord user id, so Calcifer can address the GM in their own register.
     gm_discord_id: int | None = None
     # Master switch for the bot's slash commands. Set BOT_COMMANDS_ENABLED=0 on
     # production to skip loading the command cogs and clear any commands already

@@ -136,15 +136,13 @@ authorization-code flow, `GET /profile/user/wow` (and
 **characters the signed-in account owns** — an *authoritative* character→account
 binding no public endpoint exposes. Paired with the Discord identity we already
 hold, a member completing a Battle.net login is the leading candidate for the
-data-spine's still-open **character↔Discord** link (today a manual officer link;
-[`vision.md`](vision.md) §5c). It would need an OAuth callback route on the
+data-spine's still-open **character↔Discord** link (today a manual officer link). It would need an OAuth callback route on the
 ingest listener (`ingest.py`), the bot's only HTTP surface.
 
 **What we wire today:** only **Guild Roster** (rank + level) and the **Profile
 Summary** (race/faction/class/spec/level/ilvl). Everything else above is
 documented-but-unwired — the catalog lives here so a new pull maps without
-rediscovery, and the hardening to pick it up is tracked in [`vision.md`](vision.md)
-§9 / §7b.
+rediscovery.
 
 → Connector: [`ftabot/services/blizzard.py`](../ftabot/services/blizzard.py)
 
@@ -239,7 +237,7 @@ The four sources above are all **online APIs about characters**. The piece they
 *cannot* give us is **who is who** — which characters belong to one person, and
 which Discord user that is. That ground truth lives on the GM's PC, in two WoW
 addons' saved data, and ingesting it is **the core long-term goal of this
-project** (see [`vision.md`](vision.md#5c-the-data-spine--the-long-term-core)).
+project**.
 
 - **Storage:** WoW addons persist to **SavedVariables `.lua`** files
   (`WTF/Account/<acct>/SavedVariables/<Addon>.lua`) — Lua table literals, parsed
@@ -264,7 +262,7 @@ GRM's alt/main groupings + officer notes, RCLootCouncil's per-character activity
 and the API character data lets us **intimately confirm character → account →
 Discord user** with high confidence — the link the rest of the bot's
 member-personal features depend on, sourced from data the GM *already collects*
-rather than from asking users to self-register (see [`vision.md`](vision.md#5c-the-data-spine--the-long-term-core)).
+rather than from asking users to self-register.
 
 > **Scope note:** the intake and parsers have **shipped** — the loot ledger and
 > the alt↔main account overlay are live. What remains of the *full* vision is the
@@ -322,7 +320,7 @@ Raider.IO gives recruitment only as a per-character field (`recruitmentProfiles`
 read by the scout as `lfg_active`), and WoWProgress has no recruitment API. So
 the Phase 5 funnel does not ingest an inbound feed; instead the `scout_leads`
 table is fed by the existing WCL+Raider.IO scout (`/recruit lead capture`),
-turning vetted, surfaced candidates into trackable leads. See [`ROADMAP.md`](ROADMAP.md).
+turning vetted, surfaced candidates into trackable leads.
 
 ---
 

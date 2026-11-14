@@ -24,7 +24,7 @@ def test_me_card_leads_with_main_then_alts_by_score():
         _m("MainChar", is_main=True, mythic_plus_score=500, class_name="Paladin"),
         _m("AltHigh", is_main=False, mythic_plus_score=2000, class_name="Druid"),
     ]
-    embed = me_card(members, display_name="Harry")
+    embed = me_card(members, display_name="Testgm")
     names = [f.name for f in embed.fields]
     assert names[0].startswith("MainChar")        # main always leads
     assert "main" in names[0]
@@ -39,7 +39,7 @@ def test_me_card_shows_key_stats_and_vault_fallback():
            wishlist_pct=42.0),
         _m("Fresh", is_main=False, class_name="Priest"),  # no stats yet
     ]
-    embed = me_card(members, display_name="Harry")
+    embed = me_card(members, display_name="Testgm")
     geared = embed.fields[0].value
     assert "ilvl 636" in geared and "M+ 3100" in geared
     assert "vault 6/9" in geared and "wishlist 42%" in geared
@@ -49,13 +49,13 @@ def test_me_card_shows_key_stats_and_vault_fallback():
 
 
 def test_me_card_title_has_no_em_dash():
-    embed = me_card([_m("Solo", is_main=True)], display_name="Harry")
+    embed = me_card([_m("Solo", is_main=True)], display_name="Testgm")
     assert not brand.has_em_dash(embed.title)
 
 
 def test_me_card_caps_fields_at_ten():
     many = [_m(f"Char{i}", is_main=(i == 0), mythic_plus_score=float(i)) for i in range(15)]
-    embed = me_card(many, display_name="Harry")
+    embed = me_card(many, display_name="Testgm")
     assert len(embed.fields) == 10
 
 

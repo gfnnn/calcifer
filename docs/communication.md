@@ -3,13 +3,12 @@
 This is the reference for the **full toolbox Calcifer has for communicating in
 Discord** — text markdown, dynamic timestamps, mentions, emoji, embeds,
 Components V2, and the message limits that bound them all. The bot lives in
-Discord (vision [Pillar A](vision.md#4-pillar-a--the-guilds-living-home)), so
-knowing the whole palette — and the house rules that constrain it — is what lets
-every surface "read like a designed page, not a bot's scratchpad"
-([vision §6](vision.md#6-the-design-system--look--voice)).
+Discord, so
+knowing the whole palette, and the house rules that constrain it, is what lets
+every surface read like a designed page, not a bot's scratchpad.
 
-It pairs with [`vision.md §6`](vision.md#6-the-design-system--look--voice) (the
-look-and-voice design system) and the code in
+It pairs with [`boards-contract.md`](boards-contract.md) (the board design
+contract and the colour/icon/voice system) and the code in
 [`ftabot/brand.py`](../ftabot/brand.py) (the single source of truth for colour,
 icon, and voice). **`brand.py` owns *what* Calcifer sounds like; this doc is the
 catalogue of *how* a message can be shaped.** Where a capability is already wired
@@ -27,18 +26,18 @@ visible.
 ## 0. The house rules — read these first
 
 Every capability below is subordinate to the standing constraints in
-[vision §3](vision.md#3-how-we-build-it--architecture--approach) and §6. Reach
+the conventions in [`CLAUDE.md`](../CLAUDE.md#conventions). Reach
 for a feature, then check it against these:
 
 | Rule | What it means for a message | Enforced by |
 | --- | --- | --- |
 | **One voice, never an em dash** | Anything Calcifer *authors* is run through `brand.sanitize`; *relayed* external text (a Wowhead headline) is left untouched. | [`brand.sanitize`](../ftabot/brand.py) + tests; applied in [`publisher.render_embed`](../ftabot/publisher.py) |
 | **Boards never ping** | Every board send/edit forces `allowed_mentions=none`. | [`boards/messenger.py`](../ftabot/boards/messenger.py) (`_NO_PINGS`) |
-| **Route through the gate** | No surface calls `channel.send` directly; destination resolves via `PostGate` first. | [`posting.py`](../ftabot/posting.py); see [vision §3](vision.md#3-how-we-build-it--architecture--approach) |
+| **Route through the gate** | No surface calls `channel.send` directly; destination resolves via `PostGate` first. | [`posting.py`](../ftabot/posting.py) |
 | **Times are dynamic, never hardcoded** | Every displayed time is a `<t:…>` stamp on a Paris-time epoch, so it localises per viewer. Never write "20:15 CET". | `Config.raid_timezone`; see [§2](#2-dynamic-timestamps--t) |
 | **Mobile-first** | Most of the ~300 are on phones. Favour short lines; remember code-block syntax highlighting does **not** render on mobile. | design choice; see [§1](#1-text-markdown) |
 | **Edit, never re-post** | Boards diff by fingerprint and edit in place. | [`boards/engine.py`](../ftabot/boards/engine.py) |
-| **Snark targets situations, never people** | A curation guideline for any authored copy. | curation + [vision §2](vision.md#2-calcifer--the-persona-and-the-bond) |
+| **Snark targets situations, never people** | A curation guideline for any authored copy. | curation + [`CLAUDE.md` conventions](../CLAUDE.md#conventions) |
 
 ---
 
@@ -89,7 +88,7 @@ each row with inline code for rank/score and bold for names
 The single most important formatting feature for a guild bot, because the server
 runs on **Europe/Paris** but the 300 members are scattered across timezones. A
 `<t:UNIX:STYLE>` token renders in **each viewer's own local time** automatically.
-**Never hardcode a wall-clock time** ([vision §3](vision.md#3-how-we-build-it--architecture--approach)).
+**Never hardcode a wall-clock time** ([`CLAUDE.md` conventions](../CLAUDE.md#conventions)).
 
 Syntax: `<t:UNIX_SECONDS:STYLE>` — the epoch is computed on Paris time via
 `Config.raid_timezone`, but the token itself is timezone-agnostic.
@@ -130,9 +129,9 @@ can show a name in blue without notifying anyone.
 | Slash command (clickable) | `</name:COMMAND_ID>` |
 | Custom emoji | `<:name:ID>` / animated `<a:name:ID>` |
 
-**The ping policy is deliberate and opt-in** (vision: *"opt-in, never
+**The ping policy is deliberate and opt-in** (*"opt-in, never
 opt-out"*). Loud notifications are a subscription
-([`/alerts` roles, planned](vision.md#4d-personal--toggleable)), not a default.
+([`/alerts`](../README.md#discord-commands)), not a default.
 
 - **Boards never ping.** [`boards/messenger.py`](../ftabot/boards/messenger.py)
   forces `discord.AllowedMentions.none()` on every send *and* edit.
@@ -152,7 +151,7 @@ await channel.send(f"Heads up, <@&{role_id}>",
 ## 4. Emoji
 
 Three layers, all keyed through [`brand.py`](../ftabot/brand.py) so the icon
-vocabulary stays fixed ([vision §6](vision.md#6-the-design-system--look--voice)).
+vocabulary stays fixed ([boards contract §4](boards-contract.md#4-voice-and-visual-system)).
 
 | Layer | What | Resolution |
 | --- | --- | --- |
@@ -165,7 +164,7 @@ vocabulary stays fixed ([vision §6](vision.md#6-the-design-system--look--voice)
   **nothing blocks on the upload** — an un-uploaded emoji just keeps its unicode
   glyph.
 - The mood system (`brand.Mood` + `MOOD_EMOJI`) expresses how Calcifer "feels"
-  per message via author-icon + prefix emoji ([vision §6, charm pass](vision.md#6-the-design-system--look--voice)).
+  per message via author-icon + prefix emoji ([boards contract §4](boards-contract.md#4-voice-and-visual-system)).
 
 ---
 
@@ -173,7 +172,7 @@ vocabulary stays fixed ([vision §6](vision.md#6-the-design-system--look--voice)
 
 The workhorse for alerts and command replies: a bordered, coloured panel with
 structured fields. **Colour encodes source + urgency** — one accent per panel,
-never rainbow ([vision §6](vision.md#6-the-design-system--look--voice)):
+never rainbow ([boards contract §4](boards-contract.md#4-voice-and-visual-system)):
 
 | Token | Hex | Means |
 | --- | --- | --- |
@@ -218,7 +217,7 @@ builds the leaderboard embed with a footer sign-off from `brand.Voice`.
 
 **When to use what:** simple one-line alerts and command replies stay classic
 embeds; rich boards are migrating to Components V2 ([§6](#6-components-v2)) board
-by board ([vision §6](vision.md#6-the-design-system--look--voice)).
+by board.
 
 ---
 
@@ -237,7 +236,7 @@ built entirely from components instead of `content`/`embeds`:
 | **Action row** | a row of buttons / selects | `discord.ui.ActionRow` |
 | **Link button** | a button that opens a URL | `discord.ui.Button(style=ButtonStyle.link, url=…)` |
 
-**The interaction constraint is binding** ([vision §3](vision.md#3-how-we-build-it--architecture--approach)):
+**The interaction constraint is binding** ([`CLAUDE.md` conventions](../CLAUDE.md#conventions)):
 **no stateful interaction handlers.** Interactivity is **link buttons** (open a
 URL), **slash commands** (request/response), and **native Discord** (Channels &
 Roles / Onboarding for opt-in roles; Raid-Helper for sign-ups). A V2 board may
@@ -254,7 +253,7 @@ interaction engineering.
 ## 7. Message limits
 
 Hard caps Calcifer must respect (the rate-limit/length contract in
-[vision §6](vision.md#6-the-design-system--look--voice)). Renderers should
+[boards contract §2](boards-contract.md#2-the-design-contract)). Renderers should
 budget against these — e.g. the Hot 20 caps at the top 20 rows.
 
 | Surface | Limit |
@@ -270,7 +269,7 @@ budget against these — e.g. the Hot 20 caps at the top 20 rows.
 | Components V2: total components per message | 40 |
 | Attachments per message | 10 |
 
-**Rate-limit hygiene** (vision §6): edit, never re-post; diff before editing;
+**Rate-limit hygiene**: edit, never re-post; diff before editing;
 stagger channels; run cadences hourly/6h (far under the ~30–60s/message floor).
 
 ---
@@ -300,8 +299,8 @@ A quick map so the palette's *current* reach is honest, not aspirational:
 
 ## Where the rest of the detail lives
 
-- [`vision.md §6`](vision.md#6-the-design-system--look--voice) — the design
-  system: colour meaning, iconography, Components V2 plan, the charm/voice pass.
+- [`boards-contract.md`](boards-contract.md): the board design contract,
+  colour meaning, iconography and voice hooks.
 - [`../ftabot/brand.py`](../ftabot/brand.py) — the code source of truth for
   colour, icon, emoji names, moods, and voice banks.
 - [`../ftabot/publisher.py`](../ftabot/publisher.py) — how a feed event becomes a
