@@ -29,23 +29,15 @@ Where all Calcifer's lines live: 16 banks for different contexts (thinking, recr
 - `brand.color_for(severity)` — colour system (GUILD_EMBER, BLUE_FLAME, AMBER, EMBER_RED)
 - `brand.Mood` + `mood_emoji()` — Calcifer's expressions (thinking, smug, grumpy, delighted, etc.)
 
-### 2. `docs/messaging-strategy.md` — the design philosophy
-Why the system is structured this way: tone dial, domain pacing, the em-dash rule, and design principles.
-
-**Read this if:**
-- You're adding a new board or feature
-- You want to understand the tone dial or memory system
-- You're designing a new surface (command, feed, etc.)
-
-### 3. `docs/sticky-posts-spec.md` — the comprehensive board reference
-Every sticky post (living board and planned board): detailed headers, empty states, voice patterns, copy templates, and update triggers.
+### 2. `docs/boards-contract.md`: the board reference
+Every shipped board and sticky page: exact title, row markup, footer, colour, empty state, update triggers and voice hooks, plus the channel layout and ping policy.
 
 **Read this if:**
 - You're building a board renderer
 - You need the exact copy and voice bank for a board
 - You're designing a new sticky post type
 
-### 4. `docs/voice-usage-examples.md` — the code patterns
+### 3. `docs/voice-usage-examples.md`: the code patterns
 Working examples for every pattern: board footers, domain flavor, error handling, command flows, testing.
 
 ---
@@ -131,7 +123,7 @@ More examples in `docs/voice-usage-examples.md`.
 
 1. **Identify the voice context.** Does it fit an existing bank (mplus, raid, recruiting, loot)? Or do you need a new one?
 
-2. **Check sticky-posts-spec.md.** See if the board is already designed; if new, add a detailed spec (header, empty state, signoff pattern, voice bank, update triggers).
+2. **Check `docs/boards-contract.md`.** Follow the design contract and its new-board checklist; when the board ships, add its markup (header, empty state, signoff, voice bank, update triggers) there.
 
 3. **In your renderer:**
    ```python
@@ -167,7 +159,7 @@ When a new context appears (e.g., "mythic_dungeons_2v2" for a new feature):
 
 4. **Test:** `pytest tests/test_brand.py` (ensures no em dashes, lines are unique)
 
-5. **Document in this file + messaging-strategy.md.** Add the bank to the reference table.
+5. **Document it in this file.** Add the bank to the reference table.
 
 ---
 
@@ -218,8 +210,8 @@ See `tests/test_brand.py` for the full suite.
 
 The voice system is live. Next:
 
-1. ~~**Implement recruitment board**~~ — ✅ shipped: `boards/recruitment.py` + `/recruit` commands (spec in `sticky-posts-spec.md`)
-2. **Roll out new boards** — roster, loot queue, announcements (specs in `sticky-posts-spec.md`)
+1. ~~**Implement recruitment board**~~ ✅ shipped: `boards/recruitment.py` + `/recruit` commands (contract in `docs/boards-contract.md`)
+2. **Roll out new boards**, following `docs/boards-contract.md`
 3. **Command messaging** — standardize slash command replies (thinking → work → result)
 4. **Digest mode flavor** — weekly roundup voice for feeds
 5. **Mood system** (future) — add author-icon expressions to key boards
@@ -231,8 +223,7 @@ The voice system is live. Next:
 | Need | File | What's there |
 | --- | --- | --- |
 | Voice banks | `ftabot/brand.py` | 16 banks + `Voice` class + colour system |
-| Board/sticky specs | `docs/sticky-posts-spec.md` | Complete board reference with copy templates |
-| Design philosophy | `docs/messaging-strategy.md` | Tone dial, domain pacing, design rules |
+| Board/sticky specs | `docs/boards-contract.md` | Board and page markup, voice hooks, channel layout |
 | Code examples | `docs/voice-usage-examples.md` | Worked patterns for every use case |
 | Tests | `tests/test_brand.py` | Ensure lines are unique, no em dashes |
 
@@ -240,7 +231,7 @@ The voice system is live. Next:
 
 ## One more thing
 
-**Read the vision.** If you haven't, read `docs/vision.md` §2 (Calcifer the persona) and §6 (the design system). That's where the rules live:
+**Know the anchors.** The rules every line follows (also in `CLAUDE.md` and `docs/boards-contract.md`):
 - Snark targets situations, never people
 - He never writes em dashes
 - M+ is fast/excited, raid/logs are measured

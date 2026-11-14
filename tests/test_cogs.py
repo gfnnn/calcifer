@@ -348,10 +348,10 @@ async def test_whois_lists_linked_characters(db):
     await db.set_discord_link(member.id, "7")
 
     found_it = _Interaction()
-    await MembersCog.whois.callback(cog, found_it, _User(id=7, display_name="the GM"))
+    await MembersCog.whois.callback(cog, found_it, _User(id=7, display_name="Testgm"))
     embed = found_it.response.embed
     assert isinstance(embed, discord.Embed)
-    assert "the GM" in embed.title
+    assert "Testgm" in embed.title
     assert "Ashbringer" in embed.description
 
 
@@ -368,7 +368,7 @@ async def test_me_card_empty_then_linked(db):
     # Link a character to the user, then /me renders their card.
     member = await db.get_member("Emberlyn", "hellfire", "eu")
     await db.set_discord_link(member.id, "99")
-    linked_it = _Interaction(user=_User(id=99, display_name="the GM"))
+    linked_it = _Interaction(user=_User(id=99, display_name="Testgm"))
     await MembersCog.me.callback(cog, linked_it)
     assert isinstance(linked_it.response.embed, discord.Embed)
     assert "Emberlyn" in linked_it.response.embed.fields[0].name

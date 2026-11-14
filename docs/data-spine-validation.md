@@ -7,8 +7,7 @@
 > below are *inferred*, not *confirmed*. This file tracks what still needs a
 > real-world check.
 
-Related: [`data-sources.md` §5](data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth)
-· [`vision.md` §5c](vision.md#5c-the-data-spine--the-long-term-core).
+Related: [`data-sources.md` §5](data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth).
 
 ## What *is* tested (offline)
 

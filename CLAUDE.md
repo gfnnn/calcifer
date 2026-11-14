@@ -10,8 +10,9 @@ lets the guild query it from Discord, and posts feed alerts / living boards /
 sticky pages back into Discord. **There is no dashboard and no browsable API**:
 every runtime control is a Discord command, and anything else is a change
 request to this repo (code, `content/*.json`, or env vars). See
-`README.md` for the full feature/command list and `docs/` for design docs
-(`vision.md` for the whole vision + roadmap, `data-sources.md`, `deploy.md`).
+`README.md` for the full feature/command list and `docs/` for the technical
+references (`boards-contract.md` for building boards and the channel layout,
+`communication.md`, `data-sources.md`, `deploy.md`; index in `docs/README.md`).
 
 ## Commands
 
@@ -322,3 +323,57 @@ preserved); `settings` (the `/posting` live config overlay — see
 - Tests are organized partly by feature (`test_cogs*.py`, `test_metrics.py`,
   `test_wowaudit.py`) and partly by rollout phase (`test_phase*.py`). The ingest
   routes are exercised through the `ingest_client` fixture in `conftest.py`.
+- **One voice, no em dashes.** Everything Calcifer *authors* (board framing,
+  footers, feed lines, command copy, voice banks) passes through
+  `brand.sanitize` and carries no em dashes; tests enforce it on the banks.
+  Relayed external text (a Wowhead headline, a Raid-Helper title) is shown
+  verbatim. Snark targets situations, never people.
+- **Boards edit in place and never ping.** A board re-renders and edits its own
+  message (diff by fingerprint, self-heal if deleted); it never re-posts, and
+  `boards/messenger.py` forces `allowed_mentions=none`. Build boards from
+  `docs/boards-contract.md`.
+- **Env carries secrets, ids and on/off switches only.** Layouts, wording,
+  thresholds and schedules are hard-coded and changed by change request.
+- **New feeds are modular.** A new source is a `FeedSource` in `feeds/` plus
+  routing rules, never a new cog or a bespoke posting path.
+- **The identity graph is authoritative, not self-service.** Character →
+  account comes from GRM (`identity.py`); account → Discord is an officer link
+  (`/link`). Don't add flows that pester members to self-register.
+- **Default Discord intents only.** No privileged Message Content intent: every
+  feed is push (webhook) or pull (poll), never channel scraping.
+- **No stateful interaction handlers.** Interactivity is link buttons, slash
+  commands and native Discord (Channels & Roles, Onboarding, Raid-Helper for
+  sign-ups). No persistent views or button callbacks.
+- **Persist and self-heal.** Every message id, dedup key and baseline a surface
+  relies on lives in the DB, so a restart never double-posts.
+- **Server time is Europe/Paris** (`Config.raid_timezone`, EU reset Wednesday).
+  "This week" / reset logic computes on Paris time; every *displayed* time is a
+  Discord `<t:…>` stamp. Never hard-code a wall-clock string like "20:15 CET".
+- **Bounded Mythic+ pulls.** M+ boards and feeds never poll the whole roster:
+  raiders first, then active/high scorers, hard-capped (`mplus_feed_member_cap`).
+- **Every surface has an on/off switch**, so cutover from an old bot is a toggle
+  with no double-posting window.
+- **No new runtime dependency or second process** for a feature: new
+  long-running work is another task in `serve.py`.
+
+### Surface design rules
+
+Apply these when adding any post, board, alert or command:
+
+1. **One voice, several registers.** The same Calcifer for everyone; warmth
+   scales with the audience (visitor, guild, prog team, officers, GM).
+2. **Page or knock, never nag.** Ambient information is a board (pull);
+   a time-sensitive event is an alert (push, opt-in ping); a question gets a
+   command reply. Nothing interrupts that doesn't have to.
+3. **Detail scales with audience.** The same event can be a one-liner in a guild
+   channel and a full readout in a team channel: route by channel, not by
+   shouting.
+4. **Officers hold the dials, in Discord.** Configuration is a slash command
+   wherever it reasonably can be.
+5. **Deny by default.** Nothing reaches a real channel until a human promoted
+   it: off → test → live.
+6. **Gate by the cheapest mechanism that works.** Channel permissions + feed
+   routing first; code-level tiers only when that can't express it.
+7. **Pull for management, push for community, sparingly.** Management views
+   answer when asked; community surfaces are ambient pages plus a thin opt-in
+   stream.
