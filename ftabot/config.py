@@ -188,6 +188,11 @@ class Config:
     # The confirmed sandbox channel that test/un-promoted posts land in.
     test_channel_id: str | None = None
 
+    # Numeric settings that were set but could not be read as a number. The
+    # value falls back to its default (or None), so record the name for the
+    # deploy preflight instead of failing silently.
+    unparsed_env: tuple[str, ...] = ()
+
     @property
     def wowaudit_enabled(self) -> bool:
         return bool(self.wowaudit_api_key)
@@ -256,6 +261,8 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        unparsed: list[str] = []
+
         def _int(name: str) -> int | None:
             raw = _clean(os.environ.get(name))
             if raw is None:
@@ -263,6 +270,8 @@ class Config:
             try:
                 return int(raw)
             except ValueError:
+                if name not in unparsed:
+                    unparsed.append(name)
                 return None
 
         def _float(name: str) -> float | None:
@@ -410,4 +419,5 @@ class Config:
             ),
             posting_mode=(_clean(os.environ.get("POSTING_MODE")) or "off").lower(),
             test_channel_id=_clean(os.environ.get("TEST_CHANNEL_ID")),
+            unparsed_env=tuple(unparsed),
         )

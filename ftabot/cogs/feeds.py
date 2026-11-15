@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from .. import publisher, router
 from ..feeds.base import FeedEvent
+from ..runtime_settings import effective_feed_channel, effective_post_gate
 from ._guards import require_admin
 
 if TYPE_CHECKING:
@@ -225,7 +226,7 @@ class FeedsCog(commands.Cog):
         decision = router.resolve(
             event,
             await self.bot.db.feed_rules(),
-            default_channel_id=self.bot.config.feed_default_channel_id,
+            default_channel_id=await effective_feed_channel(self.bot.db, self.bot.config),
         )
         if decision is None:
             await interaction.response.send_message(
@@ -234,14 +235,33 @@ class FeedsCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        channel = interaction.guild.get_channel(int(decision.channel_id)) if interaction.guild else None
+        # A sample is still a post: it goes through the guardrail like a real
+        # alert (feed routes count as promoted), so `off` posts nothing and
+        # `test` lands it in the sandbox, ping included.
+        gate = await effective_post_gate(self.bot.db, self.bot.config)
+        destination = gate.resolve(decision.channel_id, promoted=True)
+        if destination is None:
+            reason = (
+                "posting is **off**" if gate.silent
+                else "posting is in **test** but no test channel is set (`/posting test-channel`)"
+            )
+            await interaction.response.send_message(
+                f"Not posted: {reason}. The route points at <#{decision.channel_id}>.",
+                ephemeral=True,
+            )
+            return
+        channel = interaction.guild.get_channel(int(destination)) if interaction.guild else None
         if channel is None:
-            channel = await self.bot.fetch_channel(int(decision.channel_id))
+            channel = await self.bot.fetch_channel(int(destination))
         embed = publisher.render_embed(event, decision, tone=self.bot.config.persona_tone)
         content = decision.style.get("ping")
         await channel.send(content=content, embed=embed)
+        note = (
+            "" if str(destination) == str(decision.channel_id)
+            else f" (sandboxed: the route points at <#{decision.channel_id}>)"
+        )
         await interaction.response.send_message(
-            f"🔥 Posted a **{source.value}** sample to {channel.mention}.", ephemeral=True
+            f"🔥 Posted a **{source.value}** sample to {channel.mention}{note}.", ephemeral=True
         )
 
 

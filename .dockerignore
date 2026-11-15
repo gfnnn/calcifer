@@ -18,3 +18,4 @@ data
 backups
 fly.toml
 docker-compose.yml
+deploy
