@@ -64,11 +64,20 @@ mkdir -p data
 
 say "Installing the nightly backup (04:15, keeps the newest 14)"
 MARK="# calcifer"
+# The log lives outside data/: the container hands data/ to its own user on
+# every start, so this user could not open a log there and cron would skip the
+# backup entirely (a failed redirect stops the command running).
+BACKUP_LOG="$HOME/calcifer-backup.log"
+existing=$(crontab -l 2>/dev/null || true)
+# Re-running without HEARTBEAT_URL keeps the heartbeat you already have.
+heartbeat=$(printf '%s\n' "$existing" | grep -F "$MARK" | grep -F "/healthz" || true)
 {
-  crontab -l 2>/dev/null | grep -v "$MARK" || true
-  echo "15 4 * * * cd $REPO_DIR && docker compose exec -T -u app calcifer python -m scripts.backup_db --dest /data/backups >> $REPO_DIR/data/backup.log 2>&1 $MARK"
+  printf '%s\n' "$existing" | grep -vF "$MARK" | sed '/^$/d' || true
+  echo "15 4 * * * cd $REPO_DIR && docker compose exec -T -u app calcifer python -m scripts.backup_db --dest /data/backups >> $BACKUP_LOG 2>&1 $MARK"
   if [ -n "${HEARTBEAT_URL:-}" ]; then
     echo "*/5 * * * * curl -fsS -m 10 http://127.0.0.1:8080/healthz | grep -q '\"status\": \"ok\"' && curl -fsS -m 10 -o /dev/null $HEARTBEAT_URL $MARK"
+  elif [ -n "$heartbeat" ]; then
+    printf '%s\n' "$heartbeat"
   fi
 } | crontab -
 crontab -l | grep "$MARK"

@@ -99,3 +99,12 @@ def test_scout_zone_ids_falls_back_to_single_zone():
     # No zone-ids list, but a single pinned zone -> that one becomes the scan set.
     assert Config(warcraftlogs_zone_id=42).scout_zone_ids == (42,)
     assert Config().scout_zone_ids == ()  # nothing configured
+
+
+def test_unparsable_numbers_are_recorded_once(monkeypatch):
+    monkeypatch.setenv("DISCORD_GUILD_ID", "12345abc")
+    monkeypatch.setenv("DIGEST_FLUSH_HOURS", "weekly")  # read twice by from_env
+    monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "360")
+    c = Config.from_env()
+    assert c.discord_guild_id is None
+    assert c.unparsed_env == ("DISCORD_GUILD_ID", "DIGEST_FLUSH_HOURS")

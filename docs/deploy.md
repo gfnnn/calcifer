@@ -264,7 +264,8 @@ Fill in [the settings](#the-settings-to-use) (at least `DISCORD_TOKEN`,
 
 [`deploy/vm/deploy.sh`](../deploy/vm/deploy.sh) builds the image (a few minutes
 the first time), runs the **preflight** (`scripts.preflight`: it refuses to start
-a config with a missing token, a mistyped id or an unknown timezone, and warns
+a config with a missing token, a mistyped id or number, or an unknown timezone,
+and warns
 about switched-off loops), starts the bot and waits until `/healthz` reports it
 connected to Discord. If something is wrong it prints the recent logs instead.
 
@@ -497,7 +498,7 @@ docker compose exec -u app calcifer python -m scripts.backup_db --dest /data/bac
 
 Copies land in `data/backups/` and the newest 14 are kept. On a VM set up with
 `deploy/vm/setup.sh` this already runs nightly at 04:15 (`crontab -l` shows it;
-output goes to `data/backup.log`). Elsewhere, run `crontab -e` and add (adjust
+output goes to `~/calcifer-backup.log`). Elsewhere, run `crontab -e` and add (adjust
 the path):
 
 ```cron

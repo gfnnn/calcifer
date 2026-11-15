@@ -264,5 +264,6 @@ class FeedsCog(commands.Cog):
             f"🔥 Posted a **{source.value}** sample to {channel.mention}{note}.", ephemeral=True
         )
 
+
 async def setup(bot: "FtaBot") -> None:  # pragma: no cover - discord entrypoint
     await bot.add_cog(FeedsCog(bot))

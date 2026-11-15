@@ -9,6 +9,10 @@ network calls and never prints a secret.
     python -m scripts.preflight                                # local
     docker compose run --rm calcifer python -m scripts.preflight   # on the host
 
+It checks the environment defaults only: a ``/posting`` override saved in the
+database wins at runtime, so on an existing install the posting mode it
+reports is the boot default, not necessarily what is in effect.
+
 Exit code 1 if anything is a FAIL; warnings alone exit 0. The live API checks
 are a separate step: ``python -m scripts.smoke_all``.
 """
@@ -49,6 +53,10 @@ def check(config: Config) -> list[Finding]:
     """Every preflight finding for ``config``. Pure: no I/O, no network."""
     out: list[Finding] = []
 
+    # Settings the config could not read (it silently falls back) -------------
+    for name in config.unparsed_env:
+        out.append(Finding(name, FAIL, f"{name} is set but is not a whole number, so it is being ignored"))
+
     # Discord identity -------------------------------------------------------
     token = config.discord_token
     if not token:
@@ -59,7 +67,7 @@ def check(config: Config) -> list[Finding]:
         out.append(Finding("Discord token", OK, "set (validity is checked when the bot logs in)"))
 
     if config.discord_guild_id is None:
-        out.append(Finding("Server id", WARN, "DISCORD_GUILD_ID is unset or not a number: slash commands go global and take about an hour to appear"))
+        out.append(Finding("Server id", WARN, "DISCORD_GUILD_ID is unset: slash commands go global and take about an hour to appear"))
     elif not _is_snowflake(config.discord_guild_id):
         out.append(Finding("Server id", FAIL, "DISCORD_GUILD_ID is not a Discord id (17 to 20 digits)"))
     else:

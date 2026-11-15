@@ -108,3 +108,9 @@ def test_format_findings_summarises_and_flags_not_ready():
     assert "NOT READY" in text
     assert "1 failed" in text
     assert "ready to start" in format_findings(check(_ready()))
+
+
+def test_unparsed_numeric_setting_fails():
+    names = _by_name(replace(_ready(), discord_guild_id=None, unparsed_env=("DISCORD_GUILD_ID",)))
+    assert names["DISCORD_GUILD_ID"].level == FAIL
+    assert exit_code(check(replace(_ready(), unparsed_env=("SYNC_INTERVAL_MINUTES",)))) == 1
