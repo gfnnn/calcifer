@@ -3,7 +3,9 @@
 Calcifer is one long-running process (`python -m ftabot.serve`): the Discord bot,
 its board and feed loops, the scheduled roster sync and a small inbound listener.
 This page covers where to run it for free or close to it, how to set that up by
-hand, and how to bring the bot up safely once it is running.
+hand, and how to bring the bot up safely once it is running. For the Oracle VM the whole setup
+is three scripts in [`deploy/vm/`](../deploy/vm/): `setup.sh` once,
+`deploy.sh` to start and update, `status.sh` to check.
 
 Once deployed you operate it from three places:
 
@@ -86,9 +88,12 @@ for B. Moving between them later is copying one database file.
 
 **What has and has not been tested.** The bot process itself was run end to end
 on this code (health check, scheduled sync against the live guild, memory
-measured). `docker-compose.yml` passes `docker compose config`. The image build
-and both platform deployments have **not** been run from this repository yet,
-so treat the first deploy as the test and expect to adjust a step.
+measured). In November 2026 the Docker image was built and run on x86 with
+Compose (container runs as the unprivileged user, `/healthz`, backups, the
+preflight and `deploy/vm/deploy.sh`'s failure path all checked), and every
+dependency was confirmed to ship a ready-made ARM64 wheel for the Oracle A1
+shape. Not yet run: an actual Oracle or Fly.io deployment, so treat the first
+deploy as the final test.
 
 ---
 
@@ -155,12 +160,15 @@ You get a small Linux VM that is yours to keep. About 45 minutes the first time.
   does not charge for Always Free resources.
 - You pick a **home region** at sign-up and **cannot change it later**. Choose
   **UK South (London)** or **Germany Central (Frankfurt)**.
-- Oracle may **stop instances it considers idle** on free accounts (very low CPU,
-  network and memory over a week), which this bot would be. Upgrading the
-  account to **Pay As You Go** is widely reported to exempt you, and Always Free
-  resources stay free after the upgrade. A stopped instance is not deleted and
-  can be started again. Step 2 and the [backups](#backups-and-updates) section
-  are your protection here.
+- Oracle may **stop Always Free instances it considers idle**: over 7 days,
+  CPU (95th percentile), network and, on Arm shapes, memory all under 20%. This
+  bot would be. Upgrading to **Pay As You Go** is what Oracle's own reclamation
+  notices name as the way to keep an instance from being stopped, and Always
+  Free resources stay free after the upgrade. A stopped instance is not deleted
+  and can be started again. Step 2, the heartbeat in step 5 and the
+  [backups](#backups-and-updates) section are your protection here.
+- The Arm allowance is **2 OCPUs and 12 GB of memory in total** (Oracle halved
+  it in 2026). One small VM uses a fraction of it.
 
 ### 1. Create the account
 
@@ -173,6 +181,16 @@ In the Oracle Cloud console open the menu → **Billing & Cost Management** →
 **Upgrade and Manage Payment**, and upgrade to Pay As You Go. Expect a temporary
 authorisation on the card. You will not be billed while you stay inside the
 Always Free allowance, and one small VM is well inside it.
+
+Then add a safety net: **Billing & Cost Management → Budgets → Create Budget**,
+amount **1** (in your account currency), alert at **1%** of actual spend, sent
+to your email. If anything ever starts costing money you hear about it the
+same day.
+
+If you would rather not upgrade, give the VM in step 3 **1 OCPU and 1 GB** of
+memory instead of 6 GB. Ubuntu, Docker and the bot use roughly a third of 1 GB,
+which keeps memory above Oracle's 20% idle line (the setup script adds swap so
+builds still fit). This is a workaround, not a guarantee.
 
 ### 3. Create the VM
 
@@ -192,7 +210,7 @@ Always Free allowance, and one small VM is well inside it.
 7. Press **Create**, wait for the instance to show **Running**, and note its
    **public IP address**.
 
-### 4. Connect and install Docker
+### 4. Connect and set up the VM
 
 From your own computer (replace the path and the address):
 
@@ -201,52 +219,72 @@ ssh -i ~/Downloads/ssh-key.key ubuntu@YOUR.PUBLIC.IP
 ```
 
 If SSH refuses the key as "too open", run `chmod 600` on the key file first.
-Then, on the VM:
-
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-```
-
-```bash
-sudo usermod -aG docker ubuntu && sudo apt-get install -y git
-```
-
-Log out and back in (`exit`, then the `ssh` command again) so the group change
-takes effect.
-
-### 5. Start the bot
+(On Windows, use PowerShell; if it complains about permissions, right-click the
+key → Properties → Security → Advanced, disable inheritance and leave only your
+own user.) Then, on the VM:
 
 ```bash
 git clone https://github.com/gfnnn/calcifer && cd calcifer
 ```
 
 ```bash
-cp .env.example .env && nano .env
+./deploy/vm/setup.sh
 ```
 
-Fill in [the settings](#the-settings-to-use), save (`Ctrl+O`, `Enter`) and exit
-(`Ctrl+X`). Then:
+[`deploy/vm/setup.sh`](../deploy/vm/setup.sh) installs Docker, turns on
+automatic security updates, adds swap on small VMs, creates `.env` from the
+template with the recommended intervals already set, and installs the nightly
+backup. It is safe to run again. Log out and back in once afterwards (`exit`,
+then the `ssh` command again) so your user can run Docker.
+
+**Optional heartbeat.** Create a free check at <https://healthchecks.io> (period
+5 minutes, grace 15), copy its ping URL and run setup with it:
 
 ```bash
-docker compose up -d --build
+HEARTBEAT_URL=https://hc-ping.com/your-uuid ./deploy/vm/setup.sh
 ```
 
-The first build takes a few minutes. Check it is healthy:
+The VM then pings it every 5 minutes, but only while the bot reports healthy
+and connected to Discord. If Oracle stops the VM or the bot drops, you get an
+email.
+
+### 5. Start the bot
 
 ```bash
-docker compose ps
+nano .env
 ```
+
+Fill in [the settings](#the-settings-to-use) (at least `DISCORD_TOKEN`,
+`DISCORD_GUILD_ID`, `GM_DISCORD_ID` and `FEED_DEFAULT_CHANNEL_ID`), save
+(`Ctrl+O`, `Enter`) and exit (`Ctrl+X`). Then:
 
 ```bash
-curl -s localhost:8080/healthz
+./deploy/vm/deploy.sh
 ```
 
-You want `"status": "ok"` and, once Discord has connected, the bot showing as
-online in your server. `docker compose logs -f` shows what it is doing
-(`Ctrl+C` stops watching, not the bot).
+[`deploy/vm/deploy.sh`](../deploy/vm/deploy.sh) builds the image (a few minutes
+the first time), runs the **preflight** (`scripts.preflight`: it refuses to start
+a config with a missing token, a mistyped id or an unknown timezone, and warns
+about switched-off loops), starts the bot and waits until `/healthz` reports it
+connected to Discord. If something is wrong it prints the recent logs instead.
 
-The container restarts itself after a crash or a reboot. Continue with
-[First run](#first-run-bringing-the-bot-up-in-discord).
+Check on it any time with:
+
+```bash
+./deploy/vm/status.sh
+```
+
+`docker compose logs -f` shows what it is doing (`Ctrl+C` stops watching, not
+the bot). The container restarts itself after a crash or a reboot.
+
+Last, check the live API keys from the VM (this also proves the VM can reach
+each service):
+
+```bash
+docker compose exec calcifer python -m scripts.smoke_all
+```
+
+Continue with [First run](#first-run-bringing-the-bot-up-in-discord).
 
 ### Optional: the two inbound features
 
@@ -353,10 +391,12 @@ works well: the bot only dials out, so it runs happily behind a home router with
 no port forwarding. The trade-off is that it is offline whenever that machine or
 your broadband is.
 
-1. Install Docker: on Linux or Raspberry Pi OS, the same two commands as
-   [Guide A step 4](#4-connect-and-install-docker) (use your own username in
-   place of `ubuntu`); on Windows or macOS, install Docker Desktop.
-2. Follow [Guide A step 5](#5-start-the-bot) exactly.
+1. On Linux or Raspberry Pi OS (Debian-based): clone the repo and run
+   `./deploy/vm/setup.sh`, as in [Guide A step 4](#4-connect-and-set-up-the-vm).
+   On Windows or macOS, install Docker Desktop and create `.env` by hand
+   (`cp .env.example .env`).
+2. Follow [Guide A step 5](#5-start-the-bot). On Windows or macOS, use
+   `docker compose up -d --build` in place of the scripts.
 
 If you want the Raid-Helper webhook from a home connection, use a Cloudflare
 Tunnel as described at the end of Guide A.
@@ -452,14 +492,16 @@ live with `/posting`, `/board` and `/feed`):
 to `docker-compose.yml`. Take a safe copy while the bot is running:
 
 ```bash
-docker compose exec calcifer python -m scripts.backup_db --dest /data/backups
+docker compose exec -u app calcifer python -m scripts.backup_db --dest /data/backups
 ```
 
-Copies land in `data/backups/` and the newest 14 are kept. To do it nightly, run
-`crontab -e` and add (adjust the path):
+Copies land in `data/backups/` and the newest 14 are kept. On a VM set up with
+`deploy/vm/setup.sh` this already runs nightly at 04:15 (`crontab -l` shows it;
+output goes to `data/backup.log`). Elsewhere, run `crontab -e` and add (adjust
+the path):
 
 ```cron
-15 4 * * * cd /home/ubuntu/calcifer && docker compose exec -T calcifer python -m scripts.backup_db --dest /data/backups
+15 4 * * * cd /home/ubuntu/calcifer && docker compose exec -T -u app calcifer python -m scripts.backup_db --dest /data/backups
 ```
 
 A backup that lives only on the same machine does not protect you from losing
@@ -477,10 +519,16 @@ teams), board placements and what has already been announced.
 **Updates.**
 
 ```bash
-cd calcifer && git pull && docker compose up -d --build
+cd calcifer && ./deploy/vm/deploy.sh --pull
 ```
 
-Database changes apply themselves on start-up.
+It pulls `main`, builds, runs the preflight and only then restarts the bot, so a
+broken `.env` never replaces a running bot. Database changes apply themselves
+on start-up. Take a backup first if the release notes mention a migration.
+
+**Rolling back.** `git log --oneline -5`, then `git checkout <previous-sha>`
+and `./deploy/vm/deploy.sh`. Migrations only add columns, so an older build
+runs on a newer database. Return to normal with `git checkout main`.
 
 ---
 

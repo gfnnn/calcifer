@@ -44,8 +44,10 @@ python -m scripts.check_raiderio                    #   (also check_blizzard,
 python -m scripts.check_warcraftlogs                #    check_raidhelper)
 
 # Operations
+python -m scripts.preflight                         # offline go/no-go check of the deploy config (.env)
 python -m scripts.backup_db --dest backups          # consistent copy of the live SQLite DB (+ pruning)
 docker compose up -d --build                        # run the all-in-one process on any Docker host
+./deploy/vm/setup.sh | deploy.sh [--pull] | status.sh   # Docker VM host (Oracle): one-time setup, start/update, health
 
 # Data-spine (addon SavedVariables) tooling — pure, offline
 python -m scripts.inspect_savedvars dump.lua        # report the shape of a .lua dump
