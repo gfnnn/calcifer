@@ -66,7 +66,7 @@ def check(config: Config) -> list[Finding]:
         out.append(Finding("Server id", OK, "commands register to this server instantly"))
 
     if config.gm_discord_id is None:
-        out.append(Finding("GM id", WARN, "GM_DISCORD_ID is unset: GM-only commands (/trends) and the GM register are off; /posting and /board still work for Discord admins"))
+        out.append(Finding("GM id", WARN, "GM_DISCORD_ID is unset: GM-only commands (/gmreport, /trends) and the GM register are off; /posting and /board still work for Discord admins"))
     elif not _is_snowflake(config.gm_discord_id):
         out.append(Finding("GM id", FAIL, "GM_DISCORD_ID is not a Discord user id"))
     else:

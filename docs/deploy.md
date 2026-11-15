@@ -549,7 +549,8 @@ effect.
 
 This is what enforces the rule "*seen by members only once confirmed*": a board
 is sandboxed until you have reviewed it in full and run `/board promote`, which
-re-posts it in its production channel. The guardrail covers feed alerts too (they
+re-posts it in its production channel. The guardrail covers feed alerts and
+`/feed test` samples too (they
 drop in `off`, redirect in `test`). An alert held back while posting is off is
 not lost: milestones, for example, are stored and posted once the mode allows.
 

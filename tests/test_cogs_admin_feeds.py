@@ -213,7 +213,7 @@ class _Guild:
 
 async def test_feed_test_posts_sample_to_default_channel(db):
     channel = _PostChannel(999)
-    cog = FeedsCog(_Bot(db, _cfg_with(feed_default_channel_id="999")))
+    cog = FeedsCog(_Bot(db, _cfg_with(feed_default_channel_id="999", posting_mode="live")))
     it = _Interaction(perms=_Perms(manage_guild=True))
     it.guild = _Guild(channel)  # routes to the default channel via the guild
 
@@ -223,3 +223,44 @@ async def test_feed_test_posts_sample_to_default_channel(db):
     _content, embed = channel.sent[0]
     assert isinstance(embed, discord.Embed)
     assert "Posted a **raiderio_mplus** sample" in it.response.content
+
+
+async def test_feed_test_respects_posting_off(db):
+    # Deny by default: with posting off, even a sample posts nothing anywhere.
+    channel = _PostChannel(999)
+    cog = FeedsCog(_Bot(db, _cfg_with(feed_default_channel_id="999", posting_mode="off")))
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    it.guild = _Guild(channel)
+
+    await FeedsCog.test.callback(cog, it, _choice("milestones"))
+
+    assert channel.sent == []
+    assert it.response.ephemeral is True
+    assert "posting is **off**" in it.response.content
+
+
+async def test_feed_test_in_test_mode_lands_in_the_sandbox(db):
+    lab = _PostChannel(555)
+    cog = FeedsCog(
+        _Bot(db, _cfg_with(feed_default_channel_id="999", posting_mode="test", test_channel_id="555"))
+    )
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    it.guild = _Guild(lab)
+
+    await FeedsCog.test.callback(cog, it, _choice("milestones"))
+
+    assert len(lab.sent) == 1
+    assert "<#555>" in it.response.content
+    assert "sandboxed: the route points at <#999>" in it.response.content
+
+
+async def test_feed_test_in_test_mode_without_channel_posts_nothing(db):
+    channel = _PostChannel(999)
+    cog = FeedsCog(_Bot(db, _cfg_with(feed_default_channel_id="999", posting_mode="test")))
+    it = _Interaction(perms=_Perms(manage_guild=True))
+    it.guild = _Guild(channel)
+
+    await FeedsCog.test.callback(cog, it, _choice("milestones"))
+
+    assert channel.sent == []
+    assert "no test channel is set" in it.response.content

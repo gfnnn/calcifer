@@ -621,7 +621,9 @@ async def test_feed_test_falls_back_to_fetch_channel(db):
     # get_channel is skipped) -> the cog resolves it via bot.fetch_channel.
     channel = _SendableChannel(id=42)
     cfg = _cfg()
-    cfg = dataclasses.replace(cfg, feed_default_channel_id="42", persona_tone="off")
+    cfg = dataclasses.replace(
+        cfg, feed_default_channel_id="42", persona_tone="off", posting_mode="live"
+    )
     cog = FeedsCog(_FeedTestBot(db, cfg, channel))
     it = _Interaction(perms=_Perms(manage_guild=True))
     it.guild = None  # forces the fetch_channel branch
