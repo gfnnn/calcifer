@@ -24,6 +24,7 @@ from discord.ext import commands
 
 from .. import journey
 from ..journey_cards import (
+    CHECK_IN,
     GREET,
     LIST_PLACE,
     PLACE,
@@ -32,6 +33,7 @@ from ..journey_cards import (
     UnplacedEntry,
     page_count,
     render_card,
+    render_nudge,
     render_unplaced,
     unplaced_page_size,
 )
@@ -202,6 +204,7 @@ class JourneyCog(commands.Cog):
         _persistent.handler(NS, GREET)(self.handle_greet)
         _persistent.handler(NS, PLACE)(self.handle_place)
         _persistent.handler(NS, LIST_PLACE)(self.handle_list_place)
+        _persistent.handler(NS, CHECK_IN)(self.handle_check_in)
 
     @property
     def config(self):
@@ -364,6 +367,39 @@ class JourneyCog(commands.Cog):
             return None
         await journey.record_placed(self.db, self.config, discord_id, role, actor)
         return member
+
+    # -- the daily nudge ---------------------------------------------------------------
+
+    async def post_nudge(self, now=None) -> bool:
+        """Post today's nudge to the front door. False on a quiet day, or when
+        the flag or the posting gate says no."""
+        if not self.config.journey_nudges_enabled:
+            return False
+        payload = render_nudge(await journey.nudge_for(self.db, self.config, now))
+        if payload is None:
+            return False  # a quiet day: say nothing
+        channel_id = await effective_front_door_channel(self.db, self.config)
+        if channel_id is None:
+            return False
+        await self.messenger.send(channel_id, payload.embed, to_view(payload.buttons))
+        return True
+
+    async def handle_check_in(self, interaction, discord_id: str) -> None:
+        found = await self._target(interaction, discord_id)
+        if found is None:
+            return
+        status, member = found
+        if status.checked_in_at is None:
+            await journey.record_checked_in(
+                self.db, self.config, discord_id, str(interaction.user.id)
+            )
+        # Grey out just this button on the nudge it was clicked on.
+        clicked = _persistent.custom_id(NS, CHECK_IN, discord_id)
+        await interaction.response.edit_message(
+            view=_persistent.rebuilt_view(interaction.message, disable=clicked),
+            allowed_mentions=_NO_PINGS,
+        )
+        await self._quietly(self.refresh_card(discord_id, member), "card refresh")
 
     # -- /journey unplaced ----------------------------------------------------------
 

@@ -132,6 +132,20 @@ def check(config: Config) -> list[Finding]:
         else:
             out.append(Finding("Journey", OK, detail))
 
+    if config.journey_nudge_enabled:
+        raw = config.journey_nudge_time
+        parts = raw.split(":")
+        valid = (
+            len(parts) == 2 and all(p.isdigit() for p in parts)
+            and int(parts[0]) < 24 and int(parts[1]) < 60
+        )
+        if not valid:
+            out.append(Finding("Journey nudge", FAIL, f"JOURNEY_NUDGE_TIME={raw!r} is not HH:MM: the nudge would fall back to 18:00"))
+        elif not config.journey_enabled:
+            out.append(Finding("Journey nudge", WARN, "JOURNEY_NUDGE_ENABLED=1 but JOURNEY_ENABLED is off, so no nudge will post"))
+        else:
+            out.append(Finding("Journey nudge", OK, f"daily at {raw} UK time"))
+
     # Data sources ------------------------------------------------------------
     if not config.blizzard_enabled:
         out.append(Finding("Blizzard API", WARN, "not configured: no character levels, so The Climb and level-cap milestones stay empty"))

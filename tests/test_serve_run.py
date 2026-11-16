@@ -71,6 +71,8 @@ def _patch_common(monkeypatch, *, sources):
     monkeypatch.setattr(serve, "_board_loop", _forever)
     monkeypatch.setattr(serve, "_score_loop", _forever)
     monkeypatch.setattr(serve, "_periodic_sync", _forever)
+    monkeypatch.setattr(serve, "_journey_retention_loop", _forever)
+    monkeypatch.setattr(serve, "_journey_nudge_loop", _forever)
     monkeypatch.setattr(serve.asyncio, "create_task", _spy)
     return created, captured
 
@@ -93,13 +95,14 @@ async def test_run_launches_every_task_when_fully_configured(tmp_path, monkeypat
         score_refresh_minutes=5,
         sync_interval_minutes=10,
         journey_enabled=True,
+        journey_nudge_enabled=True,
     )
 
     await serve._run(cfg)
 
     assert set(created) == {
         "ingest", "bot", "webhook-sender", "feeds", "digest", "boards", "scores", "sync",
-        "journey-retention",
+        "journey-retention", "journey-nudge",
     }
     assert captured["ingest"].bot is not None  # bot exposed to /healthz
 

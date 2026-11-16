@@ -203,6 +203,12 @@ Key flow and layering:
   `render_unplaced`; its buttons and the card's share one placement path
   (`JourneyCog._place`: guard → allow-list → apply role → log `placed`), so add
   any new "set a role" button on top of that, never beside it.
+  The **daily nudge** is the same shape: `journey.nudge_lists` (pure: three
+  lists from the statuses and "now"), `render_nudge` (`None` on a quiet day),
+  `JourneyCog.post_nudge`, and `serve._journey_nudge_loop`, which asks
+  `journey.nudge_due` each minute whether the UK wall clock has reached
+  `JOURNEY_NUDGE_TIME` (Europe/London, the agreed exception to "server time is
+  Europe/Paris"; the last nudge date is stored so a restart never repeats it).
   The destination is `runtime_settings.effective_front_door_channel`:
   the front door is a surface behind the `PostGate`, promoted with
   `/posting front-door`.

@@ -75,6 +75,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `JOURNEY_ENABLED` | optional | The **onboarding journey**: record joins, leaves, role changes and the invite each new member used (People + an append-only events log). Needs the **Server Members intent** switched on in the developer portal, and *Manage Server* to read invite use counts. Default off. |
 | `JOURNEY_RETENTION_DAYS` | optional | Forget a person and their journey events this many days after they left (default `180`; `0` keeps them). |
 | `WELCOME_CARDS_ENABLED` / `FRONT_DOOR_CHANNEL_ID` | optional | **Welcome cards**: one staff card per join in the private `#front-door` channel, with Said hi / Set Ashes / Set Visitor buttons. Needs `JOURNEY_ENABLED`, and *Manage Roles* with Calcifer's role above the roles he sets. Default off. |
+| `JOURNEY_NUDGE_ENABLED` / `JOURNEY_NUDGE_TIME` | optional | The **daily nudge**: one staff post a day in `#front-door` listing who has not been greeted, placed or checked in on. Time is `HH:MM` on the UK clock (Europe/London, DST-safe; default `18:00`). Needs `JOURNEY_ENABLED`. Default off. |
 | `JOURNEY_STAFF_ROLES` | optional | Role names that may press the journey buttons (default `Flamekeeper,Officer,GM`; the `GM_DISCORD_ID` user always may). |
 | `JOURNEY_ROLE_ALLOWLIST` | optional | The **only** roles Calcifer may add or remove (default `Ashes,Visitor`). Anything else is refused in code, even where Discord would allow it. |
 | `JOURNEY_RANK_ROLES` | optional | Roles that mean "placed" (default `Ashes,Visitor`). The ones also on the allow-list get a `Set <role>` button. |
@@ -300,6 +301,28 @@ updates when the member picks an interest role, is given a rank by hand, or
 leaves ("Left before anyone got to them"). Someone coming back gets a new card
 marked **Back again** with their previous join date. Clicking twice logs once,
 and the buttons keep working after a restart.
+
+### The daily nudge (`JOURNEY_NUDGE_ENABLED=1`)
+
+Once a day at `JOURNEY_NUDGE_TIME` (18:00 UK time by default; it follows the
+UK clock through the summer-time changes) Calcifer posts one message in
+`#front-door` with up to three short lists:
+
+- **Not greeted after a day**: joined 24 hours ago or more, nobody has clicked
+  Said hi.
+- **Not placed after two days**: joined 48 hours ago or more, no rank role
+  (a rank given by hand in Discord counts as placed).
+- **Day-7 check-in due**: joined a week ago, still here, not checked in on.
+  Each of these has a numbered **Checked in** button, which logs `checked_in`
+  with whoever clicked and greys itself out.
+
+Each list shows at most ten people and then "and N more". A person stays on a
+list from day to day only while the thing is still outstanding, and drops off
+the moment it is done. On a quiet day nothing is posted. Members who were
+already here when the journey was switched on are never listed, and after 14
+days someone stops being a daily reminder (they are backlog, which is what
+`/journey unplaced` is for). A restart never double-posts: the date of the
+last nudge is stored.
 
 ### The unplaced sweep (`/journey unplaced`)
 
