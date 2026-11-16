@@ -205,10 +205,38 @@ async def sync_guild(
         max_age_hours=config.enrich_max_age_hours,
         limit=config.enrich_limit,
     )
+
+    # 2.6: land brand-new characters right away with their Raider.IO roster
+    #      basics, so a first sync fills the table in seconds rather than only
+    #      after every profile is enriched (that takes tens of minutes for a big
+    #      guild). Existing rows are left alone here so an interrupted run never
+    #      marks a stale row as freshly enriched.
+    new_members = [
+        m for m in members if m.character_name.lower() not in existing_by_name
+    ]
+    for m in new_members:
+        m.id = await _persist(db, m)
+    log.info(
+        "sync: %d on the roster (%d new), enriching %d via Raider.IO",
+        len(members),
+        len(new_members),
+        len(to_enrich),
+    )
+
+    async def _save_batch(batch: list[Member], done: int, total: int) -> None:
+        """Persist one enriched chunk and report progress."""
+        for m in batch:
+            m.id = await _persist(db, m)
+        log.info("sync: enriched %d/%d", done, total)
+
     if to_enrich:
         try:
             async with RaiderIOClient() as rio:
-                await rio.enrich_all(to_enrich, concurrency=config.enrich_concurrency)
+                await rio.enrich_all(
+                    to_enrich,
+                    concurrency=config.enrich_concurrency,
+                    on_batch=_save_batch,
+                )
         except Exception as exc:  # noqa: BLE001 - enrichment is best-effort
             # A transient network error (aiohttp.ClientError / TimeoutError) is
             # not wrapped as RaiderIOError, so catch broadly like the Blizzard
@@ -257,12 +285,7 @@ async def sync_guild(
     # 4: persist members.
     present_ids: list[int] = []
     for m in members:
-        # Canonicalise the role at the single write chokepoint (after every
-        # source + enrichment has had its say), recovering it from the spec when
-        # a source left it empty or in its own spelling. Stored canonical, so the
-        # web role filter, raid-board grouping and role counts all agree.
-        m.role = effective_role(m.role, m.active_spec)
-        m.id = await db.upsert_synced(m)
+        m.id = await _persist(db, m)
         present_ids.append(m.id)
 
     # 4b: reconcile the WoW Audit team tag. upsert_synced skips None on update,
@@ -353,6 +376,18 @@ async def sync_guild(
         sources=tuple(sources),
         warnings=tuple(warnings),
     )
+
+
+async def _persist(db: Database, m: Member) -> int:
+    """Upsert one member's sync-owned fields: the single write chokepoint.
+
+    The role is canonicalised here (after every source + enrichment has had its
+    say), recovering it from the spec when a source left it empty or in its own
+    spelling. Stored canonical, so the role filter, raid-board grouping and role
+    counts all agree.
+    """
+    m.role = effective_role(m.role, m.active_spec)
+    return await db.upsert_synced(m)
 
 
 def _parse_iso(value: str | None) -> datetime | None:

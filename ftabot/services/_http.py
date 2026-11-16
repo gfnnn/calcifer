@@ -47,7 +47,20 @@ def retry_after_seconds(headers: Mapping[str, str], *, fallback: float) -> float
     return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
-def new_session(headers: Mapping[str, str] | None = None) -> aiohttp.ClientSession:
+# Per-request ceiling for every outbound call. aiohttp's own default is a
+# 5-minute total with no read limit, so one stalled request (an upstream that
+# accepts the connection and then sits on the response) could hold a sync for
+# minutes per attempt. 30 s is generous for these JSON/RSS APIs: Raider.IO's
+# slowest observed cache-miss profile fetch was about 20 s, with rare outliers
+# past 40 s that are better dropped and retried on the next sync.
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_read=25)
+
+
+def new_session(
+    headers: Mapping[str, str] | None = None,
+    *,
+    timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT,
+) -> aiohttp.ClientSession:
     """Open an aiohttp session the way every outbound call in the bot should.
 
     ``trust_env=True`` makes aiohttp honour the host's ``HTTPS_PROXY`` /
@@ -56,8 +69,11 @@ def new_session(headers: Mapping[str, str] | None = None) -> aiohttp.ClientSessi
     corporate network, some container platforms, a Claude Code web session
     running the live smoke checks): every call fails at DNS instead. On a host
     with no proxy configured this is a no-op.
+
+    Every session also carries a bounded ``timeout`` (``DEFAULT_TIMEOUT``), so
+    a hung upstream fails one call fast instead of stalling a whole loop.
     """
-    return aiohttp.ClientSession(headers=headers, trust_env=True)
+    return aiohttp.ClientSession(headers=headers, trust_env=True, timeout=timeout)
 
 
 class BaseHTTPClient:

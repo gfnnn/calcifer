@@ -292,7 +292,7 @@ each wrapped as a [`FeedSource`](../ftabot/feeds/base.py) (fetch → pure parse 
 | Source | Feed | Transport | Notes |
 | --- | --- | :---: | --- |
 | **Wowhead news** | `https://www.wowhead.com/news/rss/all` | RSS 2.0 | Patch notes / blue posts / news; archives to the News board. |
-| **Blizzard WoW news** | `https://news.blizzard.com/en-us/world-of-warcraft/rss` | RSS 2.0 | Official news via the generic `rss_news` source; archives beside Wowhead (deduped). |
+| **Blizzard WoW news** | `https://news.blizzard.com/en-us/world-of-warcraft/rss` | RSS 2.0 | Official news via the generic `rss_news` source; archives beside Wowhead (deduped). **Off by default**: since Nov 2026 this URL 302s to a 404 and there is no official replacement. |
 | **YouTube uploads** | `https://www.youtube.com/feeds/videos.xml?channel_id=<UC…>` | Atom | New videos from configured channel ids; keyless, one feed per channel. |
 
 **Reliability note:** several of these sites (Wowhead, Blizzard, WoWProgress,

@@ -111,10 +111,11 @@ class Config:
     wowhead_rss_url: str = "https://www.wowhead.com/news/rss/all"
     wowhead_enabled: bool = True
 
-    # Blizzard official news RSS — a second source for the News board, archived
-    # alongside Wowhead so the board shows more. The default points at the WoW
-    # news feed; override the URL for a different (e.g. all-Blizzard) feed.
-    blizzard_news_enabled: bool = True
+    # Blizzard official news RSS: an optional second source for the News board,
+    # archived alongside Wowhead. Off by default: as of Nov 2026 the old WoW news
+    # RSS URL redirects to a 404 and Blizzard publishes no replacement feed.
+    # Turn it on with a working BLIZZARD_NEWS_RSS_URL if one appears.
+    blizzard_news_enabled: bool = False
     blizzard_news_rss_url: str = (
         "https://news.blizzard.com/en-us/world-of-warcraft/rss"
     )
@@ -372,7 +373,7 @@ class Config:
                 or "https://www.wowhead.com/news/rss/all"
             ),
             wowhead_enabled=_bool("WOWHEAD_ENABLED", True),
-            blizzard_news_enabled=_bool("BLIZZARD_NEWS_ENABLED", True),
+            blizzard_news_enabled=_bool("BLIZZARD_NEWS_ENABLED", False),
             blizzard_news_rss_url=(
                 _clean(os.environ.get("BLIZZARD_NEWS_RSS_URL"))
                 or "https://news.blizzard.com/en-us/world-of-warcraft/rss"

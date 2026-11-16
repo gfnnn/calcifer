@@ -167,7 +167,7 @@ interval and edit themselves in place (never re-post). The shipped boards:
   games. Items are sorted by their RSS section category (`Live`/`WoW` high,
   `PTR`/`Blizzard` low); the classic-games sections (`Classic`/`Mists`/`TBC`)
   stay off the page. It renders from news the feeds archive (**Wowhead**
-  (`WOWHEAD_ENABLED`) and **Blizzard's official news** (`BLIZZARD_NEWS_ENABLED`,
+  (`WOWHEAD_ENABLED`) and **Blizzard's official news** (`BLIZZARD_NEWS_ENABLED`, off by default while Blizzard has no working RSS feed;
   archived into the top zone), so turn the feed loop on (`FEED_POLL_MINUTES`)
   to fill it. Adding another news feed is one `RssNewsSource` line; the feed
   loop nudges the board right after every news poll, so a new post reaches the

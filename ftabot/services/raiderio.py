@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .. import raids
@@ -224,6 +225,10 @@ class RaiderIOClient(BaseHTTPClient):
                     "name": member.character_name,
                     "fields": _CHARACTER_FIELDS,
                 },
+                # One retry, not four: a cache-miss profile can take 10 s+ to
+                # answer, and a guild-wide sync makes hundreds of these calls.
+                # A character that still fails is simply refreshed next sync.
+                retries=1,
             )
         except RaiderIOError:
             # Character may be too low level / not yet crawled; leave as-is.
@@ -389,13 +394,23 @@ class RaiderIOClient(BaseHTTPClient):
         return out
 
     async def enrich_all(
-        self, members: list[Member], *, concurrency: int = 2, chunk_size: int = 25
+        self,
+        members: list[Member],
+        *,
+        concurrency: int = 2,
+        chunk_size: int = 25,
+        on_batch: Callable[[list[Member], int, int], Awaitable[None]] | None = None,
     ) -> list[Member]:
         """Enrich members with bounded concurrency, processed in chunks.
 
         Chunking keeps the number of in-flight requests and pending tasks flat
         regardless of roster size, so a full sync of a large guild stays gentle
         on memory (rather than scheduling one coroutine per member at once).
+
+        ``on_batch(batch, done, total)`` is awaited after each chunk, so the
+        caller can persist and report progress as it goes: Raider.IO profile
+        fetches are slow on a cache miss, and a first sync of a large guild
+        takes tens of minutes, which must not look like a hang.
         """
         semaphore = asyncio.Semaphore(max(1, concurrency))
         # One catalog fetch up front, so every member's progression is labelled
@@ -429,6 +444,8 @@ class RaiderIOClient(BaseHTTPClient):
                     enriched.append(m)
                 else:  # a BaseException (e.g. CancelledError) — never swallow it
                     raise res
+            if on_batch is not None:
+                await on_batch(batch, min(start + len(batch), len(members)), len(members))
         return enriched
 
 
