@@ -131,9 +131,11 @@ def render_card(
     config: "Config",
     match: RosterMatch | None = None,
     picked: tuple[str, ...] | None = None,
+    labels: dict[str, str] | None = None,
 ) -> CardPayload:
     """The welcome card for one person. ``picked`` overrides the interest roles
-    read from the log (the cog passes the member's live roles when it has them)."""
+    read from the log (the cog passes the member's live roles when it has them);
+    ``labels`` is the full invite-label map (default: the configured ones)."""
     name = discord.utils.escape_markdown(status.display_name or "unknown")
     lines = [f"<@{status.discord_id}> · **{name}**"]
     created = account_created_unix(status.discord_id)
@@ -147,7 +149,12 @@ def render_card(
         description="\n".join(lines),
         color=brand.GUILD_EMBER,
     )
-    embed.add_field(name="Came via", value=invite_label(status.came_via, config.invite_labels))
+    embed.add_field(
+        name="Came via",
+        value=invite_label(
+            status.came_via, config.invite_labels if labels is None else labels
+        ),
+    )
     chosen = status.picked if picked is None else picked
     embed.add_field(name="Picked", value=", ".join(chosen) if chosen else "nothing yet")
     embed.add_field(name="Roster match", value=match_line(match))

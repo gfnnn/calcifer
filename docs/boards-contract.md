@@ -344,7 +344,7 @@ The canonical layout every board, page and feed rule anchors to.
 
 | Channel | Surface |
 | --- | --- |
-| `#rules-and-info` | sticky page: Rules & Info |
+| `#rules-and-info` | sticky page: Rules & Info · where every per-storefront invite (`/invites create`) lands a new member |
 | `#guides-and-resources` | sticky page: Guides & Resources |
 | `#news` | board: News Highlights |
 | `#recruitment` | board: We're Looking (officer-configured) |

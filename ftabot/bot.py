@@ -78,6 +78,10 @@ class FtaBot(commands.Bot):
         await self.add_cog(PostingCog(self))
         await self.add_cog(ScoresCog(self))
         await self.add_cog(AlertsCog(self))
+        if self.config.storefront_invites_enabled:
+            from .cogs.invites import InvitesCog
+
+            await self.add_cog(InvitesCog(self))
 
         # Sync slash commands. Scoping to a guild makes them appear instantly.
         if self.config.discord_guild_id:

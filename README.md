@@ -81,6 +81,8 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `JOURNEY_RANK_ROLES` | optional | Roles that mean "placed" (default `Ashes,Visitor`). The ones also on the allow-list get a `Set <role>` button. |
 | `JOURNEY_INTEREST_ROLES` | optional | Interest roles members pick for themselves, shown as "Picked" on cards (default empty; they join the allow-list). |
 | `JOURNEY_INVITE_LABELS` | optional | Friendly names for invite codes, `code=Label,code=Label` (e.g. `Qske4gDnYC=Storefronts`). |
+| `STOREFRONT_INVITES_ENABLED` / `INVITE_CHANNEL_ID` | optional | **Per-storefront invites**: adds `/invites create` and `/invites list`. New invites land people in `INVITE_CHANNEL_ID` (`#rules-and-info`). Needs the *Create Invite* permission. Default off. |
+| `INVITE_STOREFRONTS` | optional | The storefronts that each get an invite (default `Raider.IO,Warcraft Logs,WoWProgress,Guilds of WoW,Linktree,In game`). |
 | `GAME_LINKED_CHANNEL_IDS` | optional | Channels bridged to in-game chat. The posting guardrail refuses to send **anything** to them, in every mode. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
@@ -125,6 +127,7 @@ switch to the richer WoW Audit data set.
 | `/posting status\|mode\|test-channel\|feed-channel\|front-door` | **Posting guardrail** (*GM or Discord admin only*): switch `off`/`test`/`live` and set the test and default feed channels live, overriding the env defaults. `front-door` promotes the journey's staff surfaces (welcome cards) from the test channel to `#front-door`, or sandboxes them again. |
 | `/board create\|list\|refresh\|promote\|demote\|disable\|enable\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
 | `/page post\|list\|refresh\|remove\|export\|import\|reset` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy lives in `ftabot/content/page_*.json`; `export`/`import`/`reset` handle a copy fix without a deploy. |
+| `/invites create\|list` | **Per-storefront invites** (needs `STOREFRONT_INVITES_ENABLED`): `create` makes one permanent invite (no expiry, no use limit) for every storefront that does not have one yet; `list` shows each invite's label, code and use count. Invites are never deleted. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
 
 **Welcome team** (the `JOURNEY_STAFF_ROLES` roles or the GM; needs `JOURNEY_ENABLED`):
@@ -346,6 +349,20 @@ and the **last 30 days** it shows:
 and, once, **Still here after 30 days**, for the people who joined 30 to 37
 days ago. It reports numbers, not people, and needs `JOURNEY_ENABLED`.
 
+### Per-storefront invites (`STOREFRONT_INVITES_ENABLED=1`)
+
+To know *where* people come from, each place the guild is listed gets its own
+invite. `/invites create` (officers) makes one permanent invite per storefront
+in `INVITE_STOREFRONTS`, pointing at `INVITE_CHANNEL_ID`, and stores the code
+with its label. It only fills gaps, so it is safe to run again after adding a
+storefront. `/invites list` shows every invite's label, code and use count.
+
+From then on welcome cards and the Front door board say "Raider.IO" or "In
+game" instead of a code. The two older invites are kept and named: `dxPgsGGDrb`
+is **Old shared link** and `Qske4gDnYC` is **Storefronts (shared)**. Nothing
+here ever deletes an invite: a link that has been handed out keeps working and
+stays traceable. `JOURNEY_INVITE_LABELS` can still rename any code.
+
 ### The unplaced sweep (`/journey unplaced`)
 
 For clearing a backlog: every member holding none of `JOURNEY_RANK_ROLES`,
@@ -387,6 +404,8 @@ Every other path returns 404.
 | Sticky page placement | `/page post`, `/page remove` |
 | Sticky page copy | a change request to `ftabot/content/page_*.json` (or `/page export` then `/page import` for a fix that can't wait for a deploy) |
 | Recruitment slots, rules, pitch, leads | `/recruit ...` |
+| Placing new members, the unplaced backlog | the welcome card buttons, `/journey unplaced` |
+| Storefront invite links | `/invites create`, `/invites list` |
 | Member links, mains/alts, notes, teams | `/link`, `/setmain`, `/note`, `/setteam`, `/setofficer` |
 | An on-demand roster refresh | `/sync` |
 | Board layouts, wording, thresholds, schedules, new feeds | a change request (code + env vars) |

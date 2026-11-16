@@ -225,7 +225,8 @@ class JourneyCog(commands.Cog):
             return None
         names = _names(member) if member is not None else [status.display_name]
         match = await journey.roster_match_for(self.db, names)
-        return render_card(status, self.config, match, self._picked(member))
+        labels = await journey.invite_labels(self.db, self.config)
+        return render_card(status, self.config, match, self._picked(member), labels)
 
     async def post_card(self, member) -> bool:
         """Post the welcome card for a member who just arrived, wherever the

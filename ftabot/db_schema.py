@@ -511,6 +511,18 @@ CREATE TABLE IF NOT EXISTS journey_cards (
     posted_at  TEXT
 );
 
+-- Per-storefront invites made by `/invites create`: which code belongs to
+-- which place the guild is listed, so welcome cards and the Front door board
+-- can say "Raider.IO" instead of a code. Rows are never deleted: an invite
+-- that has been handed out stays traceable.
+CREATE TABLE IF NOT EXISTS invites (
+    code       TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    channel_id TEXT,
+    created_by TEXT,
+    created_at TEXT
+);
+
 -- Runtime settings: a small key/value overlay that lets /posting change a
 -- handful of operational values (the posting guardrail and its channels) live,
 -- without a redeploy. A row here beats the env-built Config; deleting it reverts
