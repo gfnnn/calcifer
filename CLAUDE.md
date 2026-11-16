@@ -209,6 +209,11 @@ Key flow and layering:
   `journey.nudge_due` each minute whether the UK wall clock has reached
   `JOURNEY_NUDGE_TIME` (Europe/London, the agreed exception to "server time is
   Europe/Paris"; the last nudge date is stored so a restart never repeats it).
+  For reporting, `journey.stays` cuts the log into visits and
+  `journey.front_door` turns them into the Front Door board's numbers;
+  `reconcile_scout_leads` (run after a `/link` and in the daily journey loop)
+  moves a `scout_leads` row to `joined` and logs `lead_joined` when its
+  character is linked to someone who joined through the journey.
   The destination is `runtime_settings.effective_front_door_channel`:
   the front door is a surface behind the `PostGate`, promoted with
   `/posting front-door`.
@@ -290,8 +295,10 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   (News Highlights), `events` (Weekly Events from Raid-Helper), `pulse` (Roster
   Pulse), `recruitment` (We're Looking; officer-configured via `/recruit`, state
   in `recruitment_config`), `raidprog` (Raid Progress, from `guild_raids`),
-  `armoury` (The Armoury: top item levels among recently seen characters) and
-  `climb` (The Climb: levelling, needs Blizzard-sourced `level`). Boards that
+  `armoury` (The Armoury: top item levels among recently seen characters),
+  `climb` (The Climb: levelling, needs Blizzard-sourced `level`) and
+  `frontdoor` (Front Door: the welcome team's staff board, laid out from the
+  pure `journey.front_door` view-model over the journey log). Boards that
   show weekly movement share `_weekly.weekly_baseline` (seed, compare, roll at
   the EU reset) over the `board_baselines` table. The `/board` cog and the `_board_loop`/`_score_loop`
   in `serve.py` drive them. (Rules & Info and Guides & Resources are **not**

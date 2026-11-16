@@ -205,6 +205,9 @@ interval and edit themselves in place (never re-post). The shipped boards:
   reached the cap since the reset. Levels come from the Blizzard API, so this
   board needs `BLIZZARD_CLIENT_ID` / `BLIZZARD_CLIENT_SECRET`; the others are
   keyless.
+- **Front Door**: a staff board for the welcome team: joins by source, how
+  quickly newcomers are greeted and placed, who stayed and who left, over the
+  last 7 and 30 days (see [The onboarding journey](#the-onboarding-journey)).
 - **Recruitment ("We're Looking")**: the guild's open front door, with open slots
   per role (count, ilvl floor, note), the trial rules, and a live-token pitch.
   Officers configure it from Discord with the `/recruit` commands; the cultural
@@ -324,6 +327,25 @@ days someone stops being a daily reminder (they are backlog, which is what
 `/journey unplaced` is for). A restart never double-posts: the date of the
 last nudge is stored.
 
+### The Front door board
+
+A living board for `#front-door` (create it with `/board create`, type *Front
+Door*; it edits itself in place like every board). Over the **last 7 days**
+and the **last 30 days** it shows:
+
+- **Joined**, split by source (the invite labels);
+- **Greeted within a day** and **Placed within two days**, as a percentage of
+  the newcomers who have been here long enough for that deadline to pass (so
+  the figure never dips just because someone arrived an hour ago);
+- **Left**;
+- **Picked**: what interest roles newcomers chose (once
+  `JOURNEY_INTEREST_ROLES` is set);
+- **Scout leads who joined**: a `/recruit lead` whose character an officer has
+  `/link`ed to a newcomer is moved to `joined` automatically, and named here;
+
+and, once, **Still here after 30 days**, for the people who joined 30 to 37
+days ago. It reports numbers, not people, and needs `JOURNEY_ENABLED`.
+
 ### The unplaced sweep (`/journey unplaced`)
 
 For clearing a backlog: every member holding none of `JOURNEY_RANK_ROLES`,
@@ -433,7 +455,7 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/raids.py` | Pure raid-tier knowledge: which raids are open, their names, the guild's progress rows. |
 | `ftabot/milestones.py` | Pure milestone detection (boss kills, M+ thresholds, level caps) + the stored marks. |
 | `ftabot/journey.py` | The onboarding journey: People + the append-only events log, invite attribution, roster matching, retention. |
-| `ftabot/boards/` | Living-board renderers (Hot 20, Raid Progress, The Armoury, The Climb, Roster Pulse, News, Events, Recruitment). |
+| `ftabot/boards/` | Living-board renderers (Hot 20, Raid Progress, The Armoury, The Climb, Roster Pulse, News, Events, Recruitment, Front Door). |
 | `ftabot/feeds/` | Feed sources (news, M+, affixes, realm progress, milestones, ...) and the poll runner. |
 | `ftabot/views.py` | View-models behind the GM / Raid / Loot report commands. |
 | `ftabot/wow_data.py` | Editable raid-buff table for comp coverage. |

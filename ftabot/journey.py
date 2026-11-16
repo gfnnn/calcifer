@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -50,10 +50,11 @@ GREETED = "greeted"
 PLACED = "placed"
 CHECKED_IN = "checked_in"
 CHARACTER_LINKED = "character_linked"
+LEAD_JOINED = "lead_joined"  # a scouted recruitment lead turned up as a member
 
 EVENT_TYPES: tuple[str, ...] = (
     JOINED, LEFT, REJOINED, CAME_VIA, ROLES_CHANGED,
-    GREETED, PLACED, CHECKED_IN, CHARACTER_LINKED,
+    GREETED, PLACED, CHECKED_IN, CHARACTER_LINKED, LEAD_JOINED,
 )
 
 # ``people.came_via`` holds an invite code or one of these.
@@ -279,6 +280,8 @@ async def link_character(
     await db.add_journey_event(
         discord_id, CHARACTER_LINKED, actor_id=actor_id, data={"character": key}
     )
+    # A link is the moment a scouted lead can be recognised as having joined.
+    await reconcile_scout_leads(db)
     return True
 
 
@@ -690,3 +693,214 @@ async def nudge_for(db: "Database", config, now: datetime | None = None) -> Nudg
     return nudge_lists(
         await all_statuses(db, config), now or datetime.now(timezone.utc)
     )
+
+
+# -- the Front door board's view-model ---------------------------------------------
+
+RETENTION_AFTER = timedelta(days=30)
+RETENTION_COHORT = timedelta(days=7)
+
+
+@dataclass
+class Stay:
+    """One visit by one person: from a join to a leave (or to now)."""
+
+    discord_id: str
+    joined_at: str
+    came_via: str = VIA_UNKNOWN
+    greeted_at: str | None = None
+    placed_at: str | None = None
+    left_at: str | None = None
+    picked: list[str] = field(default_factory=list)
+
+
+def _when(text: str) -> datetime:
+    return datetime.fromisoformat(text)
+
+
+def stays(
+    events: Iterable[Mapping],
+    *,
+    rank_roles: Sequence[str] = (),
+    interest_roles: Sequence[str] = (),
+) -> list[Stay]:
+    """Cut the log into stays (a rejoin is a new stay). Pure.
+
+    Only joins the journey saw count: someone who was here before it began
+    (``baseline``) has no join event and so no stay.
+    """
+    out: list[Stay] = []
+    current: dict[str, Stay] = {}
+    for event in events:
+        who, kind, data = event["discord_id"], event["type"], event.get("data") or {}
+        if kind in (JOINED, REJOINED):
+            current[who] = Stay(discord_id=who, joined_at=event["at"])
+            out.append(current[who])
+            continue
+        stay = current.get(who)
+        if stay is None:
+            continue
+        if kind == CAME_VIA:
+            stay.came_via = data.get("code") or VIA_UNKNOWN
+        elif kind == GREETED and stay.greeted_at is None:
+            stay.greeted_at = event["at"]
+        elif kind == PLACED and stay.placed_at is None:
+            stay.placed_at = event["at"]
+        elif kind == ROLES_CHANGED:
+            added = data.get("added") or []
+            if stay.placed_at is None and any(_in(r, rank_roles) for r in added):
+                stay.placed_at = event["at"]
+            for role in added:
+                if _in(role, interest_roles) and role not in stay.picked:
+                    stay.picked.append(role)
+        elif kind == LEFT:
+            stay.left_at = event["at"]
+            current.pop(who, None)
+    return out
+
+
+@dataclass(frozen=True)
+class Rate:
+    """``done`` out of ``of`` (a cohort); no percentage when nobody is due."""
+
+    done: int = 0
+    of: int = 0
+
+    @property
+    def percent(self) -> int | None:
+        return round(100 * self.done / self.of) if self.of else None
+
+
+@dataclass(frozen=True)
+class Window:
+    """The front door over one look-back window."""
+
+    days: int
+    joins: int = 0
+    by_source: tuple[tuple[str, int], ...] = ()
+    greeted: Rate = Rate()
+    placed: Rate = Rate()
+    leavers: int = 0
+    picked: tuple[tuple[str, int], ...] = ()
+    leads: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FrontDoor:
+    windows: tuple[Window, ...]
+    still_here: Rate
+
+
+def _tally(items: Iterable[str]) -> tuple[tuple[str, int], ...]:
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item] = counts.get(item, 0) + 1
+    return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].casefold())))
+
+
+def _within(start: str, end: str | None, limit: timedelta) -> bool:
+    return end is not None and _when(end) - _when(start) <= limit
+
+
+def front_door(
+    events: Sequence[Mapping],
+    now: datetime,
+    *,
+    labels: Mapping[str, str],
+    rank_roles: Sequence[str] = (),
+    interest_roles: Sequence[str] = (),
+    windows: Sequence[int] = (7, 30),
+) -> FrontDoor:
+    """How the front door is doing, from the log alone. Pure.
+
+    The two response rates only count people who have been here long enough
+    for the deadline to have passed (a member who joined an hour ago is not a
+    missed greeting yet), so the percentage never dips just because someone
+    arrived. "Still here" follows the cohort that joined 30 to 37 days ago.
+    """
+    all_stays = stays(events, rank_roles=rank_roles, interest_roles=interest_roles)
+    out = []
+    for days in windows:
+        since = now - timedelta(days=days)
+        recent = [s for s in all_stays if _when(s.joined_at) >= since]
+        greet_due = [s for s in recent if now - _when(s.joined_at) >= GREET_AFTER]
+        place_due = [s for s in recent if now - _when(s.joined_at) >= PLACE_AFTER]
+        out.append(Window(
+            days=days,
+            joins=len(recent),
+            by_source=_tally(invite_label(s.came_via, labels) for s in recent),
+            greeted=Rate(
+                sum(_within(s.joined_at, s.greeted_at, GREET_AFTER) for s in greet_due),
+                len(greet_due),
+            ),
+            placed=Rate(
+                sum(_within(s.joined_at, s.placed_at, PLACE_AFTER) for s in place_due),
+                len(place_due),
+            ),
+            leavers=sum(
+                1 for e in events if e["type"] == LEFT and _when(e["at"]) >= since
+            ),
+            picked=_tally(role for s in recent for role in s.picked),
+            leads=tuple(
+                (e.get("data") or {}).get("name") or "a scout lead"
+                for e in events
+                if e["type"] == LEAD_JOINED and _when(e["at"]) >= since
+            ),
+        ))
+    cohort = [
+        s for s in all_stays
+        if RETENTION_AFTER <= now - _when(s.joined_at) < RETENTION_AFTER + RETENTION_COHORT
+    ]
+    stayed = sum(
+        1 for s in cohort
+        if s.left_at is None or _when(s.left_at) - _when(s.joined_at) >= RETENTION_AFTER
+    )
+    return FrontDoor(windows=tuple(out), still_here=Rate(stayed, len(cohort)))
+
+
+# -- scout leads who joined ---------------------------------------------------------
+
+_OPEN_LEAD_STATES = ("new", "contacted", "trialing")
+
+
+async def reconcile_scout_leads(db: "Database") -> int:
+    """Close the loop on recruitment: a scouted lead whose character is now
+    linked to someone who joined through the journey is moved to ``joined`` and
+    a ``lead_joined`` event is logged on that person. Returns how many moved.
+
+    Characters come from the officer links (``members.discord_id`` and
+    ``people.linked_main``); people who were here before the journey are not
+    "new" and are skipped. Idempotent: a lead already ``joined`` (or one an
+    officer marked ``passed``) is left alone.
+    """
+    leads = {
+        (fold(lead["name"]), lead["realm"].lower()): lead
+        for lead in await db.leads(limit=1000)
+        if lead["state"] in _OPEN_LEAD_STATES
+    }
+    if not leads:
+        return 0
+    newcomers = {
+        p["discord_id"]: p for p in await db.people()
+        if p["came_via"] != VIA_BASELINE
+    }
+    owned: dict[tuple[str, str], str] = {}
+    for member in await db.all_members():
+        if member.discord_id in newcomers:
+            owned[(fold(member.character_name), member.realm_slug.lower())] = member.discord_id
+    for discord_id, person in newcomers.items():
+        if person["linked_main"]:
+            name, realm, _region = person["linked_main"].split("|")
+            owned.setdefault((fold(name), realm), discord_id)
+    moved = 0
+    for key, lead in leads.items():
+        discord_id = owned.get(key)
+        if discord_id is None:
+            continue
+        await db.set_lead_state(lead["id"], "joined")
+        await db.add_journey_event(
+            discord_id, LEAD_JOINED,
+            data={"lead_id": lead["id"], "name": lead["name"], "realm": lead["realm"]},
+        )
+        moved += 1
+    return moved

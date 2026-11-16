@@ -524,8 +524,14 @@ async def test_journey_retention_loop_prunes_then_survives_an_error(
 
     monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
     monkeypatch.setattr(journey, "prune", _prune)
+
+    async def _leads(db):
+        return 1
+
+    monkeypatch.setattr(journey, "reconcile_scout_leads", _leads)
     with caplog.at_level("INFO", logger="ftabot.serve"), pytest.raises(asyncio.CancelledError):
         await serve._journey_retention_loop(_cfg(tmp_path, journey_retention_days=90))
     assert calls == [90, 90, 90]
     assert "forgot 2 departed member(s)" in caplog.text
+    assert "1 scout lead(s) marked as joined" in caplog.text
     assert "journey retention error" in caplog.text

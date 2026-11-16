@@ -111,6 +111,7 @@ per-board meaning.
 | The Armoury (`armoury`) | `boards/armoury.py` | `GUILD_EMBER` | tick; weekly baseline | no recently seen geared characters |
 | The Climb (`the_climb`) | `boards/climb.py` | `GUILD_EMBER` | tick; weekly baseline | n/a (renders an "everyone is capped" line) |
 | We're Looking (`recruitment`) | `boards/recruitment.py` | `GUILD_EMBER` | tick + `/recruit` | renders the warm "full for now" copy |
+| Front Door (`front_door`) | `boards/frontdoor.py` | `GUILD_EMBER` | tick (numbers from the journey log) | journey off, or never run |
 
 ### Calcifer's Hot 20
 
@@ -186,6 +187,25 @@ per-board meaning.
 - **Fresh caps:** `🎉 Fresh at {MAX} this week: **a**, **b** and {n} more.`
 - **Footer:** `{signoff} Levels gained since reset.`
 - Needs Blizzard-sourced `level`.
+
+### Front Door
+
+A staff board (private `#front-door`), so the content is plain numbers.
+
+- **Title:** `🚪 Front door`
+- **Per window** (`**Last 7 days**`, `**Last 30 days**`):
+  `` Joined: `{n}` ({source} `{n}` · ...) `` (sources are the invite labels,
+  busiest first), `` Greeted within a day: `{pct}%` ({done} of {due}) ``,
+  `` Placed within two days: `{pct}%` ({done} of {due}) ``, `` Left: `{n}` ``,
+  `` Picked: {role} `{n}` · ... `` (only once interest roles are configured),
+  `Scout leads who joined: **{name}**, ...` (only when there are any).
+- **Closing line:** `` **Still here after 30 days**: `{pct}%` ({stayed} of {cohort}) of those who joined 30 to 37 days ago ``.
+- A rate with nobody due reads `nobody due yet` instead of a percentage.
+- **Footer:** `{signoff} How the welcome is going.` + timestamp.
+- View-model: `journey.front_door(events, now, ...)`, pure, built on
+  `journey.stays` (the log cut into visits; a rejoin is a new visit).
+- No mentions and no member names except scouted leads' character names.
+- Fingerprint: the rendered lines.
 
 ### We're Looking (recruitment)
 
@@ -292,7 +312,7 @@ A staff surface, so it is plain: no sign-off bank, no flavour.
 `mplus 🔑` · `kill 💀` · `progress 🔥` · `events 📅` · `news 📰` ·
 `bluepost 🔵` · `vault 🎁` · `recruit 🔎` · `tank 🛡️` · `healer 💚` · `dps ⚔️` ·
 `flame 🔥` · `up ▲` · `down ▼`. Board titles: 🔥 Hot 20, 📅 Events, 📰 News,
-🔥 Pulse, 🏰 Raid Progress, 🛡️ Armoury, 🌱 Climb, 🔎 Recruitment.
+🔥 Pulse, 🏰 Raid Progress, 🛡️ Armoury, 🌱 Climb, 🔎 Recruitment, 🚪 Front Door.
 
 ### Voice hooks
 
@@ -311,6 +331,7 @@ text = brand.sanitize(f"{signoff} The guild's fiercest keys.")
 | Pulse | `board_signoff` | none today (`success` / `alert_warning` / `alert_critical` reserved) |
 | Raid Progress / Armoury / Climb | `board_signoff` | none |
 | Recruitment | `board_signoff` | `recruiting` / `empty_recruiting` |
+| Front Door | `board_signoff` | none (staff surface) |
 | Sticky pages | none (GM copy verbatim) | none |
 
 ---
@@ -351,7 +372,7 @@ our progression.
 
 | Channel | Surfaces |
 | --- | --- |
-| `#front-door` | welcome cards (one per join, with staff buttons) · the daily nudge (one post a day at 18:00 UK time, none on a quiet day). The Front door board joins them here when it ships. |
+| `#front-door` | board: Front Door · welcome cards (one per join, with staff buttons) · the daily nudge (one post a day at 18:00 UK time, none on a quiet day) |
 
 Calcifer needs View Channel, Send Messages, Embed Links and Read Message
 History here, as in every channel he posts to.
@@ -376,6 +397,7 @@ History here, as in every channel he posts to.
 | Weekly Events | Community | `#events` |
 | Roster Pulse | Community | `#guild-pulse` |
 | Raid Progress, The Armoury, The Climb | Community | `#guild-pulse` (or a channel of their own) |
+| Front Door (board) | Front door | `#front-door` (promote with `/board promote`) |
 | Welcome cards, daily nudge | Front door | `#front-door` (promote with `/posting front-door`) |
 | Drafts | Officer | `#board-drafts` (test mode) |
 
