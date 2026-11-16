@@ -225,14 +225,18 @@ async def _digest_loop(config: Config, bot) -> None:
 
 
 async def _journey_retention_loop(config: Config) -> None:
-    """Once a day, forget people who left longer ago than the retention window."""
-    from .journey import prune
+    """The journey's daily housekeeping: forget people who left longer ago than
+    the retention window, and mark scouted leads who have since joined."""
+    from .journey import prune, reconcile_scout_leads
 
     await asyncio.sleep(60)  # stay out of the way of startup
     while True:
         try:
             async with Database(config.database_path) as db:
                 forgotten = await prune(db, config.journey_retention_days)
+                joined = await reconcile_scout_leads(db)
+            if joined:
+                log.info("journey: %d scout lead(s) marked as joined", joined)
             if forgotten:
                 log.info("journey retention: forgot %d departed member(s)", forgotten)
         except Exception as exc:  # noqa: BLE001 - keep the loop alive

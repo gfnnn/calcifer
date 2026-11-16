@@ -67,6 +67,7 @@ BOARD_NAMES: dict[str, str] = {
     "raid_progress": "Raid Progress",
     "armoury": "The Armoury",
     "the_climb": "The Climb",
+    "front_door": "Front Door",
 }
 
 
