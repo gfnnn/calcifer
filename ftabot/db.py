@@ -2174,13 +2174,17 @@ class Database:
         await self.conn.commit()
         return cur.rowcount
 
-    async def journey_baseline_at(self) -> str | None:
-        """When the one-off baseline backfill ran, or ``None`` if it has not."""
+    async def get_setting(self, key: str) -> Any:
+        """One saved setting / bookkeeping value, or ``None``."""
         cur = await self.conn.execute(
-            "SELECT value_json FROM settings WHERE key = 'journey_baseline_at'"
+            "SELECT value_json FROM settings WHERE key = ?", (key,)
         )
         row = await cur.fetchone()
         return json.loads(row["value_json"]) if row else None
+
+    async def journey_baseline_at(self) -> str | None:
+        """When the one-off baseline backfill ran, or ``None`` if it has not."""
+        return await self.get_setting("journey_baseline_at")
 
     async def set_journey_baseline_at(self, at: str) -> None:
         await self.set_setting("journey_baseline_at", at)

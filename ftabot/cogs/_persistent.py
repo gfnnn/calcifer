@@ -135,6 +135,31 @@ def view(buttons: list[ActionButton]) -> discord.ui.View:
     return out
 
 
+def rebuilt_view(message, *, disable: str | None = None) -> discord.ui.View:
+    """The view already on ``message``, rebuilt from its components, with the
+    button whose ``custom_id`` is ``disable`` greyed out.
+
+    This is how a click marks one button done on a message we keep no state
+    for: read what Discord shows, change one thing, write it back.
+    """
+    template = ActionButton.__discord_ui_compiled_template__
+    buttons: list[ActionButton] = []
+    for row_index, row in enumerate(getattr(message, "components", None) or []):
+        for child in getattr(row, "children", None) or []:
+            match = template.fullmatch(getattr(child, "custom_id", None) or "")
+            if match is None:
+                continue
+            raw = match["args"]
+            buttons.append(ActionButton(
+                match["ns"], match["action"], raw.split(":") if raw else [],
+                label=child.label or "\u200b",
+                style=child.style,
+                disabled=bool(child.disabled) or child.custom_id == disable,
+                row=row_index,
+            ))
+    return view(buttons)
+
+
 def register(bot) -> None:
     """Make every Calcifer button live again after a restart. Call once, in
     ``setup_hook``."""

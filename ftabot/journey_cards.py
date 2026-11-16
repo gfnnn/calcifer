@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 GREET = "greet"
 PLACE = "place"
 LIST_PLACE = "lplace"
+CHECK_IN = "checkin"
 
 # Discord allows 5 rows of 5 buttons on one message.
 _ROWS, _PER_ROW = 5, 5
@@ -225,4 +226,65 @@ def render_unplaced(
     embed.set_footer(text=brand.sanitize(
         f"Page {page} of {pages} · {total} without a rank, longest wait first.{more}"
     ))
+    return CardPayload(embed=embed, buttons=buttons)
+
+
+# -- the daily nudge -------------------------------------------------------------
+
+NUDGE_CAP = 10
+_NAME_MAX = 24
+
+
+def _nudge_line(status: Status, number: int | None = None) -> str:
+    name = status.display_name or "unknown"
+    if len(name) > _NAME_MAX:
+        name = name[: _NAME_MAX - 1] + "…"
+    lead = f"`{number:>2}` " if number is not None else "• "
+    return (
+        f"{lead}<@{status.discord_id}> · **{discord.utils.escape_markdown(name)}**"
+        f" · joined {stamp(status.joined_at)}"
+    )
+
+
+def _nudge_section(
+    heading: str, people: tuple[Status, ...], *, numbered: bool = False
+) -> list[str]:
+    if not people:
+        return []
+    shown = people[:NUDGE_CAP]
+    lines = [f"**{heading}** ({len(people)})"]
+    lines += [
+        _nudge_line(s, i + 1 if numbered else None) for i, s in enumerate(shown)
+    ]
+    if len(people) > NUDGE_CAP:
+        lines.append(f"*and {len(people) - NUDGE_CAP} more*")
+    return [*lines, ""]
+
+
+def render_nudge(lists) -> CardPayload | None:
+    """The day's nudge, or ``None`` on a quiet day (nothing is posted).
+
+    Three short lists, each capped at :data:`NUDGE_CAP` with an "and N more"
+    tail. The check-in list is numbered and each number has a "Checked in"
+    button; greeting and placing are done on the cards or ``/journey unplaced``.
+    """
+    if lists.quiet:
+        return None
+    lines = [
+        *_nudge_section("Not greeted after a day", lists.not_greeted),
+        *_nudge_section("Not placed after two days", lists.not_placed),
+        *_nudge_section("Day-7 check-in due", lists.check_in, numbered=True),
+    ]
+    embed = discord.Embed(
+        title="🔔 Front door: today's nudge",
+        description="\n".join(lines).rstrip(),
+        color=brand.GUILD_EMBER,
+    )
+    embed.set_footer(text=brand.sanitize(
+        "Greet and place from the welcome cards or /journey unplaced."
+    ))
+    buttons = [
+        ButtonSpec(CHECK_IN, s.discord_id, f"Checked in · {i + 1}")
+        for i, s in enumerate(lists.check_in[:NUDGE_CAP])
+    ]
     return CardPayload(embed=embed, buttons=buttons)

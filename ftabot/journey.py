@@ -27,8 +27,9 @@ import logging
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from .models import now_iso
 
@@ -530,6 +531,19 @@ async def record_greeted(
     return status
 
 
+async def record_checked_in(
+    db: "Database", config, discord_id: str, actor_id: str
+) -> Status | None:
+    """Log the day-7 check-in, once per stay."""
+    status = await status_for(db, config, discord_id)
+    if status is None:
+        return None
+    if status.checked_in_at is None:
+        await db.add_journey_event(discord_id, CHECKED_IN, actor_id=actor_id)
+        status = await status_for(db, config, discord_id)
+    return status
+
+
 async def record_placed(
     db: "Database", config, discord_id: str, role: str, actor_id: str
 ) -> Status | None:
@@ -577,3 +591,102 @@ def unplaced(members: Iterable, rank_roles: Sequence[str]) -> list:
     ]
     far_future = datetime.max.replace(tzinfo=timezone.utc)
     return sorted(waiting, key=lambda m: (m.joined_at or far_future, m.id))
+
+
+# -- the daily nudge --------------------------------------------------------------
+
+# Hard-coded on purpose (thresholds and schedules are change requests): the
+# nudge runs on UK time because that is when the Flamekeepers are about.
+NUDGE_TZ = ZoneInfo("Europe/London")
+NUDGE_DEFAULT_TIME = time(18, 0)
+NUDGE_LAST_SETTING = "journey_nudge_last"
+GREET_AFTER = timedelta(hours=24)
+PLACE_AFTER = timedelta(hours=48)
+CHECK_IN_AFTER = timedelta(days=7)
+# Past this, somebody is no longer a daily reminder: they are backlog, and
+# `/journey unplaced` is the tool for backlog.
+NUDGE_HORIZON = timedelta(days=14)
+
+
+def parse_nudge_time(text: str | None) -> time:
+    """``HH:MM`` as a time of day; anything unreadable is the 18:00 default."""
+    try:
+        hours, minutes = (text or "").strip().split(":")
+        return time(int(hours), int(minutes))
+    except ValueError:
+        return NUDGE_DEFAULT_TIME
+
+
+def nudge_due(now: datetime, at: time, last: str | None) -> date | None:
+    """The UK date whose nudge should go out now, or ``None``.
+
+    Due once the UK wall clock has reached ``at`` today and today's has not
+    gone yet (``last`` is the ISO date of the previous one). Working on the
+    wall clock is what makes it DST-safe: 18:00 is 18:00 in January and July.
+    """
+    local = now.astimezone(NUDGE_TZ)
+    if local.time() < at or last == local.date().isoformat():
+        return None
+    return local.date()
+
+
+@dataclass(frozen=True)
+class NudgeLists:
+    """Who needs a nudge today, each list longest-waiting first."""
+
+    not_greeted: tuple[Status, ...] = ()
+    not_placed: tuple[Status, ...] = ()
+    check_in: tuple[Status, ...] = ()
+
+    @property
+    def quiet(self) -> bool:
+        return not (self.not_greeted or self.not_placed or self.check_in)
+
+
+def nudge_lists(statuses: Iterable[Status], now: datetime) -> NudgeLists:
+    """Sort people into the three nudge lists. Pure.
+
+    Everything is read from the log, so a person leaves a list the moment the
+    thing is done and stays on it, day after day, only while it is still
+    outstanding. People who were here before the journey (``baseline``) and
+    people who have left are never nudged about.
+    """
+    greet, place, check = [], [], []
+    for status in statuses:
+        if not status.present or status.came_via == VIA_BASELINE or not status.joined_at:
+            continue
+        age = now - datetime.fromisoformat(status.joined_at)
+        if age >= NUDGE_HORIZON:
+            continue
+        if not status.greeted and age >= GREET_AFTER:
+            greet.append(status)
+        if not status.placed and age >= PLACE_AFTER:
+            place.append(status)
+        if status.checked_in_at is None and age >= CHECK_IN_AFTER:
+            check.append(status)
+
+    def oldest(items: list[Status]) -> tuple[Status, ...]:
+        return tuple(sorted(items, key=lambda s: (s.joined_at, s.discord_id)))
+
+    return NudgeLists(oldest(greet), oldest(place), oldest(check))
+
+
+async def all_statuses(db: "Database", config) -> list[Status]:
+    """The :class:`Status` of everyone currently in the server (two queries)."""
+    by_person: dict[str, list] = {}
+    for event in await db.journey_events():
+        by_person.setdefault(event["discord_id"], []).append(event)
+    return [
+        status_from(
+            person, by_person.get(person["discord_id"], []),
+            rank_roles=config.journey_rank_roles,
+            interest_roles=config.journey_interest_roles,
+        )
+        for person in await db.people(present_only=True)
+    ]
+
+
+async def nudge_for(db: "Database", config, now: datetime | None = None) -> NudgeLists:
+    return nudge_lists(
+        await all_statuses(db, config), now or datetime.now(timezone.utc)
+    )

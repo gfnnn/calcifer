@@ -246,6 +246,23 @@ A staff surface, so it is plain: no sign-off bank, no flavour.
 - Mentions render so staff can click through; `allowed_mentions=none` on every
   send and edit, so nobody is pinged.
 
+### Daily nudge (journey; one new post a day, not a board)
+
+- **Renderer:** `journey_cards.render_nudge(lists)`, pure; returns `None` on a
+  quiet day so nothing is posted.
+- **Title:** `🔔 Front door: today's nudge`.
+- **Sections** (each omitted when empty, capped at 10 with `*and N more*`):
+  `**Not greeted after a day** (n)`, `**Not placed after two days** (n)`,
+  `**Day-7 check-in due** (n)`. Rows: `• <@id> · **{name}** · joined <t:…:R>`;
+  check-in rows are numbered `` `{n:>2}` `` to match their buttons.
+- **Buttons:** `Checked in · {n}` for the check-in list only.
+- **Footer:** `Greet and place from the welcome cards or /journey unplaced.`
+- **Schedule:** `serve._journey_nudge_loop` checks the UK wall clock each
+  minute (`journey.nudge_due`, DST-safe) and stores the last nudge date, so a
+  restart neither skips nor repeats a day.
+- This is the one journey surface that is a *new* message each day, on
+  purpose: it is a knock, not a page. Never pings.
+
 ### Unplaced list (`/journey unplaced`; a command reply)
 
 - **Renderer:** `journey_cards.render_unplaced(entries, config, page, total)`.
@@ -334,7 +351,7 @@ our progression.
 
 | Channel | Surfaces |
 | --- | --- |
-| `#front-door` | welcome cards (one per join, with staff buttons). The daily nudge and the Front door board join them here as they ship. |
+| `#front-door` | welcome cards (one per join, with staff buttons) · the daily nudge (one post a day at 18:00 UK time, none on a quiet day). The Front door board joins them here when it ships. |
 
 Calcifer needs View Channel, Send Messages, Embed Links and Read Message
 History here, as in every channel he posts to.
@@ -359,7 +376,7 @@ History here, as in every channel he posts to.
 | Weekly Events | Community | `#events` |
 | Roster Pulse | Community | `#guild-pulse` |
 | Raid Progress, The Armoury, The Climb | Community | `#guild-pulse` (or a channel of their own) |
-| Welcome cards | Front door | `#front-door` (promote with `/posting front-door`) |
+| Welcome cards, daily nudge | Front door | `#front-door` (promote with `/posting front-door`) |
 | Drafts | Officer | `#board-drafts` (test mode) |
 
 ---

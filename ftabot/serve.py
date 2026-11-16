@@ -240,6 +240,36 @@ async def _journey_retention_loop(config: Config) -> None:
         await asyncio.sleep(24 * 3600)
 
 
+async def _journey_nudge_loop(config: Config, bot) -> None:
+    """Post the front-door nudge once a day at the configured UK time.
+
+    Checks the clock every minute instead of sleeping until the hour, so a DST
+    change or a restart cannot make it early, late or double: the date of the
+    last nudge is stored, and "due" is a pure function of the UK wall clock.
+    A quiet day (or a closed posting gate) still counts as today's nudge.
+    """
+    from datetime import datetime, timezone
+
+    from .journey import NUDGE_LAST_SETTING, nudge_due, parse_nudge_time
+
+    await bot.wait_until_ready()
+    at = parse_nudge_time(config.journey_nudge_time)
+    while True:
+        try:
+            async with Database(config.database_path) as db:
+                last = await db.get_setting(NUDGE_LAST_SETTING)
+                today = nudge_due(datetime.now(timezone.utc), at, last)
+                if today is not None:
+                    await db.set_setting(NUDGE_LAST_SETTING, today.isoformat())
+            if today is not None:
+                cog = bot.get_cog("JourneyCog")
+                if cog is not None and await cog.post_nudge():
+                    log.info("journey: daily nudge posted")
+        except Exception as exc:  # noqa: BLE001 - keep the loop alive
+            log.warning("journey nudge error: %s", type(exc).__name__)
+        await asyncio.sleep(60)
+
+
 async def _periodic_sync(config: Config) -> None:
     """Refresh the roster on an interval, each run on its own connection."""
     interval = config.sync_interval_minutes * 60
@@ -360,6 +390,13 @@ async def _run(config: Config) -> None:
             log.info(
                 "journey on (retention %d days)", config.journey_retention_days
             )
+        if config.journey_nudges_enabled:
+            tasks.append(
+                asyncio.create_task(
+                    _journey_nudge_loop(config, bot), name="journey-nudge"
+                )
+            )
+            log.info("journey nudge daily at %s UK time", config.journey_nudge_time)
     else:
         log.info("DISCORD_TOKEN not set — running ingest (+ sync) only")
 

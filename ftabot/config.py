@@ -210,6 +210,10 @@ class Config:
     journey_interest_roles: tuple[str, ...] = ()
     # Friendly names for invite codes: (("Qske4gDnYC", "Storefronts"), ...).
     journey_invite_labels: tuple[tuple[str, str], ...] = ()
+    # The daily nudge: one staff post a day listing who has not been greeted,
+    # placed or checked in on. The time is HH:MM on the UK clock (Europe/London).
+    journey_nudge_enabled: bool = False
+    journey_nudge_time: str = "18:00"
     # Welcome cards: one staff card per join, posted to the front-door channel.
     welcome_cards_enabled: bool = False
     # The private staff channel (#front-door) the journey's surfaces live in.
@@ -276,6 +280,11 @@ class Config:
     def journey_cards_enabled(self) -> bool:
         """Welcome cards need the journey itself (the listeners) to be on."""
         return self.journey_enabled and self.welcome_cards_enabled
+
+    @property
+    def journey_nudges_enabled(self) -> bool:
+        """The nudge needs the journey itself (the log it reads) to be on."""
+        return self.journey_enabled and self.journey_nudge_enabled
 
     @property
     def invite_labels(self) -> dict[str, str]:
@@ -494,6 +503,8 @@ class Config:
             journey_rank_roles=_str_list("JOURNEY_RANK_ROLES") or ("Ashes", "Visitor"),
             journey_interest_roles=_str_list("JOURNEY_INTEREST_ROLES"),
             journey_invite_labels=_pairs("JOURNEY_INVITE_LABELS"),
+            journey_nudge_enabled=_bool("JOURNEY_NUDGE_ENABLED", False),
+            journey_nudge_time=_clean(os.environ.get("JOURNEY_NUDGE_TIME")) or "18:00",
             welcome_cards_enabled=_bool("WELCOME_CARDS_ENABLED", False),
             front_door_channel_id=_clean(os.environ.get("FRONT_DOOR_CHANNEL_ID")),
             game_linked_channel_ids=_str_list("GAME_LINKED_CHANNEL_IDS"),
