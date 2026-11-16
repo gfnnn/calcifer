@@ -468,6 +468,39 @@ CREATE TABLE IF NOT EXISTS milestones (
 );
 CREATE INDEX IF NOT EXISTS idx_milestones_achieved ON milestones (achieved_at);
 
+-- The onboarding journey (ftabot/journey.py): People + an append-only Events
+-- log that the welcome cards, /journey, the daily nudge and the Front door
+-- board all read from. One row per Discord account seen in the server.
+-- came_via is the invite code used, or unknown / vanity / baseline (present
+-- before the journey was switched on). linked_main is the journey's view of an
+-- officer /link (a character key, name|realm|region). Stores only what the
+-- journey needs; a person who left is forgotten after the retention window.
+CREATE TABLE IF NOT EXISTS people (
+    discord_id   TEXT PRIMARY KEY,
+    display_name TEXT,
+    joined_at    TEXT,
+    left_at      TEXT,
+    came_via     TEXT NOT NULL DEFAULT 'unknown',
+    linked_main  TEXT,
+    first_seen   TEXT,
+    updated_at   TEXT
+);
+
+-- Append-only: rows are inserted, never updated, and only deleted by the
+-- retention job (people who left long ago). type is one of
+-- journey.EVENT_TYPES; actor_id is the staff member who did it (null for
+-- things that simply happened); data_json carries the per-type detail.
+CREATE TABLE IF NOT EXISTS journey_events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_id TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    actor_id   TEXT,
+    at         TEXT NOT NULL,
+    data_json  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_journey_person ON journey_events (discord_id, type);
+CREATE INDEX IF NOT EXISTS idx_journey_type_at ON journey_events (type, at);
+
 -- Runtime settings: a small key/value overlay that lets /posting change a
 -- handful of operational values (the posting guardrail and its channels) live,
 -- without a redeploy. A row here beats the env-built Config; deleting it reverts

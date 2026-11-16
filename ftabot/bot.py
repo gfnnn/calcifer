@@ -22,13 +22,23 @@ class FtaBot(commands.Bot):
 
     def __init__(self, config: Config):
         intents = discord.Intents.default()
-        # We only use slash commands + member mentions; no message content needed.
+        # Slash commands need no privileged intent. The onboarding journey needs
+        # one: Server Members (joins, leaves, role changes), requested only when
+        # JOURNEY_ENABLED is on. Message Content is never requested.
+        intents.members = config.journey_enabled
         super().__init__(command_prefix="!fta ", intents=intents)
         self.config = config
         self.db = Database(config.database_path)
 
     async def setup_hook(self) -> None:
         await self.db.connect()
+
+        # The journey listeners are not commands, so they load before (and
+        # regardless of) the command switch below.
+        if self.config.journey_enabled:
+            from .cogs.journey import JourneyCog
+
+            await self.add_cog(JourneyCog(self))
 
         if not self.config.bot_commands_enabled:
             # Commands disabled (e.g. on production): don't load the command cogs

@@ -121,6 +121,17 @@ def check(config: Config) -> list[Finding]:
     if config.milestones_feed_enabled and not config.feeds_enabled:
         out.append(Finding("Milestones", WARN, "MILESTONES_FEED_ENABLED=1 but the feed loop is off, so nothing will post"))
 
+    # Onboarding journey ----------------------------------------------------
+    if config.journey_enabled:
+        detail = (
+            "on: the Server Members intent must also be switched on in the "
+            "Discord developer portal, or the bot will refuse to log in"
+        )
+        if config.discord_guild_id is None:
+            out.append(Finding("Journey", WARN, detail + "; set DISCORD_GUILD_ID so it knows which server to watch"))
+        else:
+            out.append(Finding("Journey", OK, detail))
+
     # Data sources ------------------------------------------------------------
     if not config.blizzard_enabled:
         out.append(Finding("Blizzard API", WARN, "not configured: no character levels, so The Climb and level-cap milestones stay empty"))

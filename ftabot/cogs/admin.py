@@ -63,6 +63,16 @@ class AdminCog(commands.Cog):
             )
             return
         await self.bot.db.set_discord_link(m.id, str(user.id) if user else None)
+        if self.cfg.journey_enabled:
+            # Keep the journey's view of the link (and its event log) in step.
+            from .. import journey
+
+            if user:
+                await journey.link_character(
+                    self.bot.db, str(user.id), m, actor_id=str(interaction.user.id)
+                )
+            else:
+                await journey.unlink_character(self.bot.db, m)
         if user:
             await interaction.response.send_message(
                 f"Linked **{m.character_name}** to {user.mention}."
