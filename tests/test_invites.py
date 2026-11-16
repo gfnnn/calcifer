@@ -59,8 +59,14 @@ class _IBot(_JBot):
         return self.cogs_by_name.get(name)
 
 
+# The invites that predate per-storefront tracking, named through the env
+# (JOURNEY_INVITE_LABELS). Placeholder codes: the real ones live in the host's .env.
+OLD_LABELS = (("oldShared01", "Old shared link"), ("storefront02", "Storefronts (shared)"))
+
+
 def _cfg(**over):
     base = dict(
+        journey_invite_labels=OLD_LABELS,
         journey_enabled=True, welcome_cards_enabled=True, discord_guild_id=GUILD_ID,
         storefront_invites_enabled=True, invite_channel_id=RULES,
         posting_mode="test", test_channel_id=LAB,
@@ -70,7 +76,7 @@ def _cfg(**over):
 
 
 def _setup(db, *, with_journey=True, forbidden_after=None, **over):
-    guild = _Guild({"dxPgsGGDrb": 40, "Qske4gDnYC": 12})
+    guild = _Guild({"oldShared01": 40, "storefront02": 12})
     channel = _InviteChannel(guild, forbidden_after=forbidden_after)
     bot = _IBot(db, _cfg(**over), guild, channel)
     journey_cog = None
@@ -121,21 +127,22 @@ async def test_cog_loads_only_with_the_flag(tmp_path, monkeypatch):
 # --- the label mapping ---------------------------------------------------------
 
 
-async def test_label_layers_legacy_then_stored_then_env(db):
-    labels = await journey.invite_labels(db, Config())
-    assert labels == {
-        "dxPgsGGDrb": "Old shared link", "Qske4gDnYC": "Storefronts (shared)",
-    }
+async def test_label_layers_stored_then_env(db):
+    # Nothing is built in: an unlabelled database knows no invites.
+    assert await journey.invite_labels(db, Config()) == {}
+    # An env label names a code that predates per-storefront tracking.
+    old = Config(journey_invite_labels=OLD_LABELS)
+    assert await journey.invite_labels(db, old) == dict(OLD_LABELS)
     await db.add_invite("abc123", "Raider.IO", channel_id=RULES, created_by="1")
     await db.add_invite("abc123", "Raider.IO")  # same code again: still one row
-    labels = await journey.invite_labels(db, Config())
+    labels = await journey.invite_labels(db, old)
     assert labels["abc123"] == "Raider.IO" and len(await db.invites()) == 1
-    # An explicit env label has the last word, for old and new codes alike.
-    override = Config(journey_invite_labels=(("Qske4gDnYC", "Storefronts"),
-                                             ("abc123", "RIO profile")))
+    assert labels["oldShared01"] == "Old shared link"
+    # An explicit env label has the last word over a stored one.
+    override = Config(journey_invite_labels=(*OLD_LABELS, ("abc123", "RIO profile")))
     labels = await journey.invite_labels(db, override)
-    assert labels["Qske4gDnYC"] == "Storefronts" and labels["abc123"] == "RIO profile"
-    assert labels["dxPgsGGDrb"] == "Old shared link"
+    assert labels["abc123"] == "RIO profile"
+    assert labels["storefront02"] == "Storefronts (shared)"
 
 
 def test_invite_rows_sort_by_label_and_carry_uses():
@@ -165,7 +172,7 @@ async def test_create_makes_one_permanent_unique_invite_per_storefront(db):
     assert stored["Raider.IO"]["created_by"] == str(it.user.id)
     assert "**Raider.IO**: `https://discord.gg/new1`" in it.followup.content
     # The old invites were not touched.
-    assert {"dxPgsGGDrb", "Qske4gDnYC"} <= set(guild._invites)
+    assert {"oldShared01", "storefront02"} <= set(guild._invites)
 
 
 async def test_create_is_idempotent_and_fills_only_gaps(db):
@@ -218,7 +225,7 @@ async def test_create_works_without_the_journey_cog(db):
 # --- /invites list ------------------------------------------------------------------
 
 
-async def test_list_shows_label_code_and_uses_including_the_old_invites(db):
+async def test_list_shows_label_code_and_uses_including_env_labelled_old_invites(db):
     cog, _, guild, _ = _setup(db)
     await InvitesCog.create.callback(cog, _officer(guild))
     guild._invites["new1"] = 5
@@ -228,8 +235,8 @@ async def test_list_shows_label_code_and_uses_including_the_old_invites(db):
     lines = it.response.content.split("\n")
     assert it.response.ephemeral and len(lines) == 8
     assert "**Raider.IO** · `new1` · 5 uses" in lines
-    assert "**Old shared link** · `dxPgsGGDrb` · 40 uses" in lines
-    assert "**Storefronts (shared)** · `Qske4gDnYC` · 12 uses" in lines
+    assert "**Old shared link** · `oldShared01` · 40 uses" in lines
+    assert "**Storefronts (shared)** · `storefront02` · 12 uses" in lines
     assert "**In game** · `new6` · no longer exists" in lines  # still listed, never dropped
     assert len(await db.invites()) == 6
 
@@ -244,7 +251,7 @@ async def test_list_without_manage_server_or_a_guild(db):
 
     nowhere = _officer(None)
     await InvitesCog.list_invites.callback(cog, nowhere)
-    assert "**Old shared link** · `dxPgsGGDrb` · uses unknown" in nowhere.response.content
+    assert "**Old shared link** · `oldShared01` · uses unknown" in nowhere.response.content
 
     denied = _Interaction()
     await InvitesCog.list_invites.callback(cog, denied)
@@ -269,19 +276,19 @@ async def test_a_join_through_a_new_invite_is_attributed_and_labelled(db):
     assert next(f.value for f in embed.fields if f.name == "Came via") == "Warcraft Logs"
 
     # The old shared link still attributes, under its new name.
-    guild._invites["Qske4gDnYC"] = 13
+    guild._invites["storefront02"] = 13
     await journey_cog.on_member_join(_M(175928847299117064, guild=guild))
     embed = journey_cog.messenger.sent[1][1]
     assert next(f.value for f in embed.fields if f.name == "Came via") == "Storefronts (shared)"
 
 
 def test_diff_picks_a_brand_new_code_among_the_old_ones():
-    before = {"dxPgsGGDrb": 40, "Qske4gDnYC": 12, "new1": 0, "new2": 0}
+    before = {"oldShared01": 40, "storefront02": 12, "new1": 0, "new2": 0}
     after = {**before, "new1": 1}
     assert journey.attribute_invite(before, after) == "new1"
     # Never seen being created (no Manage Channels, so no gateway event): still found.
     assert journey.attribute_invite(
-        {"dxPgsGGDrb": 40, "Qske4gDnYC": 12}, {**before, "new2": 1}
+        {"oldShared01": 40, "storefront02": 12}, {**before, "new2": 1}
     ) == "new2"
     # Two storefronts in the same instant cannot be told apart.
     assert journey.attribute_invite(before, {**before, "new1": 1, "new2": 1}) == "unknown"

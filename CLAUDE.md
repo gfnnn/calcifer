@@ -214,11 +214,14 @@ Key flow and layering:
   `reconcile_scout_leads` (run after a `/link` and in the daily journey loop)
   moves a `scout_leads` row to `joined` and logs `lead_joined` when its
   character is linked to someone who joined through the journey.
-  Invite codes are shown through `journey.invite_labels(db, config)`: the two
-  `LEGACY_INVITES`, then the `invites` table (`cogs/invites.py`: `/invites
-  create|list`, one permanent `unique=True` invite per storefront, behind
-  `STOREFRONT_INVITES_ENABLED`), then `JOURNEY_INVITE_LABELS`. **Never delete
-  an invite or an `invites` row**: a handed-out link must stay traceable.
+  Invite codes are shown through `journey.invite_labels(db, config)`: the
+  `invites` table (`cogs/invites.py`: `/invites create|list`, one permanent
+  `unique=True` invite per storefront, behind `STOREFRONT_INVITES_ENABLED`),
+  then `JOURNEY_INVITE_LABELS`, which wins and is also how invites older than
+  `/invites create` get a name (`oldShared01=Old shared link,storefront02=...`
+  in the host's `.env`). **No real invite code belongs in this repo**: code,
+  tests and docs use placeholders. **Never delete an invite or an `invites`
+  row**: a handed-out link must stay traceable.
   The destination is `runtime_settings.effective_front_door_channel`:
   the front door is a surface behind the `PostGate`, promoted with
   `/posting front-door`.
