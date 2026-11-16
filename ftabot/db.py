@@ -2226,3 +2226,28 @@ class Database:
         )
         await self.conn.commit()
 
+    # -- per-storefront invites -------------------------------------------------
+
+    async def add_invite(
+        self,
+        code: str,
+        label: str,
+        *,
+        channel_id: str | None = None,
+        created_by: str | None = None,
+    ) -> None:
+        """Remember an invite's label (re-labelling an existing code is allowed).
+        There is no delete: a handed-out invite stays traceable."""
+        await self.conn.execute(
+            "INSERT INTO invites (code, label, channel_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (code) DO UPDATE SET "
+            "label = excluded.label",
+            (code, label, channel_id, created_by, now_iso()),
+        )
+        await self.conn.commit()
+
+    async def invites(self) -> list[dict[str, Any]]:
+        """Every stored invite, oldest first."""
+        cur = await self.conn.execute("SELECT * FROM invites ORDER BY created_at, code")
+        return [self._person_row(r) for r in await cur.fetchall()]
+

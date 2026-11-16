@@ -223,6 +223,17 @@ class Config:
     # them. Deliberately not an env var: promotion is a person's decision.
     front_door_stage: str = "test"
 
+    # Per-storefront invites (/invites): one permanent invite per place the
+    # guild is listed, so a join can be traced to where it came from.
+    storefront_invites_enabled: bool = False
+    # The channel new invites land people in (#rules-and-info). Channel ID.
+    invite_channel_id: str | None = None
+    # One invite is made per label here.
+    invite_storefronts: tuple[str, ...] = (
+        "Raider.IO", "Warcraft Logs", "WoWProgress", "Guilds of WoW",
+        "Linktree", "In game",
+    )
+
     # Channels bridged to in-game chat (a post there echoes into /guild).
     # The posting guardrail refuses to send anything to these, in every mode.
     game_linked_channel_ids: tuple[str, ...] = ()
@@ -507,6 +518,15 @@ class Config:
             journey_nudge_time=_clean(os.environ.get("JOURNEY_NUDGE_TIME")) or "18:00",
             welcome_cards_enabled=_bool("WELCOME_CARDS_ENABLED", False),
             front_door_channel_id=_clean(os.environ.get("FRONT_DOOR_CHANNEL_ID")),
+            storefront_invites_enabled=_bool("STOREFRONT_INVITES_ENABLED", False),
+            invite_channel_id=_clean(os.environ.get("INVITE_CHANNEL_ID")),
+            invite_storefronts=(
+                _str_list("INVITE_STOREFRONTS")
+                or (
+                    "Raider.IO", "Warcraft Logs", "WoWProgress", "Guilds of WoW",
+                    "Linktree", "In game",
+                )
+            ),
             game_linked_channel_ids=_str_list("GAME_LINKED_CHANNEL_IDS"),
             unparsed_env=tuple(unparsed),
         )

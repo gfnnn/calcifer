@@ -214,6 +214,11 @@ Key flow and layering:
   `reconcile_scout_leads` (run after a `/link` and in the daily journey loop)
   moves a `scout_leads` row to `joined` and logs `lead_joined` when its
   character is linked to someone who joined through the journey.
+  Invite codes are shown through `journey.invite_labels(db, config)`: the two
+  `LEGACY_INVITES`, then the `invites` table (`cogs/invites.py`: `/invites
+  create|list`, one permanent `unique=True` invite per storefront, behind
+  `STOREFRONT_INVITES_ENABLED`), then `JOURNEY_INVITE_LABELS`. **Never delete
+  an invite or an `invites` row**: a handed-out link must stay traceable.
   The destination is `runtime_settings.effective_front_door_channel`:
   the front door is a surface behind the `PostGate`, promoted with
   `/posting front-door`.
@@ -225,7 +230,7 @@ Key flow and layering:
   `_persistent.button(...)`; never a bare `discord.ui.View` with callbacks.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
   `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`,
-  `scores` (officer-only), `journey` (the welcome team; also holds the journey's
+  `scores`, `invites` (officer-only), `journey` (the welcome team; also holds the journey's
   gateway listeners). `_guards.py` holds the shared `require_admin`/`_is_admin`
   permission gate (Manage-Server perm or the admin role) so every cog gates through
   one helper. Registered in `bot.py:setup_hook`; setting `DISCORD_GUILD_ID` makes
@@ -341,7 +346,8 @@ sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
 `scout_leads` (scouted candidates tracked through new→contacted→trialing→
 joined/passed; discovered fields refreshed by a re-scout, officer state/notes
 preserved); onboarding journey: `people` + `journey_events` (append-only; see
-`journey.py`) and `journey_cards` (where each welcome card is); `settings` (the `/posting` live config overlay — see
+`journey.py`), `journey_cards` (where each welcome card is) and `invites`
+(per-storefront invite codes and their labels); `settings` (the `/posting` live config overlay — see
 `runtime_settings.py`); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions

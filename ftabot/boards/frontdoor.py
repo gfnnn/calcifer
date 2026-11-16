@@ -74,7 +74,7 @@ class FrontDoorBoard(Board):
         stats = journey.front_door(
             await db.journey_events(),
             _now(),
-            labels=config.invite_labels,
+            labels=await journey.invite_labels(db, config),
             rank_roles=config.journey_rank_roles,
             interest_roles=config.journey_interest_roles,
         )
