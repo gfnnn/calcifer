@@ -87,6 +87,7 @@ class ActionButton(
         label: str = "​",
         style: discord.ButtonStyle = discord.ButtonStyle.secondary,
         disabled: bool = False,
+        row: int | None = None,
     ) -> None:
         super().__init__(
             discord.ui.Button(
@@ -94,6 +95,7 @@ class ActionButton(
                 style=style,
                 disabled=disabled,
                 custom_id=custom_id(namespace, action, *args),
+                row=row,
             )
         )
         self.namespace, self.action, self.args = namespace, action, args
@@ -117,10 +119,11 @@ def button(
     label: str,
     style: discord.ButtonStyle = discord.ButtonStyle.secondary,
     disabled: bool = False,
+    row: int | None = None,
 ) -> ActionButton:
     return ActionButton(
         namespace, action, [str(a) for a in args],
-        label=label, style=style, disabled=disabled,
+        label=label, style=style, disabled=disabled, row=row,
     )
 
 

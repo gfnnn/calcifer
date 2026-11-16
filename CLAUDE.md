@@ -198,7 +198,12 @@ Key flow and layering:
   embed + `ButtonSpec`s). `cogs/journey.py` posts one card per join through
   `FrontDoorMessenger` (always `allowed_mentions=none`), keeps its message id
   in `journey_cards`, and edits it in place on a click, a role change or a
-  leave. The destination is `runtime_settings.effective_front_door_channel`:
+  leave. `/journey unplaced` (same cog, `require_staff`) lists members with no
+  rank role from `journey.unplaced` (pure, over live members) via
+  `render_unplaced`; its buttons and the card's share one placement path
+  (`JourneyCog._place`: guard → allow-list → apply role → log `placed`), so add
+  any new "set a role" button on top of that, never beside it.
+  The destination is `runtime_settings.effective_front_door_channel`:
   the front door is a surface behind the `PostGate`, promoted with
   `/posting front-door`.
 - **`cogs/_persistent.py`** — the shared **restart-proof button** helper. One
@@ -209,7 +214,8 @@ Key flow and layering:
   `_persistent.button(...)`; never a bare `discord.ui.View` with callbacks.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
   `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`,
-  `scores` (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
+  `scores` (officer-only), `journey` (the welcome team; also holds the journey's
+  gateway listeners). `_guards.py` holds the shared `require_admin`/`_is_admin`
   permission gate (Manage-Server perm or the admin role) so every cog gates through
   one helper. Registered in `bot.py:setup_hook`; setting `DISCORD_GUILD_ID` makes
   commands appear instantly instead of ~1h global propagation. `BOT_COMMANDS_ENABLED=0`

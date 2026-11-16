@@ -19,10 +19,22 @@ import asyncio
 import logging
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from .. import journey
-from ..journey_cards import GREET, PLACE, ButtonSpec, CardPayload, render_card
+from ..journey_cards import (
+    GREET,
+    LIST_PLACE,
+    PLACE,
+    ButtonSpec,
+    CardPayload,
+    UnplacedEntry,
+    page_count,
+    render_card,
+    render_unplaced,
+    unplaced_page_size,
+)
 from ..runtime_settings import effective_front_door_channel
 from . import _persistent
 from ._guards import require_staff
@@ -100,8 +112,9 @@ def to_view(buttons: list[ButtonSpec]) -> discord.ui.View | None:
         return None
     return _persistent.view([
         _persistent.button(
-            NS, spec.action, spec.target, *([spec.arg] if spec.arg else []),
+            NS, spec.action, spec.target, *(spec.arg.split(":") if spec.arg else []),
             label=spec.label,
+            row=spec.row,
             style=(discord.ButtonStyle.success if spec.primary
                    else discord.ButtonStyle.secondary),
             disabled=spec.disabled,
@@ -177,6 +190,10 @@ def _display(member) -> str | None:
 class JourneyCog(commands.Cog):
     """Joins, leaves, role changes and invite bookkeeping for one server."""
 
+    journey_group = app_commands.Group(
+        name="journey", description="The welcome team's view of new members."
+    )
+
     def __init__(self, bot):
         self.bot = bot
         self.invites = InviteTracker()
@@ -184,6 +201,7 @@ class JourneyCog(commands.Cog):
         # The buttons are restart-proof: clicks are routed here by custom_id.
         _persistent.handler(NS, GREET)(self.handle_greet)
         _persistent.handler(NS, PLACE)(self.handle_place)
+        _persistent.handler(NS, LIST_PLACE)(self.handle_list_place)
 
     @property
     def config(self):
@@ -309,9 +327,19 @@ class JourneyCog(commands.Cog):
         await self._finish(interaction, discord_id, member, note)
 
     async def handle_place(self, interaction, discord_id: str, role: str) -> None:
+        member = await self._place(interaction, discord_id, role)
+        if member is not None:
+            await self._finish(
+                interaction, discord_id, member, f"<@{discord_id}> is now **{role}**."
+            )
+
+    async def _place(self, interaction, discord_id: str, role: str):
+        """The one placement path every "Set <role>" button shares: guard,
+        allow-list, apply the role, then log ``placed``. Returns the member, or
+        ``None`` after replying with why it could not be done."""
         found = await self._target(interaction, discord_id)
         if found is None:
-            return
+            return None
         _, member = found
         actor = str(interaction.user.id)
         try:
@@ -323,21 +351,88 @@ class JourneyCog(commands.Cog):
                 interaction,
                 f"I am not allowed to set **{role}**. It is not on my role list.",
             )
-            return
+            return None
         except RoleMissing:
             await self._reply(interaction, f"This server has no role called **{role}**.")
-            return
+            return None
         except discord.Forbidden:
             await self._reply(
                 interaction,
                 f"Discord would not let me set **{role}**. I need Manage Roles, "
                 "and my own role has to sit above it.",
             )
-            return
+            return None
         await journey.record_placed(self.db, self.config, discord_id, role, actor)
-        await self._finish(
-            interaction, discord_id, member, f"<@{discord_id}> is now **{role}**."
+        return member
+
+    # -- /journey unplaced ----------------------------------------------------------
+
+    async def unplaced_page(self, guild, page: int) -> CardPayload:
+        """One page of members with no rank role, read live from the server."""
+        waiting = journey.unplaced(guild.members, self.config.journey_rank_roles)
+        size = unplaced_page_size(self.config)
+        page = min(max(1, page), page_count(len(waiting), size))
+        roster = await self.db.all_members()
+        ranks = await self.db.identity_rank_names() if roster else {}
+        entries = [
+            UnplacedEntry(
+                discord_id=str(m.id),
+                display_name=_display(m),
+                joined_at=journey.iso(m.joined_at) if m.joined_at else None,
+                match=journey.match_roster(_names(m), roster, ranks),
+            )
+            for m in waiting[(page - 1) * size: page * size]
+        ]
+        return render_unplaced(entries, self.config, page=page, total=len(waiting))
+
+    async def handle_list_place(
+        self, interaction, discord_id: str, role: str, page: str = "1"
+    ) -> None:
+        """A "Set <role>" click on the unplaced list: the same placement as the
+        card button, then the list redraws without the person just placed."""
+        member = await self._place(interaction, discord_id, role)
+        if member is None:
+            return
+        payload = await self.unplaced_page(interaction.guild, int(page))
+        await interaction.response.edit_message(
+            embed=payload.embed, view=to_view(payload.buttons),
+            allowed_mentions=_NO_PINGS,
         )
+        await self._quietly(self.refresh_card(discord_id, member), "card refresh")
+
+    @journey_group.command(
+        name="unplaced", description="Members with no rank yet, longest wait first."
+    )
+    @app_commands.describe(
+        page="Which page of ten to show (default 1)",
+        post="Post the list in the front-door channel instead of showing only you",
+    )
+    async def unplaced(
+        self, interaction: discord.Interaction, page: int = 1, post: bool = False
+    ) -> None:
+        if not await require_staff(interaction, self.config, action="see who is unplaced"):
+            return
+        if interaction.guild is None:
+            await self._reply(interaction, "Run this inside the server.")
+            return
+        payload = await self.unplaced_page(interaction.guild, page)
+        view = to_view(payload.buttons)
+        if not post:
+            kwargs = {"view": view} if view is not None else {}
+            await interaction.response.send_message(
+                embed=payload.embed, ephemeral=True, allowed_mentions=_NO_PINGS, **kwargs
+            )
+            return
+        channel_id = await effective_front_door_channel(self.db, self.config)
+        if channel_id is None:
+            await self._reply(
+                interaction,
+                "I can't post right now: posting is off or no channel is set. "
+                "Run it without `post` to see the list yourself.",
+            )
+            return
+        await self.messenger.send(channel_id, payload.embed, view)
+        await self._reply(interaction, f"Posted in <#{channel_id}>.")
 
     @property
     def db(self):

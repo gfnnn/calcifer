@@ -246,6 +246,17 @@ A staff surface, so it is plain: no sign-off bank, no flavour.
 - Mentions render so staff can click through; `allowed_mentions=none` on every
   send and edit, so nobody is pinged.
 
+### Unplaced list (`/journey unplaced`; a command reply)
+
+- **Renderer:** `journey_cards.render_unplaced(entries, config, page, total)`.
+- **Title:** `🚪 Unplaced members`.
+- **Rows** (up to 10): `` `{n:>2}` <@id> · **{name}** · joined <t:…:R> · {roster match} ``.
+- **Buttons:** `{n} · {role}` per placement role, two members to a row (five
+  rows, so no pager row: the next page is `page:` on the command).
+- **Footer:** `Page {p} of {P} · {total} without a rank, longest wait first.`
+- **Empty:** `Everyone here has a rank. Nothing to do.`
+- Ephemeral by default; `post:True` sends it through the front-door gate.
+
 ---
 
 ## 4. Voice and visual system
