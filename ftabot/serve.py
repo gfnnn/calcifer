@@ -224,6 +224,22 @@ async def _digest_loop(config: Config, bot) -> None:
             log.warning("digest loop error (failure %d): %s", failures, exc)
 
 
+async def _journey_retention_loop(config: Config) -> None:
+    """Once a day, forget people who left longer ago than the retention window."""
+    from .journey import prune
+
+    await asyncio.sleep(60)  # stay out of the way of startup
+    while True:
+        try:
+            async with Database(config.database_path) as db:
+                forgotten = await prune(db, config.journey_retention_days)
+            if forgotten:
+                log.info("journey retention: forgot %d departed member(s)", forgotten)
+        except Exception as exc:  # noqa: BLE001 - keep the loop alive
+            log.warning("journey retention error: %s", exc)
+        await asyncio.sleep(24 * 3600)
+
+
 async def _periodic_sync(config: Config) -> None:
     """Refresh the roster on an interval, each run on its own connection."""
     interval = config.sync_interval_minutes * 60
@@ -332,6 +348,18 @@ async def _run(config: Config) -> None:
         if config.scores_enabled:
             tasks.append(asyncio.create_task(_score_loop(config, bot), name="scores"))
             log.info("score refresh every %d min", config.score_refresh_minutes)
+
+        # Onboarding journey: the listeners live on the bot; this is its daily
+        # retention sweep.
+        if config.journey_enabled:
+            tasks.append(
+                asyncio.create_task(
+                    _journey_retention_loop(config), name="journey-retention"
+                )
+            )
+            log.info(
+                "journey on (retention %d days)", config.journey_retention_days
+            )
     else:
         log.info("DISCORD_TOKEN not set — running ingest (+ sync) only")
 

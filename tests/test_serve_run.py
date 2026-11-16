@@ -92,12 +92,14 @@ async def test_run_launches_every_task_when_fully_configured(tmp_path, monkeypat
         board_refresh_minutes=5,
         score_refresh_minutes=5,
         sync_interval_minutes=10,
+        journey_enabled=True,
     )
 
     await serve._run(cfg)
 
     assert set(created) == {
         "ingest", "bot", "webhook-sender", "feeds", "digest", "boards", "scores", "sync",
+        "journey-retention",
     }
     assert captured["ingest"].bot is not None  # bot exposed to /healthz
 

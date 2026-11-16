@@ -114,3 +114,11 @@ def test_unparsed_numeric_setting_fails():
     names = _by_name(replace(_ready(), discord_guild_id=None, unparsed_env=("DISCORD_GUILD_ID",)))
     assert names["DISCORD_GUILD_ID"].level == FAIL
     assert exit_code(check(replace(_ready(), unparsed_env=("SYNC_INTERVAL_MINUTES",)))) == 1
+
+
+def test_journey_names_the_portal_intent():
+    assert "Journey" not in _by_name(_ready())  # off: silent
+    on = _by_name(replace(_ready(), journey_enabled=True))["Journey"]
+    assert on.level == OK and "Server Members intent" in on.detail
+    no_guild = _by_name(replace(_ready(), journey_enabled=True, discord_guild_id=None))
+    assert no_guild["Journey"].level == WARN

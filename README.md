@@ -72,6 +72,8 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `POSTING_MODE` / `TEST_CHANNEL_ID` | optional | Boot defaults for the **deny-by-default posting guardrail** (`off`/`test`/`live`) that gates every board and feed alert; change it live with `/posting`. See [docs/deploy.md](docs/deploy.md#the-posting-guardrail-deny-by-default). |
 | `MILESTONES_FEED_ENABLED` | optional | The **guild milestones** feed: new boss kills, Mythic+ score thresholds and level-cap dings, detected from the stored data (no extra API). Default off. |
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
+| `JOURNEY_ENABLED` | optional | The **onboarding journey**: record joins, leaves, role changes and the invite each new member used (People + an append-only events log). Needs the **Server Members intent** switched on in the developer portal, and *Manage Server* to read invite use counts. Default off. |
+| `JOURNEY_RETENTION_DAYS` | optional | Forget a person and their journey events this many days after they left (default `180`; `0` keeps them). |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
 Everything except `DISCORD_TOKEN` has a sensible default, so the pipeline works
@@ -228,6 +230,39 @@ ever sees it, and a deploy can never surprise the server. Full workflow in
 
 ---
 
+## The onboarding journey
+
+Calcifer supports the Flamekeepers in welcoming new Discord members: he notices
+every join and remembers where it came from, so the people doing the welcoming
+have the facts in front of them. He never DMs a member, never gives a rank
+without a person clicking, and never pings.
+
+It is built as **People + an append-only Events log + Views**:
+
+- **`people`**: one row per Discord account (display name, joined, left, the
+  invite they came via, a linked main character once an officer `/link`s one).
+- **`journey_events`**: what happened and who did it (`joined`, `left`,
+  `rejoined`, `came_via`, `roles_changed`, `greeted`, `placed`, `checked_in`,
+  `character_linked`). Rows are only ever added; nothing is edited.
+- **Views** read from those two tables and keep no state of their own.
+
+With `JOURNEY_ENABLED=1` the bot:
+
+- inserts everyone already in the server once, as came via `baseline` with no
+  events, so the first week is not flooded (a restart repairs any join or leave
+  it missed while it was down);
+- records each join, leave, rejoin and role change;
+- works out **which invite** a new member used by comparing invite use counts
+  before and after the join (`unknown` when two people join at once, when
+  nothing moved, or when the bot lacks *Manage Server*);
+- matches a member's nickname to a roster character (case and accent
+  insensitive, understands `Character (Name)`), with its in-game rank name;
+- forgets people `JOURNEY_RETENTION_DAYS` after they leave (a daily sweep).
+
+Nothing is posted by this part: the staff-facing surfaces build on it.
+
+---
+
 ## Inbound HTTP (ingest only)
 
 There is **no dashboard and no browsable API**: the bot is controlled from
@@ -267,7 +302,11 @@ Every other path returns 404.
 4. (Recommended) set `DISCORD_GUILD_ID` to your server's ID so commands appear
    immediately instead of waiting up to an hour for global propagation.
 
-The bot uses only default intents (no privileged "message content" intent).
+The bot uses default intents, plus one privileged intent when the onboarding
+journey is on: with `JOURNEY_ENABLED=1` it asks for **Server Members** (switch
+it on under *Bot → Privileged Gateway Intents* in the developer portal first,
+or the bot will refuse to log in). It never asks for the "message content"
+intent.
 
 ---
 
@@ -316,6 +355,7 @@ Pass `--no-prune` (CLI) or `prune: false` (`/sync`) to keep them.
 | `ftabot/metrics.py` | Pure scoring: activity, readiness, guild health, loot priority. |
 | `ftabot/raids.py` | Pure raid-tier knowledge: which raids are open, their names, the guild's progress rows. |
 | `ftabot/milestones.py` | Pure milestone detection (boss kills, M+ thresholds, level caps) + the stored marks. |
+| `ftabot/journey.py` | The onboarding journey: People + the append-only events log, invite attribution, roster matching, retention. |
 | `ftabot/boards/` | Living-board renderers (Hot 20, Raid Progress, The Armoury, The Climb, Roster Pulse, News, Events, Recruitment). |
 | `ftabot/feeds/` | Feed sources (news, M+, affixes, realm progress, milestones, ...) and the poll runner. |
 | `ftabot/views.py` | View-models behind the GM / Raid / Loot report commands. |

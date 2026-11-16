@@ -2014,3 +2014,179 @@ class Database:
             (str(discord_user_id),),
         )
         return [r["source"] for r in await cur.fetchall()]
+
+    # -- the onboarding journey: people + append-only events -------------------
+
+    @staticmethod
+    def _person_row(row: aiosqlite.Row) -> dict[str, Any]:
+        return {key: row[key] for key in row.keys()}
+
+    async def get_person(self, discord_id: str) -> dict[str, Any] | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM people WHERE discord_id = ?", (str(discord_id),)
+        )
+        row = await cur.fetchone()
+        return self._person_row(row) if row else None
+
+    async def people(self, *, present_only: bool = False) -> list[dict[str, Any]]:
+        """Everyone the journey knows, oldest join first."""
+        sql = "SELECT * FROM people"
+        if present_only:
+            sql += " WHERE left_at IS NULL"
+        cur = await self.conn.execute(sql + " ORDER BY joined_at, discord_id")
+        return [self._person_row(r) for r in await cur.fetchall()]
+
+    async def upsert_person(
+        self,
+        discord_id: str,
+        *,
+        display_name: str | None,
+        joined_at: str,
+        came_via: str,
+    ) -> None:
+        """Record an arrival: a new person, or a known one coming back (which
+        clears ``left_at`` and moves ``joined_at`` to this join)."""
+        now = now_iso()
+        await self.conn.execute(
+            "INSERT INTO people (discord_id, display_name, joined_at, came_via, "
+            " first_seen, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (discord_id) DO UPDATE SET "
+            "  display_name = excluded.display_name, joined_at = excluded.joined_at, "
+            "  came_via = excluded.came_via, left_at = NULL, "
+            "  updated_at = excluded.updated_at",
+            (str(discord_id), display_name, joined_at, came_via, now, now),
+        )
+        await self.conn.commit()
+
+    async def insert_baseline_people(
+        self, rows: Iterable[tuple[str, str | None, str | None]]
+    ) -> int:
+        """Insert ``(discord_id, display_name, joined_at)`` rows as the baseline
+        membership. Existing people are left untouched; returns how many were new."""
+        now = now_iso()
+        before = self.conn.total_changes
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO people (discord_id, display_name, joined_at, "
+            " came_via, first_seen, updated_at) VALUES (?, ?, ?, 'baseline', ?, ?)",
+            [(str(d), name, joined, now, now) for d, name, joined in rows],
+        )
+        await self.conn.commit()
+        return self.conn.total_changes - before
+
+    async def _update_person(self, discord_id: str, column: str, value: Any) -> None:
+        await self.conn.execute(
+            f"UPDATE people SET {column} = ?, updated_at = ? WHERE discord_id = ?",
+            (value, now_iso(), str(discord_id)),
+        )
+        await self.conn.commit()
+
+    async def set_person_left(self, discord_id: str, at: str) -> None:
+        await self._update_person(discord_id, "left_at", at)
+
+    async def set_person_name(self, discord_id: str, display_name: str | None) -> None:
+        await self._update_person(discord_id, "display_name", display_name)
+
+    async def set_person_linked_main(self, discord_id: str, key: str | None) -> None:
+        await self._update_person(discord_id, "linked_main", key)
+
+    async def clear_linked_main(self, key: str) -> None:
+        """Drop a character link from whoever holds it (an officer unlinked it)."""
+        await self.conn.execute(
+            "UPDATE people SET linked_main = NULL, updated_at = ? WHERE linked_main = ?",
+            (now_iso(), key),
+        )
+        await self.conn.commit()
+
+    async def add_journey_event(
+        self,
+        discord_id: str,
+        type: str,  # noqa: A002 - mirrors the column name
+        *,
+        actor_id: str | None = None,
+        at: str | None = None,
+        data: dict | None = None,
+    ) -> int:
+        """Append one event to the journey log. There is deliberately no update
+        or delete counterpart: the log is append-only outside retention."""
+        cur = await self.conn.execute(
+            "INSERT INTO journey_events (discord_id, type, actor_id, at, data_json) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                str(discord_id), type,
+                str(actor_id) if actor_id is not None else None,
+                at or now_iso(),
+                json.dumps(data, ensure_ascii=False) if data else None,
+            ),
+        )
+        await self.conn.commit()
+        return cur.lastrowid
+
+    async def journey_events(
+        self,
+        *,
+        discord_id: str | None = None,
+        type: str | None = None,  # noqa: A002 - mirrors the column name
+        since: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Events in the order they happened, optionally filtered."""
+        where, params = [], []
+        if discord_id is not None:
+            where.append("discord_id = ?")
+            params.append(str(discord_id))
+        if type is not None:
+            where.append("type = ?")
+            params.append(type)
+        if since is not None:
+            where.append("at >= ?")
+            params.append(since)
+        sql = "SELECT * FROM journey_events"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        cur = await self.conn.execute(sql + " ORDER BY at, id", params)
+        return [
+            {
+                "id": r["id"],
+                "discord_id": r["discord_id"],
+                "type": r["type"],
+                "actor_id": r["actor_id"],
+                "at": r["at"],
+                "data": json.loads(r["data_json"]) if r["data_json"] else {},
+            }
+            for r in await cur.fetchall()
+        ]
+
+    async def prune_journey(self, cutoff: str) -> int:
+        """Retention: forget everyone who left before ``cutoff`` (their events,
+        then their person row). Returns the number of people forgotten."""
+        gone = "SELECT discord_id FROM people WHERE left_at IS NOT NULL AND left_at < ?"
+        await self.conn.execute(
+            f"DELETE FROM journey_events WHERE discord_id IN ({gone})", (cutoff,)
+        )
+        cur = await self.conn.execute(
+            "DELETE FROM people WHERE left_at IS NOT NULL AND left_at < ?", (cutoff,)
+        )
+        await self.conn.commit()
+        return cur.rowcount
+
+    async def journey_baseline_at(self) -> str | None:
+        """When the one-off baseline backfill ran, or ``None`` if it has not."""
+        cur = await self.conn.execute(
+            "SELECT value_json FROM settings WHERE key = 'journey_baseline_at'"
+        )
+        row = await cur.fetchone()
+        return json.loads(row["value_json"]) if row else None
+
+    async def set_journey_baseline_at(self, at: str) -> None:
+        await self.set_setting("journey_baseline_at", at)
+
+    async def identity_rank_names(self) -> dict[tuple[str, str], str]:
+        """In-game rank names from GRM, keyed ``(lower(name), realm_slug)``."""
+        cur = await self.conn.execute(
+            "SELECT character_name, realm_slug, rank_name FROM identity_members "
+            "WHERE rank_name IS NOT NULL AND rank_name != ''"
+        )
+        return {
+            (r["character_name"].lower(), r["realm_slug"].lower()): r["rank_name"]
+            for r in await cur.fetchall()
+        }
+

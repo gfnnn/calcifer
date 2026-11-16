@@ -502,3 +502,30 @@ async def test_periodic_sync_backs_off_on_db_error(tmp_path, monkeypatch, caplog
     with pytest.raises(asyncio.CancelledError):
         await serve._periodic_sync(_cfg(tmp_path))
     assert "scheduled sync failed (failure 1)" in caplog.text
+
+
+# --- journey retention ------------------------------------------------------
+
+
+async def test_journey_retention_loop_prunes_then_survives_an_error(
+    tmp_path, monkeypatch, caplog
+):
+    from ftabot import journey
+
+    calls: list[int] = []
+
+    async def _prune(db, days):
+        calls.append(days)
+        if len(calls) == 2:
+            raise RuntimeError("db is busy")
+        if len(calls) == 3:
+            raise asyncio.CancelledError
+        return 2
+
+    monkeypatch.setattr(serve.asyncio, "sleep", _noop_sleep)
+    monkeypatch.setattr(journey, "prune", _prune)
+    with caplog.at_level("INFO", logger="ftabot.serve"), pytest.raises(asyncio.CancelledError):
+        await serve._journey_retention_loop(_cfg(tmp_path, journey_retention_days=90))
+    assert calls == [90, 90, 90]
+    assert "forgot 2 departed member(s)" in caplog.text
+    assert "journey retention error" in caplog.text

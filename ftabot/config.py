@@ -189,6 +189,14 @@ class Config:
     # The confirmed sandbox channel that test/un-promoted posts land in.
     test_channel_id: str | None = None
 
+    # --- Onboarding journey (People + the append-only events log) -----------
+    # Master switch. On, the bot asks Discord for the Server Members intent
+    # (which must also be switched on in the developer portal) and records
+    # joins, leaves and role changes. Off (the default), nothing changes.
+    journey_enabled: bool = False
+    # Forget a person (and their events) this many days after they left.
+    journey_retention_days: int = 180
+
     # Numeric settings that were set but could not be read as a number. The
     # value falls back to its default (or None), so record the name for the
     # deploy preflight instead of failing silently.
@@ -420,5 +428,11 @@ class Config:
             ),
             posting_mode=(_clean(os.environ.get("POSTING_MODE")) or "off").lower(),
             test_channel_id=_clean(os.environ.get("TEST_CHANNEL_ID")),
+            journey_enabled=_bool("JOURNEY_ENABLED", False),
+            journey_retention_days=(
+                _int("JOURNEY_RETENTION_DAYS")
+                if _int("JOURNEY_RETENTION_DAYS") is not None
+                else 180
+            ),
             unparsed_env=tuple(unparsed),
         )

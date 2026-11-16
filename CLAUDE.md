@@ -173,6 +173,23 @@ Key flow and layering:
   `safe_format` (never crashes a render) and `live_tokens` (current
   member-count/progression/recruiting values). One home so both surfaces import
   the same substitution without a cycle.
+- **`journey.py`** — the **onboarding journey**, the first piece of the core
+  structure *People + an append-only Events log + Views*. `people` is one row
+  per Discord account; `journey_events` is what happened to them and who did it
+  (`EVENT_TYPES`). **Events are only ever inserted** (`db.add_journey_event`
+  has no update/delete sibling; only the retention sweep removes rows), and
+  every view (cards, `/journey`, the nudge, the Front door board) is *derived*
+  from those two tables, so build new people-facing features as views over the
+  log rather than new state. The module is split like `metrics.py`: pure
+  helpers (`attribute_invite`, the invite-count diff; `match_roster`, a Discord
+  name to a roster character + GRM rank name + confidence) and DB-backed
+  recorders (`record_join`/`record_leave`/`record_roles_changed`, `reconcile`
+  for the one-off `baseline` backfill and missed joins/leaves after a restart,
+  `prune` for retention). The gateway listeners (`on_member_join`/`_remove`/
+  `_update`, `on_invite_create`/`_delete`) are thin adapters in
+  `cogs/journey.py`, loaded only when `JOURNEY_ENABLED` is on and *before* the
+  `BOT_COMMANDS_ENABLED` switch (they are not commands). Member names and ids
+  are never logged at INFO.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
   `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`,
   `scores` (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
@@ -285,7 +302,8 @@ sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
 (`/page import` copy overrides for the bundled `content/*.json`); recruitment funnel:
 `scout_leads` (scouted candidates tracked through new→contacted→trialing→
 joined/passed; discovered fields refreshed by a re-scout, officer state/notes
-preserved); `settings` (the `/posting` live config overlay — see
+preserved); onboarding journey: `people` + `journey_events` (append-only; see
+`journey.py`); `settings` (the `/posting` live config overlay — see
 `runtime_settings.py`); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
@@ -338,11 +356,18 @@ preserved); `settings` (the `/posting` live config overlay — see
   thresholds and schedules are hard-coded and changed by change request.
 - **New feeds are modular.** A new source is a `FeedSource` in `feeds/` plus
   routing rules, never a new cog or a bespoke posting path.
+- **Calcifer supports the welcome; people do it.** The journey never DMs a
+  member, never assigns a role without a staff click, and never pings.
 - **The identity graph is authoritative, not self-service.** Character →
   account comes from GRM (`identity.py`); account → Discord is an officer link
   (`/link`). Don't add flows that pester members to self-register.
-- **Default Discord intents only.** No privileged Message Content intent: every
-  feed is push (webhook) or pull (poll), never channel scraping.
+- **Intents: default, plus Server Members for the journey. Never Message
+  Content.** `JOURNEY_ENABLED` turns on `intents.members` (a deliberate,
+  agreed exception: joins, leaves and role changes cannot be seen without it,
+  and it must also be switched on in the developer portal). With the flag off
+  the bot runs on default intents exactly as before. The Message Content
+  intent stays off for good: every feed is push (webhook) or pull (poll),
+  never channel scraping.
 - **No stateful interaction handlers.** Interactivity is link buttons, slash
   commands and native Discord (Channels & Roles, Onboarding, Raid-Helper for
   sign-ups). No persistent views or button callbacks.
