@@ -121,7 +121,7 @@ def _cfg(**over):
     base = dict(
         journey_enabled=True, welcome_cards_enabled=True, discord_guild_id=GUILD_ID,
         posting_mode="test", test_channel_id=LAB, front_door_channel_id=FRONT_DOOR,
-        journey_invite_labels=(("Qske4gDnYC", "Storefronts"),),
+        journey_invite_labels=(("storefront02", "Storefronts"),),
     )
     base.update(over)
     return Config(**base)
@@ -168,7 +168,7 @@ def test_new_flags_default_off_and_parse(monkeypatch):
         "JOURNEY_ROLE_ALLOWLIST": "Ashes,Visitor",
         "JOURNEY_RANK_ROLES": "Ashes,Visitor,Raider",
         "JOURNEY_INTEREST_ROLES": "Mythic+, PvP",
-        "JOURNEY_INVITE_LABELS": "Qske4gDnYC=Storefronts, bad, =x, dxPgsGGDrb=Old shared link",
+        "JOURNEY_INVITE_LABELS": "storefront02=Storefronts, bad, =x, oldShared01=Old shared link",
         "GAME_LINKED_CHANNEL_IDS": "5,6",
     }.items():
         monkeypatch.setenv(key, value)
@@ -177,7 +177,7 @@ def test_new_flags_default_off_and_parse(monkeypatch):
     assert cfg.journey_staff_roles == ("Flamekeeper", "Officer")
     assert cfg.journey_interest_roles == ("Mythic+", "PvP")
     assert cfg.invite_labels == {
-        "Qske4gDnYC": "Storefronts", "dxPgsGGDrb": "Old shared link",
+        "storefront02": "Storefronts", "oldShared01": "Old shared link",
     }
     # Raider counts as placed but is not Calcifer's to give: no button for it.
     assert cfg.journey_placement_roles == ("Ashes", "Visitor")
@@ -238,7 +238,7 @@ async def test_front_door_in_a_game_linked_channel_posts_nowhere(db):
 def _status(**over):
     base = dict(
         discord_id=str(NEWBIE), display_name="Emberlyn (Dave)",
-        joined_at="2026-11-16T12:00:00+00:00", left_at=None, came_via="Qske4gDnYC",
+        joined_at="2026-11-16T12:00:00+00:00", left_at=None, came_via="storefront02",
     )
     base.update(over)
     return journey.Status(**base)

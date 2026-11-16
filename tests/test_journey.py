@@ -260,11 +260,11 @@ async def test_roster_match_for_reads_the_stored_roster_and_grm_ranks(db):
 async def test_join_leave_rejoin_events(db):
     first = await journey.record_join(
         db, discord_id="1", display_name="Newbie",
-        joined_at="2026-11-01T10:00:00+00:00", came_via="Qske4gDnYC",
+        joined_at="2026-11-01T10:00:00+00:00", came_via="storefront02",
     )
     assert first.rejoin is False
     person = await db.get_person("1")
-    assert person["came_via"] == "Qske4gDnYC" and person["left_at"] is None
+    assert person["came_via"] == "storefront02" and person["left_at"] is None
     assert await _types(db, "1") == ["joined", "came_via"]
 
     assert await journey.record_leave(db, "1", at="2026-11-02T10:00:00+00:00") is True
@@ -284,7 +284,7 @@ async def test_join_leave_rejoin_events(db):
     rejoined = (await db.journey_events(type="rejoined"))[0]
     assert rejoined["data"] == {"previous_joined_at": "2026-11-01T10:00:00+00:00"}
     codes = [e["data"]["code"] for e in await db.journey_events(type="came_via")]
-    assert codes == ["Qske4gDnYC", "unknown"]
+    assert codes == ["storefront02", "unknown"]
 
 
 async def test_event_log_filters(db):
@@ -468,12 +468,12 @@ async def test_on_ready_without_a_home_server_warns(db, caplog):
 
 
 async def test_member_join_records_the_invite_used(db):
-    guild = _Guild({"Qske4gDnYC": 7, "dxPgsGGDrb": 2})
+    guild = _Guild({"storefront02": 7, "oldShared01": 2})
     cog = _cog(db, guild)
     await cog.on_ready()
-    guild._invites["Qske4gDnYC"] = 8
+    guild._invites["storefront02"] = 8
     await cog.on_member_join(_M(50, guild=guild))
-    assert (await db.get_person("50"))["came_via"] == "Qske4gDnYC"
+    assert (await db.get_person("50"))["came_via"] == "storefront02"
     assert await _types(db, "50") == ["joined", "came_via"]
 
 

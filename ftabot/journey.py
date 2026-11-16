@@ -498,23 +498,16 @@ async def status_for(db: "Database", config, discord_id: str) -> Status | None:
     )
 
 
-# The two invites that predate per-storefront tracking. They stay in use (old
-# links are all over the internet) and are never deleted, only named.
-LEGACY_INVITES: dict[str, str] = {
-    "dxPgsGGDrb": "Old shared link",
-    "Qske4gDnYC": "Storefronts (shared)",
-}
-
-
 async def invite_labels(db: "Database", config) -> dict[str, str]:
     """Every known invite code -> its friendly label.
 
-    Three layers, later ones winning: the legacy invites, the per-storefront
-    invites stored by ``/invites create``, then ``JOURNEY_INVITE_LABELS`` (an
-    explicit override always has the last word).
+    Two layers, the later one winning: the per-storefront invites stored by
+    ``/invites create``, then ``JOURNEY_INVITE_LABELS``. The env labels are
+    also how invites that predate per-storefront tracking get a name (their
+    codes live in the host's ``.env``, never in this repo), and an explicit
+    label always has the last word.
     """
-    labels = dict(LEGACY_INVITES)
-    labels.update({row["code"]: row["label"] for row in await db.invites()})
+    labels = {row["code"]: row["label"] for row in await db.invites()}
     labels.update(config.invite_labels)
     return labels
 

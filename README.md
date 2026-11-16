@@ -80,7 +80,7 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `JOURNEY_ROLE_ALLOWLIST` | optional | The **only** roles Calcifer may add or remove (default `Ashes,Visitor`). Anything else is refused in code, even where Discord would allow it. |
 | `JOURNEY_RANK_ROLES` | optional | Roles that mean "placed" (default `Ashes,Visitor`). The ones also on the allow-list get a `Set <role>` button. |
 | `JOURNEY_INTEREST_ROLES` | optional | Interest roles members pick for themselves, shown as "Picked" on cards (default empty; they join the allow-list). |
-| `JOURNEY_INVITE_LABELS` | optional | Friendly names for invite codes, `code=Label,code=Label` (e.g. `Qske4gDnYC=Storefronts`). |
+| `JOURNEY_INVITE_LABELS` | optional | Friendly names for invite codes, `code=Label,code=Label` (e.g. `oldShared01=Old shared link,storefront02=Storefronts (shared)`). This is how invites older than `/invites create` get a name; an env label also overrides a stored one. |
 | `STOREFRONT_INVITES_ENABLED` / `INVITE_CHANNEL_ID` | optional | **Per-storefront invites**: adds `/invites create` and `/invites list`. New invites land people in `INVITE_CHANNEL_ID` (`#rules-and-info`). Needs the *Create Invite* permission. Default off. |
 | `INVITE_STOREFRONTS` | optional | The storefronts that each get an invite (default `Raider.IO,Warcraft Logs,WoWProgress,Guilds of WoW,Linktree,In game`). |
 | `GAME_LINKED_CHANNEL_IDS` | optional | Channels bridged to in-game chat. The posting guardrail refuses to send **anything** to them, in every mode. |
@@ -358,10 +358,13 @@ with its label. It only fills gaps, so it is safe to run again after adding a
 storefront. `/invites list` shows every invite's label, code and use count.
 
 From then on welcome cards and the Front door board say "Raider.IO" or "In
-game" instead of a code. The two older invites are kept and named: `dxPgsGGDrb`
-is **Old shared link** and `Qske4gDnYC` is **Storefronts (shared)**. Nothing
-here ever deletes an invite: a link that has been handed out keeps working and
-stays traceable. `JOURNEY_INVITE_LABELS` can still rename any code.
+game" instead of a code. Invites that predate `/invites create` are kept, and
+are named in the host's `.env` rather than in this repo, for example
+`JOURNEY_INVITE_LABELS=oldShared01=Old shared link,storefront02=Storefronts (shared)`.
+Without a label an old invite still attributes joins, but shows as its bare
+code and is missing from `/invites list`. Nothing here ever deletes an invite:
+a link that has been handed out keeps working and stays traceable.
+`JOURNEY_INVITE_LABELS` can also rename any stored code.
 
 ### The unplaced sweep (`/journey unplaced`)
 

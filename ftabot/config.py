@@ -208,7 +208,7 @@ class Config:
     # Interest roles members pick for themselves (Discord Onboarding / Channels
     # & Roles). Shown as "Picked" on cards; empty until they exist.
     journey_interest_roles: tuple[str, ...] = ()
-    # Friendly names for invite codes: (("Qske4gDnYC", "Storefronts"), ...).
+    # Friendly names for invite codes: (("storefront02", "Storefronts"), ...).
     journey_invite_labels: tuple[tuple[str, str], ...] = ()
     # The daily nudge: one staff post a day listing who has not been greeted,
     # placed or checked in on. The time is HH:MM on the UK clock (Europe/London).
