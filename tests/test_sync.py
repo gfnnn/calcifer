@@ -99,7 +99,7 @@ class _FakeRaiderIO:
     async def guild_members(self, name, realm, region):
         return list(self._members)
 
-    async def enrich_all(self, members, *, concurrency=2):
+    async def enrich_all(self, members, *, concurrency=2, on_batch=None):
         if self._enrich_raises:
             from ftabot.services.raiderio import RaiderIOError
 

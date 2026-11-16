@@ -20,7 +20,9 @@ echo "$(git rev-parse --short HEAD) $(git log -1 --format='%cd %s' --date=short)
 say "Resources"
 docker stats --no-stream --format 'memory {{.MemUsage}}  cpu {{.CPUPerc}}' calcifer 2>/dev/null
 df -h --output=avail,pcent . | tail -1 | awk '{print "disk free " $1 " (" $2 " used)"}'
-du -sh data/ftabot.db 2>/dev/null | awk '{print "database " $1}'
+# Under WAL most recent writes live in ftabot.db-wal until a checkpoint, so the
+# main file alone can read 4 KB on a full database: count all three files.
+du -ch data/ftabot.db data/ftabot.db-wal data/ftabot.db-shm 2>/dev/null | tail -1 | awk '{print "database " $1 " (incl. WAL)"}'
 
 say "Backups"
 # shellcheck disable=SC2012

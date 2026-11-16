@@ -41,7 +41,7 @@ class _FakeRio:
             raise self._overview
         return self._overview
 
-    async def enrich_all(self, members, *, concurrency=2):
+    async def enrich_all(self, members, *, concurrency=2, on_batch=None):
         return members
 
 

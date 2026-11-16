@@ -43,7 +43,7 @@ def _make_fake_rio(roster: list[Member], enrich_map: dict | None = None):
             # Hand back deep copies so a sync run can't mutate the test's roster.
             return [copy.deepcopy(m) for m in roster]
 
-        async def enrich_all(self, members, *, concurrency=3):
+        async def enrich_all(self, members, *, concurrency=3, on_batch=None):
             for m in members:
                 for key, val in (enrich_map.get(m.character_name.lower()) or {}).items():
                     setattr(m, key, val)
