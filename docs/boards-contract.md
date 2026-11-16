@@ -220,6 +220,32 @@ per-board meaning.
   the old copy and re-posts; same channel + same copy is a no-op; a copy edit
   edits each message in place. Mentions are always disabled.
 
+### Welcome card (journey; not a board)
+
+A staff surface, so it is plain: no sign-off bank, no flavour.
+
+- **Renderer:** `journey_cards.render_card(status, config, match, picked)`,
+  pure, returning the embed and a list of button specs.
+- **Title:** `👋 New member`, or `👋 Back again` for a rejoin.
+- **Description:** `<@id> · **{display name}**`, `Account created <t:…:R>`,
+  `Joined <t:…:F> (<t:…:R>)`.
+- **Fields:** `Came via` (invite label, bare code or `unknown`), `Picked`
+  (interest roles or `nothing yet`), `Roster match`
+  (`**{character}** · {rank} · {exact|likely|possible}` or `no match`),
+  `Previous join` (rejoins only), `Status` (full width):
+  `Said hi: <@actor> <t:…:R>` / `Not greeted yet`,
+  `Placed: **{role}** by <@actor> <t:…:R>` / `Not placed yet`, and
+  `**Left** <t:…:R> before anyone got to them` when it applies.
+- **Buttons:** `Said hi`, then one `Set {role}` per placement role. Done
+  actions are greyed out; all of them once the member has left.
+- **Footer:** `Calcifer keeps the notes. You do the welcoming.`
+- **Colour:** `GUILD_EMBER`.
+- **Lifecycle:** posted once per join, then edited in place on a click, a
+  relevant role or nickname change, or a leave. A deleted card is forgotten,
+  not re-posted. Its message id lives in `journey_cards`.
+- Mentions render so staff can click through; `allowed_mentions=none` on every
+  send and edit, so nobody is pinged.
+
 ---
 
 ## 4. Voice and visual system
@@ -282,7 +308,7 @@ The canonical layout every board, page and feed rule anchors to.
 | `#events` | board: Weekly Events · feeds: Raid-Helper, WoW Audit raid reminders, light WCL kill |
 | `#guild-pulse` | board: Roster Pulse (Raid Progress, Armoury, Climb also fit here) |
 | `#general` | no boards |
-| `#guild-hall` | WoW 12.1 in-game ↔ Discord chat bridge. **Calcifer never posts here**: no board, page or feed route (it would echo into in-game `/guild` chat). |
+| `#guild-general`, `#blonde-moments` | WoW 12.1 in-game ↔ Discord chat bridges. **Calcifer never posts here**: no board, page, card or feed route (it would echo into in-game `/guild` chat). List their ids in `GAME_LINKED_CHANNEL_IDS` and the posting guardrail refuses them in every mode. |
 
 ### INTEGRATION HUB (optional)
 
@@ -292,6 +318,15 @@ The canonical layout every board, page and feed rule anchors to.
 
 `#progression`: detailed WCL prog (kills with pull count, best pull), Raider.IO
 our progression.
+
+### FRONT DOOR (read-restricted to Flamekeepers, Officers and the GM)
+
+| Channel | Surfaces |
+| --- | --- |
+| `#front-door` | welcome cards (one per join, with staff buttons). The daily nudge and the Front door board join them here as they ship. |
+
+Calcifer needs View Channel, Send Messages, Embed Links and Read Message
+History here, as in every channel he posts to.
 
 ### OFFICER HUB (read-restricted to the officer role)
 
@@ -313,6 +348,7 @@ our progression.
 | Weekly Events | Community | `#events` |
 | Roster Pulse | Community | `#guild-pulse` |
 | Raid Progress, The Armoury, The Climb | Community | `#guild-pulse` (or a channel of their own) |
+| Welcome cards | Front door | `#front-door` (promote with `/posting front-door`) |
 | Drafts | Officer | `#board-drafts` (test mode) |
 
 ---
@@ -349,6 +385,9 @@ default feed channel (`/posting feed-channel`, boot default
 
 - **Boards and pages: never ping.** `boards/messenger.py` forces
   `allowed_mentions=none` on every send and edit.
+- **Journey surfaces: never ping.** Welcome cards and their button replies
+  show members as mentions with `allowed_mentions=none`. Calcifer never DMs a
+  member.
 - **Feed alerts: opt-in only.** Members subscribe with `/alerts`; a rule's
   `ping:` role is set deliberately by an officer. Suggested opt-ins: M+ in
   `#mythic-plus`, event sign-ups in `#events`, the prog role in `#progression`,

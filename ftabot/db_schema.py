@@ -501,6 +501,16 @@ CREATE TABLE IF NOT EXISTS journey_events (
 CREATE INDEX IF NOT EXISTS idx_journey_person ON journey_events (discord_id, type);
 CREATE INDEX IF NOT EXISTS idx_journey_type_at ON journey_events (type, at);
 
+-- The welcome card posted for a person's current stay: just where it is, so
+-- it can be edited in place after a click, a role change or a leave (and
+-- after a restart). Everything shown on it is derived from the journey log.
+CREATE TABLE IF NOT EXISTS journey_cards (
+    discord_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    posted_at  TEXT
+);
+
 -- Runtime settings: a small key/value overlay that lets /posting change a
 -- handful of operational values (the posting guardrail and its channels) live,
 -- without a redeploy. A row here beats the env-built Config; deleting it reverts

@@ -55,10 +55,18 @@ class PostGate:
 
     mode: PostingMode = PostingMode.OFF
     test_channel_id: str | None = None
+    # Channels nothing may ever be sent to (the in-game chat bridges): a post
+    # there would echo into /guild chat. Checked last, so it holds in every
+    # mode and for the test channel too.
+    denied_channel_ids: frozenset[str] = frozenset()
 
     @classmethod
     def from_config(cls, config: "Config") -> "PostGate":
-        return cls(PostingMode.parse(config.posting_mode), config.test_channel_id)
+        return cls(
+            PostingMode.parse(config.posting_mode),
+            config.test_channel_id,
+            frozenset(config.game_linked_channel_ids),
+        )
 
     @property
     def silent(self) -> bool:
@@ -72,6 +80,12 @@ class PostGate:
         ``promoted=True`` because their per-rule channel is already an officer's
         explicit choice; boards pass their own stored promotion flag.
         """
+        destination = self._stage(production_channel_id, promoted)
+        if destination is not None and str(destination) in self.denied_channel_ids:
+            return None  # a game-linked channel: never, whatever the mode
+        return destination
+
+    def _stage(self, production_channel_id: str | None, promoted: bool) -> str | None:
         if self.mode is PostingMode.OFF:
             return None
         if self.mode is PostingMode.TEST:

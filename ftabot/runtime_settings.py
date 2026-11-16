@@ -65,6 +65,15 @@ OVERRIDABLE: tuple[Overridable, ...] = (
         config_attr="feed_default_channel_id",
         help="Catches feed alerts with no specific routing rule.",
     ),
+    Overridable(
+        key="front_door_stage",
+        label="Front-door surfaces",
+        kind="choice",
+        config_attr="front_door_stage",
+        choices=("test", "live"),
+        help="test = welcome cards and nudges stay in the test channel; "
+        "live = they reach the front-door channel once posting is live.",
+    ),
 )
 
 _BY_KEY: dict[str, Overridable] = {o.key: o for o in OVERRIDABLE}
@@ -120,7 +129,21 @@ async def effective_post_gate(db: "Database", config: "Config") -> PostGate:
     mode = await effective(db, config, "posting_mode")
     test_channel = await effective(db, config, "test_channel_id")
     return PostGate(PostingMode.parse(mode if isinstance(mode, str) else None),
-                    test_channel or None)
+                    test_channel or None,
+                    frozenset(config.game_linked_channel_ids))
+
+
+async def effective_front_door_channel(db: "Database", config: "Config") -> str | None:
+    """Where a front-door surface (welcome card, nudge) may post right now.
+
+    The staff channel is a surface like any other: it resolves through the
+    posting gate, and counts as promoted only once `/posting front-door` says
+    so. So in test mode, and in live mode before promotion, it lands in the
+    test channel; with posting off it goes nowhere.
+    """
+    gate = await effective_post_gate(db, config)
+    stage = await effective(db, config, "front_door_stage")
+    return gate.resolve(config.front_door_channel_id, promoted=stage == "live")
 
 
 async def effective_feed_channel(db: "Database", config: "Config") -> str | None:

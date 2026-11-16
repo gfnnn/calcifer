@@ -372,3 +372,190 @@ async def prune(
         return 0
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=retention_days)
     return await db.prune_journey(iso(cutoff))
+
+
+# -- the view-model every journey surface renders from ------------------------
+
+
+@dataclass(frozen=True)
+class Status:
+    """Where one person is on the journey, derived from the log (pure data).
+
+    Only events from their current stay count: a rejoin starts a clean slate,
+    and carries the date of the previous join.
+    """
+
+    discord_id: str
+    display_name: str | None
+    joined_at: str | None
+    left_at: str | None
+    came_via: str
+    rejoin: bool = False
+    previous_joined_at: str | None = None
+    greeted_by: str | None = None
+    greeted_at: str | None = None
+    placed_role: str | None = None
+    placed_by: str | None = None
+    placed_at: str | None = None
+    checked_in_by: str | None = None
+    checked_in_at: str | None = None
+    picked: tuple[str, ...] = ()
+
+    @property
+    def present(self) -> bool:
+        return self.left_at is None
+
+    @property
+    def greeted(self) -> bool:
+        return self.greeted_at is not None
+
+    @property
+    def placed(self) -> bool:
+        return self.placed_role is not None
+
+    @property
+    def handled(self) -> bool:
+        """Somebody on the welcome team has done something for them."""
+        return self.greeted or self.placed
+
+
+def _in(name: str, names: Iterable[str]) -> bool:
+    return name.casefold() in {n.casefold() for n in names}
+
+
+def status_from(
+    person: Mapping,
+    events: Sequence[Mapping],
+    *,
+    rank_roles: Sequence[str] = (),
+    interest_roles: Sequence[str] = (),
+) -> Status:
+    """Fold a person's events into their :class:`Status`. Pure.
+
+    A rank role given by hand in Discord counts as placed too (it arrives as a
+    ``roles_changed`` event with nobody to credit), so the nudges never chase
+    someone a Flamekeeper already sorted out the old way.
+    """
+    start = 0
+    for index, event in enumerate(events):
+        if event["type"] in (JOINED, REJOINED):
+            start = index
+    current = list(events[start:])
+
+    fields: dict = {}
+    picked: list[str] = []
+    for event in current:
+        kind, data = event["type"], event.get("data") or {}
+        if kind == REJOINED:
+            fields["rejoin"] = True
+            fields["previous_joined_at"] = data.get("previous_joined_at")
+        elif kind == GREETED and "greeted_at" not in fields:
+            fields["greeted_by"], fields["greeted_at"] = event["actor_id"], event["at"]
+        elif kind == CHECKED_IN and "checked_in_at" not in fields:
+            fields["checked_in_by"] = event["actor_id"]
+            fields["checked_in_at"] = event["at"]
+        elif kind == PLACED:
+            fields["placed_role"] = data.get("role")
+            fields["placed_by"], fields["placed_at"] = event["actor_id"], event["at"]
+        elif kind == ROLES_CHANGED:
+            added, removed = data.get("added") or [], data.get("removed") or []
+            for role in added:
+                if _in(role, interest_roles) and role not in picked:
+                    picked.append(role)
+            picked = [r for r in picked if r not in removed]
+            ranks = [r for r in added if _in(r, rank_roles)]
+            held = fields.get("placed_role")
+            if ranks and not (held and _in(held, ranks)):
+                fields["placed_role"], fields["placed_by"] = ranks[-1], None
+                fields["placed_at"] = event["at"]
+            elif held and not ranks and _in(held, removed):
+                fields["placed_role"] = fields["placed_by"] = fields["placed_at"] = None
+    return Status(
+        discord_id=person["discord_id"],
+        display_name=person["display_name"],
+        joined_at=person["joined_at"],
+        left_at=person["left_at"],
+        came_via=person["came_via"],
+        picked=tuple(picked),
+        **fields,
+    )
+
+
+async def status_for(db: "Database", config, discord_id: str) -> Status | None:
+    """A person's current :class:`Status`, or ``None`` if we do not know them."""
+    person = await db.get_person(discord_id)
+    if person is None:
+        return None
+    return status_from(
+        person,
+        await db.journey_events(discord_id=discord_id),
+        rank_roles=config.journey_rank_roles,
+        interest_roles=config.journey_interest_roles,
+    )
+
+
+_VIA_WORDS = {
+    VIA_UNKNOWN: "unknown",
+    VIA_VANITY: "the vanity link",
+    VIA_BASELINE: "here before the journey began",
+}
+
+
+def invite_label(came_via: str | None, labels: Mapping[str, str]) -> str:
+    """How to show where someone came from: the friendly label for an invite
+    code when one is configured, plain words for the special values, and the
+    bare code otherwise (so an unlabelled invite is still traceable)."""
+    if not came_via:
+        return _VIA_WORDS[VIA_UNKNOWN]
+    if came_via in labels:
+        return labels[came_via]
+    return _VIA_WORDS.get(came_via, f"`{came_via}`")
+
+
+# -- staff actions (each one appends an event, once) ---------------------------
+
+
+async def record_greeted(
+    db: "Database", config, discord_id: str, actor_id: str
+) -> Status | None:
+    """Log that ``actor_id`` said hi. Idempotent: the first greeting stands and
+    a second click logs nothing. Returns the status after, or ``None`` for a
+    stranger."""
+    status = await status_for(db, config, discord_id)
+    if status is None:
+        return None
+    if not status.greeted:
+        await db.add_journey_event(discord_id, GREETED, actor_id=actor_id)
+        status = await status_for(db, config, discord_id)
+    return status
+
+
+async def record_placed(
+    db: "Database", config, discord_id: str, role: str, actor_id: str
+) -> Status | None:
+    """Log that ``actor_id`` placed the person as ``role``. Idempotent per
+    role: clicking the same role twice logs once; a different role is a new
+    placement (a correction)."""
+    status = await status_for(db, config, discord_id)
+    if status is None:
+        return None
+    same = status.placed_role and status.placed_role.casefold() == role.casefold()
+    if not (same and status.placed_by):
+        await db.add_journey_event(
+            discord_id, PLACED, actor_id=actor_id, data={"role": role}
+        )
+        status = await status_for(db, config, discord_id)
+    return status
+
+
+class RoleNotAllowed(Exception):
+    """Calcifer was asked to touch a role that is not on the allow-list."""
+
+
+def check_role_allowed(role: str, config) -> None:
+    """Raise :class:`RoleNotAllowed` unless ``role`` is on the explicit
+    allow-list (plus the configured interest roles). This is the code-level
+    guard: it refuses even where Discord's role order would permit the change."""
+    allowed = (*config.journey_role_allowlist, *config.journey_interest_roles)
+    if not _in(role, allowed):
+        raise RoleNotAllowed(role)

@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 
 _ENV_DEFAULT = "default"
 
+_STAGE_CHOICES = [
+    app_commands.Choice(name="test: keep them in the test channel", value="test"),
+    app_commands.Choice(name="live: send them to the front-door channel", value="live"),
+]
+
 _MODE_CHOICES = [
     app_commands.Choice(name="off: post nothing anywhere", value="off"),
     app_commands.Choice(name="test: everything goes to the test channel", value="test"),
@@ -129,3 +134,28 @@ class PostingCog(commands.Cog):
         await self._set_channel(
             interaction, "feed_default_channel_id", "Default feed channel", channel
         )
+
+    @posting.command(
+        name="front-door",
+        description="Promote the front-door surfaces (welcome cards, nudges) or sandbox them.",
+    )
+    @app_commands.describe(stage="Where welcome cards and nudges go")
+    @app_commands.choices(stage=_STAGE_CHOICES)
+    async def front_door(
+        self, interaction: discord.Interaction, stage: app_commands.Choice[str]
+    ) -> None:
+        if not await self._guard(interaction):
+            return
+        await self.bot.db.set_setting(
+            "front_door_stage", normalise("front_door_stage", stage.value)
+        )
+        if stage.value == "live":
+            channel = self.bot.config.front_door_channel_id
+            where = f"<#{channel}>" if channel else "*no FRONT_DOOR_CHANNEL_ID set*"
+            message = (
+                f"Front-door surfaces are promoted: they post to {where} "
+                "whenever posting mode is `live`."
+            )
+        else:
+            message = "Front-door surfaces are sandboxed: they post to the test channel."
+        await interaction.response.send_message(message, ephemeral=True)
