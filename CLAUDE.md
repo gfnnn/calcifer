@@ -189,7 +189,24 @@ Key flow and layering:
   `_update`, `on_invite_create`/`_delete`) are thin adapters in
   `cogs/journey.py`, loaded only when `JOURNEY_ENABLED` is on and *before* the
   `BOT_COMMANDS_ENABLED` switch (they are not commands). Member names and ids
-  are never logged at INFO.
+  are never logged at INFO. Every surface renders from one view-model,
+  `journey.Status` (`status_from` folds a person's events for their *current
+  stay*; a rank role given by hand in Discord counts as placed). Staff actions
+  (`record_greeted`, `record_placed`) append an event once, so a double click
+  is harmless.
+- **`journey_cards.py`** — the pure welcome-card renderer (`render_card` →
+  embed + `ButtonSpec`s). `cogs/journey.py` posts one card per join through
+  `FrontDoorMessenger` (always `allowed_mentions=none`), keeps its message id
+  in `journey_cards`, and edits it in place on a click, a role change or a
+  leave. The destination is `runtime_settings.effective_front_door_channel`:
+  the front door is a surface behind the `PostGate`, promoted with
+  `/posting front-door`.
+- **`cogs/_persistent.py`** — the shared **restart-proof button** helper. One
+  `ActionButton` (`discord.ui.DynamicItem`) is registered in `setup_hook`;
+  every button's `custom_id` is `calcifer:<namespace>:<action>:<args>` and
+  clicks are routed to the handler registered for `(namespace, action)`. No
+  view objects or message ids are kept in memory. Build any new button with
+  `_persistent.button(...)`; never a bare `discord.ui.View` with callbacks.
 - **`cogs/`** — Discord slash commands grouped by audience: `members`, `reports`,
   `alerts` (everyone), `admin`, `recruit`, `feeds`, `boards`, `pages`, `posting`,
   `scores` (officer-only). `_guards.py` holds the shared `require_admin`/`_is_admin`
@@ -208,7 +225,8 @@ Key flow and layering:
   dashboard, read-API or admin routes here**: new controls are Discord commands.
 - **`runtime_settings.py`** — the live config overlay. A frozen `Config` is built
   once from env, so nothing can mutate it; instead a small whitelist
-  (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`)
+  (`OVERRIDABLE`: `posting_mode`, `test_channel_id`, `feed_default_channel_id`,
+  `front_door_stage`)
   is saved into the `settings` table by the **`/posting`** cog and resolved
   *through here* per use (`effective_post_gate`, `effective_feed_channel`) — the
   override wins, else the env `Config` default. The board/feed loops and the
@@ -284,7 +302,8 @@ Raid-Helper webhooks) and posts branded Discord alerts.
   message (boards, sticky pages and feed alerts) resolves its destination through
   a `PostGate` first: mode `off` posts nothing, `test` redirects to the test
   channel, `live` lets only `/board promote`d surfaces reach their real
-  channel. The mode and test channel are set live with `/posting` (env
+  channel. A channel listed in `GAME_LINKED_CHANNEL_IDS` (the in-game chat
+  bridges) is refused in every mode. The mode and test channel are set live with `/posting` (env
   `POSTING_MODE` / `TEST_CHANNEL_ID` are the boot defaults); the off → test →
   promote flow lives in the `/posting` + `/board` cogs. New posting
   surfaces must route through the gate.
@@ -303,7 +322,7 @@ sticky pages: `sticky_pages` (placement + posted message ids), `content_docs`
 `scout_leads` (scouted candidates tracked through new→contacted→trialing→
 joined/passed; discovered fields refreshed by a re-scout, officer state/notes
 preserved); onboarding journey: `people` + `journey_events` (append-only; see
-`journey.py`); `settings` (the `/posting` live config overlay — see
+`journey.py`) and `journey_cards` (where each welcome card is); `settings` (the `/posting` live config overlay — see
 `runtime_settings.py`); and `schema_migrations` (migration bookkeeping).
 
 ## Conventions
@@ -333,7 +352,14 @@ preserved); onboarding journey: `people` + `journey_events` (append-only; see
 - Background loops (`serve.py`, feed loop) deliberately swallow exceptions with
   `# noqa: BLE001` to stay alive; follow that pattern for long-running loops only.
 - Officer-only cogs gate through `cogs/_guards.py:require_admin` — don't re-roll a
-  permission check or import one from a sibling cog.
+  permission check or import one from a sibling cog. The welcome team
+  (Flamekeeper / Officer / GM, `JOURNEY_STAFF_ROLES`) gates through
+  `require_staff` in the same module: every journey button and command checks
+  it, and Manage Server alone does not qualify.
+- **Calcifer only touches allow-listed roles.** Any role add/remove goes
+  through `journey.check_role_allowed` (`JOURNEY_ROLE_ALLOWLIST` plus the
+  interest roles) before Discord is asked, and only ever as the result of a
+  staff click. Don't call `add_roles`/`remove_roles` anywhere else.
 - New API clients should subclass `services/_http.py:BaseHTTPClient` (or
   `OAuthClientCredentials`) rather than re-implementing the session/token plumbing.
 - **Discord is the control surface.** A new runtime control is a slash command
@@ -353,7 +379,10 @@ preserved); onboarding journey: `people` + `journey_events` (append-only; see
   `boards/messenger.py` forces `allowed_mentions=none`. Build boards from
   `docs/boards-contract.md`.
 - **Env carries secrets, ids and on/off switches only.** Layouts, wording,
-  thresholds and schedules are hard-coded and changed by change request.
+  thresholds and schedules are hard-coded and changed by change request. The
+  one deliberate addition is the server's own vocabulary for the journey
+  (role names, invite labels: `JOURNEY_*`), which belongs to the Discord
+  server, not to the code.
 - **New feeds are modular.** A new source is a `FeedSource` in `feeds/` plus
   routing rules, never a new cog or a bespoke posting path.
 - **Calcifer supports the welcome; people do it.** The journey never DMs a
@@ -368,9 +397,12 @@ preserved); onboarding journey: `people` + `journey_events` (append-only; see
   the bot runs on default intents exactly as before. The Message Content
   intent stays off for good: every feed is push (webhook) or pull (poll),
   never channel scraping.
-- **No stateful interaction handlers.** Interactivity is link buttons, slash
-  commands and native Discord (Channels & Roles, Onboarding, Raid-Helper for
-  sign-ups). No persistent views or button callbacks.
+- **Buttons are stateless and restart-proof.** Interactivity is link buttons,
+  slash commands, native Discord (Channels & Roles, Onboarding, Raid-Helper
+  for sign-ups) and, for staff surfaces, buttons built with
+  `cogs/_persistent.py`: everything a click needs is in its `custom_id`, the
+  handler re-reads the database, and nothing depends on an in-memory view. No
+  timeout-bound views and no per-message callback state.
 - **Persist and self-heal.** Every message id, dedup key and baseline a surface
   relies on lives in the DB, so a restart never double-posts.
 - **Server time is Europe/Paris** (`Config.raid_timezone`, EU reset Wednesday).

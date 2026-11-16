@@ -196,6 +196,32 @@ class Config:
     journey_enabled: bool = False
     # Forget a person (and their events) this many days after they left.
     journey_retention_days: int = 180
+    # Who may press the journey buttons and run /journey: these role names,
+    # plus the GM (gm_discord_id).
+    journey_staff_roles: tuple[str, ...] = ("Flamekeeper", "Officer", "GM")
+    # The ONLY roles Calcifer may add or remove, by name. Anything else is
+    # refused in code even where Discord's role order would allow it.
+    journey_role_allowlist: tuple[str, ...] = ("Ashes", "Visitor")
+    # Roles that mean "this person has been placed". A member holding none of
+    # them is unplaced. The ones also on the allow-list get a "Set <role>" button.
+    journey_rank_roles: tuple[str, ...] = ("Ashes", "Visitor")
+    # Interest roles members pick for themselves (Discord Onboarding / Channels
+    # & Roles). Shown as "Picked" on cards; empty until they exist.
+    journey_interest_roles: tuple[str, ...] = ()
+    # Friendly names for invite codes: (("Qske4gDnYC", "Storefronts"), ...).
+    journey_invite_labels: tuple[tuple[str, str], ...] = ()
+    # Welcome cards: one staff card per join, posted to the front-door channel.
+    welcome_cards_enabled: bool = False
+    # The private staff channel (#front-door) the journey's surfaces live in.
+    front_door_channel_id: str | None = None
+    # Boot stage of the front-door surfaces: "test" keeps them in the test
+    # channel even when posting is live, until `/posting front-door` promotes
+    # them. Deliberately not an env var: promotion is a person's decision.
+    front_door_stage: str = "test"
+
+    # Channels bridged to in-game chat (a post there echoes into /guild).
+    # The posting guardrail refuses to send anything to these, in every mode.
+    game_linked_channel_ids: tuple[str, ...] = ()
 
     # Numeric settings that were set but could not be read as a number. The
     # value falls back to its default (or None), so record the name for the
@@ -245,6 +271,22 @@ class Config:
     def scores_enabled(self) -> bool:
         """The recurring M+ score refresh runs only when an interval is set."""
         return self.score_refresh_minutes > 0
+
+    @property
+    def journey_cards_enabled(self) -> bool:
+        """Welcome cards need the journey itself (the listeners) to be on."""
+        return self.journey_enabled and self.welcome_cards_enabled
+
+    @property
+    def invite_labels(self) -> dict[str, str]:
+        """Invite code -> friendly label."""
+        return dict(self.journey_invite_labels)
+
+    @property
+    def journey_placement_roles(self) -> tuple[str, ...]:
+        """The rank roles Calcifer is allowed to set: one button each."""
+        allowed = {r.casefold() for r in self.journey_role_allowlist}
+        return tuple(r for r in self.journey_rank_roles if r.casefold() in allowed)
 
     @property
     def raidhelper_channel(self) -> str | None:
@@ -305,6 +347,15 @@ class Config:
                     out.append(int(part))
                 except ValueError:
                     continue
+            return tuple(out)
+
+        def _pairs(name: str) -> tuple[tuple[str, str], ...]:
+            """Parse ``KEY=Label,KEY2=Label two`` into pairs (bad parts skipped)."""
+            out: list[tuple[str, str]] = []
+            for part in _str_list(name):
+                key, sep, label = part.partition("=")
+                if sep and key.strip() and label.strip():
+                    out.append((key.strip(), label.strip()))
             return tuple(out)
 
         def _bool(name: str, default: bool) -> bool:
@@ -434,5 +485,17 @@ class Config:
                 if _int("JOURNEY_RETENTION_DAYS") is not None
                 else 180
             ),
+            journey_staff_roles=(
+                _str_list("JOURNEY_STAFF_ROLES") or ("Flamekeeper", "Officer", "GM")
+            ),
+            journey_role_allowlist=(
+                _str_list("JOURNEY_ROLE_ALLOWLIST") or ("Ashes", "Visitor")
+            ),
+            journey_rank_roles=_str_list("JOURNEY_RANK_ROLES") or ("Ashes", "Visitor"),
+            journey_interest_roles=_str_list("JOURNEY_INTEREST_ROLES"),
+            journey_invite_labels=_pairs("JOURNEY_INVITE_LABELS"),
+            welcome_cards_enabled=_bool("WELCOME_CARDS_ENABLED", False),
+            front_door_channel_id=_clean(os.environ.get("FRONT_DOOR_CHANNEL_ID")),
+            game_linked_channel_ids=_str_list("GAME_LINKED_CHANNEL_IDS"),
             unparsed_env=tuple(unparsed),
         )

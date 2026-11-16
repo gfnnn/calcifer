@@ -9,7 +9,8 @@ through the same helpers without importing from a sibling cog. Three tiers:
 * :func:`require_gm` — the GM alone.
 
 plus :func:`require_team_member`, the team-chemistry-roster gate used by the
-member-facing data commands.
+member-facing data commands, and :func:`require_staff`, the welcome-team gate
+(Flamekeeper / Officer / GM) on the onboarding journey's buttons and commands.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING
 import discord
 
 if TYPE_CHECKING:
+    from ..config import Config
     from ..db import Database
 
 
@@ -114,5 +116,35 @@ async def require_team_member(
         f"Only members of the team roster can {action}. "
         "Ask an officer if you should be on it.",
         ephemeral=True,
+    )
+    return False
+
+
+def is_staff(interaction: discord.Interaction, config: "Config") -> bool:
+    """True for the welcome team: a configured staff role, or the GM.
+
+    Deliberately role-based only. Unlike :func:`_is_admin`, the Manage-Server
+    permission does not qualify: the journey's buttons place people, and that
+    belongs to the named staff roles.
+    """
+    if _is_gm(interaction, config.gm_discord_id):
+        return True
+    wanted = {name.casefold() for name in config.journey_staff_roles}
+    roles = getattr(interaction.user, "roles", None) or ()
+    return any(getattr(r, "name", "").casefold() in wanted for r in roles)
+
+
+async def require_staff(
+    interaction: discord.Interaction,
+    config: "Config",
+    *,
+    action: str = "do that",
+) -> bool:
+    """True for the welcome team; otherwise reply (ephemeral) and False."""
+    if is_staff(interaction, config):
+        return True
+    roles = ", ".join(config.journey_staff_roles)
+    await interaction.response.send_message(
+        f"Only the welcome team ({roles}) can {action}.", ephemeral=True
     )
     return False

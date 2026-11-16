@@ -74,6 +74,13 @@ automatically). See [`.env.example`](.env.example) for the full list.
 | `BOARD_REFRESH_MINUTES` / `SCORE_REFRESH_MINUTES` | optional | Re-render **living boards** (e.g. *Calcifer's Hot 20*) and refresh the active key-runners' M+ scores on an interval. |
 | `JOURNEY_ENABLED` | optional | The **onboarding journey**: record joins, leaves, role changes and the invite each new member used (People + an append-only events log). Needs the **Server Members intent** switched on in the developer portal, and *Manage Server* to read invite use counts. Default off. |
 | `JOURNEY_RETENTION_DAYS` | optional | Forget a person and their journey events this many days after they left (default `180`; `0` keeps them). |
+| `WELCOME_CARDS_ENABLED` / `FRONT_DOOR_CHANNEL_ID` | optional | **Welcome cards**: one staff card per join in the private `#front-door` channel, with Said hi / Set Ashes / Set Visitor buttons. Needs `JOURNEY_ENABLED`, and *Manage Roles* with Calcifer's role above the roles he sets. Default off. |
+| `JOURNEY_STAFF_ROLES` | optional | Role names that may press the journey buttons (default `Flamekeeper,Officer,GM`; the `GM_DISCORD_ID` user always may). |
+| `JOURNEY_ROLE_ALLOWLIST` | optional | The **only** roles Calcifer may add or remove (default `Ashes,Visitor`). Anything else is refused in code, even where Discord would allow it. |
+| `JOURNEY_RANK_ROLES` | optional | Roles that mean "placed" (default `Ashes,Visitor`). The ones also on the allow-list get a `Set <role>` button. |
+| `JOURNEY_INTEREST_ROLES` | optional | Interest roles members pick for themselves, shown as "Picked" on cards (default empty; they join the allow-list). |
+| `JOURNEY_INVITE_LABELS` | optional | Friendly names for invite codes, `code=Label,code=Label` (e.g. `Qske4gDnYC=Storefronts`). |
+| `GAME_LINKED_CHANNEL_IDS` | optional | Channels bridged to in-game chat. The posting guardrail refuses to send **anything** to them, in every mode. |
 | `SAVEDVARS_UPLOAD_SECRET` | optional | Enables the **data-spine upload** (`POST /api/upload/savedvars`) for RCLootCouncil loot + GRM identity `.lua`. See [docs/data-sources.md](docs/data-sources.md#5-local-desktop-addon-databases--the-identity--loot-ground-truth). |
 
 Everything except `DISCORD_TOKEN` has a sensible default, so the pipeline works
@@ -114,7 +121,7 @@ switch to the richer WoW Audit data set.
 | `/recruit slots\|ilvl\|note\|rule\|message\|show\|reset` | **Recruitment board config**: set open slots per role (+ ilvl floor and note), manage the trial rules, override the pitch, preview the board. |
 | `/recruit lead capture\|list\|set\|note\|remove` | **Recruitment funnel**: capture the scout's candidates as trackable leads and move them through the funnel (new → contacted → trialing → joined/passed). |
 | `/feed route\|list\|remove\|disable\|enable\|mute\|unmute\|test` | **Calcifer feed hub**: route each feed (Wowhead, M+, Raid-Helper, raid reminders, prog) to a channel with its own style/ping. |
-| `/posting status\|mode\|test-channel\|feed-channel` | **Posting guardrail** (*GM or Discord admin only*): switch `off`/`test`/`live` and set the test and default feed channels live, overriding the env defaults. |
+| `/posting status\|mode\|test-channel\|feed-channel\|front-door` | **Posting guardrail** (*GM or Discord admin only*): switch `off`/`test`/`live` and set the test and default feed channels live, overriding the env defaults. `front-door` promotes the journey's staff surfaces (welcome cards) from the test channel to `#front-door`, or sandboxes them again. |
 | `/board create\|list\|refresh\|promote\|demote\|disable\|enable\|remove` | **Living boards** (*GM or Discord admin only*): create a self-updating board (e.g. *Calcifer's Hot 20*) in a channel; it stays sandboxed until promoted (see the posting guardrail). |
 | `/page post\|list\|refresh\|remove\|export\|import\|reset` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy lives in `ftabot/content/page_*.json`; `export`/`import`/`reset` handle a copy fix without a deploy. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
@@ -259,7 +266,38 @@ With `JOURNEY_ENABLED=1` the bot:
   insensitive, understands `Character (Name)`), with its in-game rank name;
 - forgets people `JOURNEY_RETENTION_DAYS` after they leave (a daily sweep).
 
-Nothing is posted by this part: the staff-facing surfaces build on it.
+Nothing is posted by that part: the staff-facing surfaces build on it.
+
+### Welcome cards (`WELCOME_CARDS_ENABLED=1`)
+
+Each join puts one card in `#front-door` (private to Flamekeepers, Officers
+and the GM):
+
+- the member (a mention that pings nobody), when their account was made and
+  when they joined, as Discord timestamps;
+- **Came via**: the invite's friendly label (`JOURNEY_INVITE_LABELS`), or the
+  bare code, or `unknown`;
+- **Picked**: their interest roles (`JOURNEY_INTEREST_ROLES`), or "nothing yet";
+- **Roster match**: the character their nickname points at, with its in-game
+  rank and how sure the match is, or "no match";
+- **Status**: who said hi and who placed them, and when.
+
+Three buttons, for the welcome team only (`JOURNEY_STAFF_ROLES`):
+
+| Button | What it does |
+| --- | --- |
+| **Said hi** | Logs `greeted` with whoever clicked. |
+| **Set Ashes** / **Set Visitor** | Gives that role (swapping out the other one), then logs `placed` with the role and whoever clicked. |
+
+The card edits itself to show who did what and greys out what is done. It also
+updates when the member picks an interest role, is given a rank by hand, or
+leaves ("Left before anyone got to them"). Someone coming back gets a new card
+marked **Back again** with their previous join date. Clicking twice logs once,
+and the buttons keep working after a restart.
+
+Calcifer only ever touches the roles on `JOURNEY_ROLE_ALLOWLIST`. Cards follow
+the posting guardrail like everything else: in `test` mode, and in `live` mode
+until `/posting front-door stage:live`, they land in the test channel.
 
 ---
 

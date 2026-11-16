@@ -2128,7 +2128,12 @@ class Database:
         type: str | None = None,  # noqa: A002 - mirrors the column name
         since: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Events in the order they happened, optionally filtered."""
+        """Events in the order they were logged, optionally filtered.
+
+        Insertion order (``id``), not ``at``: the log is append-only, so the
+        order rows were written is the order things happened, whereas ``at``
+        can carry Discord's own join time for a join we only learned of later.
+        """
         where, params = [], []
         if discord_id is not None:
             where.append("discord_id = ?")
@@ -2142,7 +2147,7 @@ class Database:
         sql = "SELECT * FROM journey_events"
         if where:
             sql += " WHERE " + " AND ".join(where)
-        cur = await self.conn.execute(sql + " ORDER BY at, id", params)
+        cur = await self.conn.execute(sql + " ORDER BY id", params)
         return [
             {
                 "id": r["id"],
@@ -2159,9 +2164,10 @@ class Database:
         """Retention: forget everyone who left before ``cutoff`` (their events,
         then their person row). Returns the number of people forgotten."""
         gone = "SELECT discord_id FROM people WHERE left_at IS NOT NULL AND left_at < ?"
-        await self.conn.execute(
-            f"DELETE FROM journey_events WHERE discord_id IN ({gone})", (cutoff,)
-        )
+        for table in ("journey_events", "journey_cards"):
+            await self.conn.execute(
+                f"DELETE FROM {table} WHERE discord_id IN ({gone})", (cutoff,)
+            )
         cur = await self.conn.execute(
             "DELETE FROM people WHERE left_at IS NOT NULL AND left_at < ?", (cutoff,)
         )
@@ -2189,4 +2195,30 @@ class Database:
             (r["character_name"].lower(), r["realm_slug"].lower()): r["rank_name"]
             for r in await cur.fetchall()
         }
+
+    async def set_journey_card(
+        self, discord_id: str, channel_id: str, message_id: str
+    ) -> None:
+        """Remember where a person's welcome card is (a rejoin replaces it)."""
+        await self.conn.execute(
+            "INSERT INTO journey_cards (discord_id, channel_id, message_id, posted_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT (discord_id) DO UPDATE SET "
+            "channel_id = excluded.channel_id, message_id = excluded.message_id, "
+            "posted_at = excluded.posted_at",
+            (str(discord_id), str(channel_id), str(message_id), now_iso()),
+        )
+        await self.conn.commit()
+
+    async def get_journey_card(self, discord_id: str) -> dict[str, Any] | None:
+        cur = await self.conn.execute(
+            "SELECT * FROM journey_cards WHERE discord_id = ?", (str(discord_id),)
+        )
+        row = await cur.fetchone()
+        return self._person_row(row) if row else None
+
+    async def delete_journey_card(self, discord_id: str) -> None:
+        await self.conn.execute(
+            "DELETE FROM journey_cards WHERE discord_id = ?", (str(discord_id),)
+        )
+        await self.conn.commit()
 

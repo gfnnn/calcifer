@@ -36,9 +36,12 @@ class FtaBot(commands.Bot):
         # The journey listeners are not commands, so they load before (and
         # regardless of) the command switch below.
         if self.config.journey_enabled:
+            from .cogs import _persistent
             from .cogs.journey import JourneyCog
 
             await self.add_cog(JourneyCog(self))
+            # Re-arm every button already sitting in a channel (restart-proof).
+            _persistent.register(self)
 
         if not self.config.bot_commands_enabled:
             # Commands disabled (e.g. on production): don't load the command cogs
