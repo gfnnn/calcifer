@@ -559,3 +559,21 @@ def check_role_allowed(role: str, config) -> None:
     allowed = (*config.journey_role_allowlist, *config.journey_interest_roles)
     if not _in(role, allowed):
         raise RoleNotAllowed(role)
+
+
+# -- the unplaced sweep ---------------------------------------------------------
+
+
+def unplaced(members: Iterable, rank_roles: Sequence[str]) -> list:
+    """The members holding none of the rank roles, longest-waiting first. Pure.
+
+    ``members`` are Discord members (anything with ``bot``, ``roles`` and
+    ``joined_at``); bots are skipped. Someone with no join date sorts last.
+    """
+    ranks = {r.casefold() for r in rank_roles}
+    waiting = [
+        m for m in members
+        if not m.bot and not any(r.name.casefold() in ranks for r in m.roles)
+    ]
+    far_future = datetime.max.replace(tzinfo=timezone.utc)
+    return sorted(waiting, key=lambda m: (m.joined_at or far_future, m.id))

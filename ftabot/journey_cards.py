@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 
 GREET = "greet"
 PLACE = "place"
+LIST_PLACE = "lplace"
+
+# Discord allows 5 rows of 5 buttons on one message.
+_ROWS, _PER_ROW = 5, 5
 CHECK_IN = "checkin"
 
 _DISCORD_EPOCH_MS = 1420070400000
@@ -37,6 +41,7 @@ class ButtonSpec:
     arg: str | None = None
     disabled: bool = False
     primary: bool = False
+    row: int | None = None
 
 
 @dataclass
@@ -159,4 +164,65 @@ def render_card(
         ),
         *placement_buttons(status, config),
     ]
+    return CardPayload(embed=embed, buttons=buttons)
+
+
+# -- /journey unplaced -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class UnplacedEntry:
+    """One member waiting for a rank, as the list shows them."""
+
+    discord_id: str
+    display_name: str | None
+    joined_at: str | None
+    match: RosterMatch | None = None
+
+
+def unplaced_page_size(config: "Config") -> int:
+    """How many members fit on one page: ten, or fewer if there are so many
+    placement roles that their buttons would not fit on one message."""
+    per_member = max(1, len(config.journey_placement_roles))
+    return max(1, min(10, _ROWS * (_PER_ROW // per_member)))
+
+
+def page_count(total: int, size: int) -> int:
+    return max(1, -(-total // size))
+
+
+def render_unplaced(
+    entries: list[UnplacedEntry], config: "Config", *, page: int, total: int
+) -> CardPayload:
+    """One page of the unplaced list. ``entries`` is that page's slice;
+    ``page`` is 1-based (already clamped) and ``total`` counts everyone waiting.
+    Each member gets a numbered line and matching numbered "Set" buttons."""
+    size = unplaced_page_size(config)
+    pages = page_count(total, size)
+    embed = discord.Embed(title="🚪 Unplaced members", color=brand.GUILD_EMBER)
+    if not entries:
+        embed.description = "Everyone here has a rank. Nothing to do."
+        return CardPayload(embed=embed)
+
+    roles = config.journey_placement_roles
+    members_per_row = max(1, _PER_ROW // max(1, len(roles)))
+    lines, buttons = [], []
+    for index, entry in enumerate(entries):
+        number = index + 1
+        name = discord.utils.escape_markdown(entry.display_name or "unknown")
+        joined = f" · joined {stamp(entry.joined_at)}" if entry.joined_at else ""
+        lines.append(
+            f"`{number:>2}` <@{entry.discord_id}> · **{name}**{joined}"
+            f" · {match_line(entry.match)}"
+        )
+        for role in roles:
+            buttons.append(ButtonSpec(
+                LIST_PLACE, entry.discord_id, f"{number} · {role}",
+                arg=f"{role}:{page}", row=index // members_per_row,
+            ))
+    embed.description = "\n".join(lines)
+    more = f" Next: /journey unplaced page:{page + 1}" if page < pages else ""
+    embed.set_footer(text=brand.sanitize(
+        f"Page {page} of {pages} · {total} without a rank, longest wait first.{more}"
+    ))
     return CardPayload(embed=embed, buttons=buttons)

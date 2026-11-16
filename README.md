@@ -126,6 +126,12 @@ switch to the richer WoW Audit data set.
 | `/page post\|list\|refresh\|remove\|export\|import\|reset` | **Sticky pages**: post a GM-authored markdown page (Rules & Info, Guides & Resources) to a channel. Re-running `/page post` with a new channel moves the page (old copy deleted); the same channel is a no-op. Copy lives in `ftabot/content/page_*.json`; `export`/`import`/`reset` handle a copy fix without a deploy. |
 | `/refreshme` | Refresh your linked character(s)' Mythic+ score now and nudge the boards. |
 
+**Welcome team** (the `JOURNEY_STAFF_ROLES` roles or the GM; needs `JOURNEY_ENABLED`):
+
+| Command | Description |
+| --- | --- |
+| `/journey unplaced [page] [post]` | Members with no rank role, longest wait first, ten to a page, each with their roster match and `Set Ashes` / `Set Visitor` buttons. Shown only to you unless `post:True` puts it in `#front-door`. |
+
 ---
 
 ## Calcifer: the feed hub
@@ -294,6 +300,16 @@ updates when the member picks an interest role, is given a rank by hand, or
 leaves ("Left before anyone got to them"). Someone coming back gets a new card
 marked **Back again** with their previous join date. Clicking twice logs once,
 and the buttons keep working after a restart.
+
+### The unplaced sweep (`/journey unplaced`)
+
+For clearing a backlog: every member holding none of `JOURNEY_RANK_ROLES`,
+longest wait first, ten to a page (`page:2` for the next ten). Each line has
+the member, when they joined and their roster match; the numbered buttons
+underneath (`1 · Ashes`, `1 · Visitor`, ...) place that person with exactly
+the same checks and logging as the card buttons, and the list redraws without
+them. It reads the server's live roles, so someone given a rank by hand drops
+off by themselves.
 
 Calcifer only ever touches the roles on `JOURNEY_ROLE_ALLOWLIST`. Cards follow
 the posting guardrail like everything else: in `test` mode, and in `live` mode
